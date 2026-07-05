@@ -1,5 +1,7 @@
 <?php
 
+use MadeByClowd\Documentable\Drivers\S3MultipartDriver;
+
 return [
     /*
     |--------------------------------------------------------------------------
@@ -87,7 +89,7 @@ return [
         'session_ttl_hours' => 24,
         'use_native_checksum' => false,
         'drivers' => [
-            // 's3' => \MadeByClowd\Documentable\Drivers\S3MultipartDriver::class,
+            's3' => S3MultipartDriver::class,
         ],
     ],
 
