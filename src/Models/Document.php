@@ -15,12 +15,14 @@ class Document extends Model
     protected $fillable = [
         'storage_file_id',
         'document_type_id',
+        'document_group_id',
         'documentable_type',
         'documentable_id',
         'client_filename',
         'metadata',
         'version',
         'is_latest',
+        'latest_marker',
     ];
 
     protected $casts = [

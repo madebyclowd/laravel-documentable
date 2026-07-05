@@ -24,13 +24,19 @@ class DocumentService
 
     /**
      * Upload a file and create a document record. Handles deduplication via file
-     * hash and single-slot versioning (group-aware versioning lands in phase 2).
+     * hash and group-aware versioning.
+     *
+     * $documentGroupId: pass the group id of an existing document to upload a new
+     * version *of that specific slot* (only meaningful when the type
+     * `allows_multiple`). Omit it to version/replace the type's single slot
+     * (allows_multiple = false) or to start a brand new independent slot
+     * (allows_multiple = true).
      */
-    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = []): Document
+    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null): Document
     {
         $this->validateFile($file, $type);
 
-        return DB::transaction(function () use ($file, $type, $documentable, $metadata) {
+        return DB::transaction(function () use ($file, $type, $documentable, $metadata, $documentGroupId) {
             $hash = hash_file('sha256', $file->getRealPath());
 
             $storageFile = $this->getOrCreateStorageFile(
@@ -47,7 +53,8 @@ class DocumentService
                 $type,
                 $documentable,
                 $file->getClientOriginalName(),
-                $metadata ?? []
+                $metadata ?? [],
+                $documentGroupId
             );
         });
     }
@@ -74,15 +81,19 @@ class DocumentService
                 $metadata ?? []
             );
 
+            $groupId = (string) Str::uuid();
+
             return $this->documentRepository->create([
                 'storage_file_id' => $storageFile->id,
                 'document_type_id' => $type->id,
+                'document_group_id' => $groupId,
                 'documentable_type' => null,
                 'documentable_id' => null,
                 'client_filename' => $file->getClientOriginalName(),
                 'metadata' => $metadata ?? [],
                 'version' => 1,
-                'is_latest' => ! $type->allows_multiple,
+                'is_latest' => true,
+                'latest_marker' => $groupId,
             ]);
         });
     }
@@ -108,11 +119,20 @@ class DocumentService
     }
 
     /**
-     * Soft-delete a document.
+     * Soft-delete a document. If it's currently the latest of its group, the
+     * latest_marker unique-column must be cleared in the same operation —
+     * otherwise a soft-deleted row would keep "occupying" the unique slot and
+     * block a future upload from becoming latest for that group.
      */
     public function delete(Document $document): bool
     {
-        return $this->documentRepository->delete($document);
+        return DB::transaction(function () use ($document) {
+            if ($document->latest_marker !== null) {
+                $document->update(['latest_marker' => null, 'is_latest' => false]);
+            }
+
+            return $this->documentRepository->delete($document);
+        });
     }
 
     /**
@@ -194,15 +214,27 @@ class DocumentService
     }
 
     /**
-     * Create a Document from an existing StorageFile. Single-slot versioning
-     * only — document_group_id-aware versioning lands in phase 2.
+     * Create a Document from an existing StorageFile, resolving which group/slot
+     * it belongs to and whether it starts a new version chain or a fresh one:
+     *
+     * - $documentGroupId given: new version of that specific, already-existing
+     *   group/slot (only meaningful when the type allows_multiple).
+     * - $documentGroupId null + allows_multiple: start a brand new independent
+     *   group/slot.
+     * - $documentGroupId null + !allows_multiple: resolve the type's single slot
+     *   (there can only ever be one group for this owner+type).
+     *
+     * Every created row is is_latest = true for its own group — allows_multiple
+     * no longer forces is_latest = false, which is what made versioning silently
+     * break for multi-document types before document_group_id existed.
      */
     protected function createDocumentFromStorageFile(
         StorageFile $storageFile,
         DocumentType $type,
         Model $documentable,
         string $clientFilename,
-        array $metadata = []
+        array $metadata = [],
+        ?string $documentGroupId = null
     ): Document {
         $metadata = array_merge([
             'size' => $storageFile->size_bytes,
@@ -210,19 +242,20 @@ class DocumentService
         ], $metadata);
 
         $version = 1;
+        $groupId = $documentGroupId;
 
-        if ($type->requires_versioning) {
+        if ($groupId !== null) {
             $previousLatest = $this->documentRepository->findLatest(
                 $documentable->getMorphClass(),
                 (string) $documentable->getKey(),
-                $type->id
+                $type->id,
+                $groupId
             );
 
-            if ($previousLatest) {
-                $version = $previousLatest->version + 1;
-                $previousLatest->update(['is_latest' => false]);
-            }
-        } elseif (! $type->allows_multiple) {
+            $version = $this->demoteAndResolveVersion($previousLatest, $type);
+        } elseif ($type->allows_multiple) {
+            $groupId = (string) Str::uuid();
+        } else {
             $existing = $this->documentRepository->findLatest(
                 $documentable->getMorphClass(),
                 (string) $documentable->getKey(),
@@ -230,20 +263,52 @@ class DocumentService
             );
 
             if ($existing) {
-                $existing->update(['is_latest' => false]);
-                $this->documentRepository->delete($existing);
+                $groupId = $existing->document_group_id;
+                $version = $this->demoteAndResolveVersion($existing, $type);
+            } else {
+                $groupId = (string) Str::uuid();
             }
         }
 
         return $this->documentRepository->create([
             'storage_file_id' => $storageFile->id,
             'document_type_id' => $type->id,
+            'document_group_id' => $groupId,
             'documentable_type' => $documentable->getMorphClass(),
             'documentable_id' => $documentable->getKey(),
             'client_filename' => $clientFilename,
             'metadata' => $metadata,
             'version' => $version,
-            'is_latest' => ! $type->allows_multiple,
+            'is_latest' => true,
+            'latest_marker' => $groupId,
         ]);
+    }
+
+    /**
+     * Lock and demote the group's current latest document. Returns the version
+     * number the new document should take: incremented if the type keeps
+     * history, 1 if it hard-replaces (old row soft-deleted, no history kept).
+     */
+    protected function demoteAndResolveVersion(?Document $previousLatest, DocumentType $type): int
+    {
+        if (! $previousLatest) {
+            return 1;
+        }
+
+        $locked = Document::whereKey($previousLatest->id)->lockForUpdate()->first();
+
+        if (! $locked) {
+            return 1;
+        }
+
+        $locked->update(['is_latest' => false, 'latest_marker' => null]);
+
+        if ($type->requires_versioning) {
+            return $locked->version + 1;
+        }
+
+        $this->documentRepository->delete($locked);
+
+        return 1;
     }
 }

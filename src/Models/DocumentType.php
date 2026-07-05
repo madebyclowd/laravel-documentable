@@ -20,6 +20,7 @@ class DocumentType extends Model
         'path_prefix',
         'requires_versioning',
         'allows_multiple',
+        'max_versions_to_keep',
     ];
 
     protected $casts = [
@@ -27,6 +28,7 @@ class DocumentType extends Model
         'max_size_mb' => 'integer',
         'requires_versioning' => 'boolean',
         'allows_multiple' => 'boolean',
+        'max_versions_to_keep' => 'integer',
     ];
 
     public function documents(): HasMany

@@ -13,6 +13,7 @@ return new class extends Migration
 
             $table->foreignUuid('storage_file_id')->constrained('storage_files')->cascadeOnDelete();
             $table->foreignUuid('document_type_id')->constrained('document_types');
+            $table->uuid('document_group_id')->nullable();
 
             // String, not typed FK — must work against arbitrary consumer PK types (int or uuid).
             $table->string('documentable_type')->nullable();
@@ -25,8 +26,20 @@ return new class extends Migration
             $table->unsignedInteger('version')->default(1);
             $table->boolean('is_latest')->default(true);
 
+            // Nullable "latest marker": document_group_id when this row is the
+            // current latest version of its group, NULL otherwise (superseded
+            // or soft-deleted). All three engines (MySQL/Postgres/SQLite) treat
+            // NULL as distinct in a UNIQUE index — this is the DB-portable
+            // replacement for a Postgres/SQLite-only partial unique index.
+            $table->uuid('latest_marker')->nullable();
+
             $table->timestamps();
             $table->softDeletes();
+
+            $table->unique(
+                ['documentable_type', 'documentable_id', 'document_type_id', 'latest_marker'],
+                'documents_latest_unique'
+            );
         });
     }
 
