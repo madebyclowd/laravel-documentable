@@ -11,7 +11,7 @@ class InstallCommand extends Command
 {
     protected $signature = 'documents:install';
 
-    protected $description = 'Publish config/migrations/Boost skill and configure laravel-documentable.';
+    protected $description = 'Publish config/migrations and configure laravel-documentable.';
 
     public function handle(): int
     {
@@ -19,7 +19,6 @@ class InstallCommand extends Command
 
         $this->call('vendor:publish', ['--tag' => 'documentable-config']);
         $this->call('vendor:publish', ['--tag' => 'documentable-migrations']);
-        $this->call('vendor:publish', ['--tag' => 'documentable-boost-skills']);
 
         if ($this->confirm('Run migrations now?', true)) {
             $this->call('migrate');

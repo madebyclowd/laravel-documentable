@@ -350,6 +350,22 @@ Event::listen(function (\MadeByClowd\Documentable\Events\DocumentUploaded $event
 | `documents:clean-orphaned [--hours=N]` | Reaper — purges expired pending documents, aborts stale multipart sessions. Auto-scheduled. |
 | `documents:configure-bucket-lifecycle {disk} [--days=3]` | Optional bucket-native `AbortIncompleteMultipartUpload` backstop. |
 
+## AI agent context (Laravel Boost)
+
+The package ships `resources/boost/guidelines/core.blade.php` (upfront package overview) and
+`resources/boost/skills/laravel-documentable/SKILL.md` (detailed reference — upload transports,
+versioning semantics, security checklist, every artisan command). If you have
+[Laravel Boost](https://github.com/laravel/boost) installed (`composer require laravel/boost --dev`
++ `php artisan boost:install`), both are **auto-discovered from `vendor/`** — nothing to run in
+this package. Boost decides the actual per-agent install location itself (its `ClaudeCode` agent
+class targets `.claude/skills/`, other supported agents have their own conventions) — this package
+doesn't hardcode a directory for that, and no longer tries to guess one.
+
+Without Boost, read the files directly from
+`vendor/madebyclowd/laravel-documentable/resources/boost/` and copy the skill into whatever your
+AI tool expects (Claude Code: `.claude/skills/laravel-documentable/SKILL.md` project-level, or
+`~/.claude/skills/` for personal use across projects).
+
 ## Configuration
 
 Full annotated file lives at [`config/documentable.php`](config/documentable.php). Key sections:

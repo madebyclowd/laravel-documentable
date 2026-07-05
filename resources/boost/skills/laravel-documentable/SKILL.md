@@ -1,3 +1,8 @@
+---
+name: laravel-documentable
+description: Build and work with laravel-documentable — S3-compatible document storage, versioning, multipart/presigned uploads, and authorization for madebyclowd/laravel-documentable.
+---
+
 # Laravel Documentable
 
 Customizable, S3-compatible-first document storage for Laravel: content-addressable dedup,
@@ -16,6 +21,10 @@ class Invoice extends Model
 
 $invoice->documents(); // MorphMany<Document>
 ```
+
+Or skip the manual edit: `php artisan documents:attach-model Invoice` adds the import and
+`use Documentable;` for you — refuses (prints why) rather than guessing if the file's `use`
+statements aren't in a simple, unambiguous shape.
 
 ## Defining a DocumentType
 
@@ -174,22 +183,52 @@ config:
 Either way, integrity is verified independently via a server-computed sha256 compared against the
 client's declared hash — an ETag is never a real content checksum on any provider.
 
+## Listing an owner's documents
+
+```
+GET /documents?documentable_type=...&documentable_id=...[&document_type_id=...][&page=1]
+```
+
+Returns every latest-per-slot document for that owner, grouped `{document_type_id: {document_group_id: document}}`
+(`storageFile` eager-loaded). `canView()` is applied per document after the query — a custom
+authorizer denying some documents excludes just those, not the whole set — so
+`config('documentable.listing.per_page')` (default 50) paginates the already-filtered result, not
+a raw DB query. Service-call equivalent: `DocumentService::listForOwner($documentable, $documentTypeId = null)`
+(returns the flat `Collection<Document>`, no grouping/pagination/authorization — that's the
+controller's job, same seam as everywhere else in this package).
+
 ## HTTP routes
 
 Package ships `routes/api.php`, auto-loaded under `/documents` when
-`config('documentable.load_routes')` is true (default). Rate-limited behind the named limiter in
-`config('documentable.throttle')` (default `'documents'`) — define your own rate with
-`RateLimiter::for('documents', ...)` in your `AppServiceProvider`; the package registers a
-permissive `Limit::none()` fallback only if you haven't. Set `load_routes` to `false` and mount
-`MadeByClowd\Documentable\Http\Controllers\*` yourself for full control over prefix/middleware/guard.
+`config('documentable.load_routes')` is true (default). Middleware stack is
+`config('documentable.middleware')` (default `['api']` — **no session/auth**, `$request->user()`
+is `null`; `php artisan documents:install` asks whether the app is a session-based monolith
+(`['web', 'auth']`) or a separate API, and writes the choice back to config) plus a throttle
+behind the named limiter in `config('documentable.throttle')` (default `'documents'`) — define
+your own rate with `RateLimiter::for('documents', ...)` in your `AppServiceProvider`; the package
+registers a permissive `Limit::none()` fallback only if you haven't. Set `load_routes` to `false`
+and mount `MadeByClowd\Documentable\Http\Controllers\*` yourself for full control over
+prefix/middleware/guard.
 
-## Authorization
+## Security
 
-Bind `MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess` (`config('documentable.authorization.resolver')`)
-to control who can upload/view/delete — default is permissive (allows everything), replace before
-production use. The shipped HTTP controllers consult it; `DocumentService` itself does not (it has
-no request/user context of its own) — a direct service caller (job, command) must consult the
-authorizer itself if it needs to.
+Two things to do before production use — the out-of-the-box state is intentionally permissive so
+the package works immediately, not because either default is safe to ship:
+
+1. **`documentable_type` allowlist.** Every `documentable_type` on an upload/finalize/complete/list
+   request is resolved via `Relation::getMorphedModel()`. An unmapped type is **rejected** unless
+   it's in `config('documentable.security.allowed_documentable_types')` (default `null` = reject
+   all unmapped types) — call `Relation::enforceMorphMap()` in your app instead where possible;
+   only reach for the allowlist if you can't.
+2. **`AuthorizesDocumentAccess`.** Default is `PermissiveDocumentAuthorizer` (allows everything).
+   Bind a real implementation via `config('documentable.authorization.resolver')` — the shipped
+   HTTP controllers consult it (`canUpload`/`canView`/`canDelete`); `DocumentService` itself does
+   not (no request/user context of its own) — a direct service caller (job, command) must consult
+   the authorizer itself if it needs to. `php artisan documents:make-authorizer` scaffolds a
+   starting implementation in `app/Documentable` instead of a blank-page interface.
+
+Neither is optional in combination: an allowlisted/morph-mapped type with a permissive authorizer
+still lets any caller act on any instance of that type.
 
 ## Other pluggable contracts
 
@@ -216,8 +255,9 @@ default to stay lean.
 
 ## Operational commands
 
-- `php artisan documents:install` — interactive wizard: publishes config/migrations/Boost skill,
-  prompts for `etag_strategy` and type-catalog mode.
+- `php artisan documents:install` — interactive wizard: publishes config/migrations, prompts for
+  app shape (monolith vs. separate API — sets `documentable.middleware`), `etag_strategy`,
+  type-catalog mode, and optionally scaffolds an authorizer.
 - `php artisan documents:sync-types [--prune]` — see above.
 - `php artisan documents:list` — table of registered types with usage counts.
 - `php artisan documents:verify [--repair]` — drift-detector for the `latest_marker`/`is_latest`
@@ -225,3 +265,7 @@ default to stay lean.
 - `php artisan documents:clean-orphaned [--hours=N]` — the reaper (auto-scheduled).
 - `php artisan documents:configure-bucket-lifecycle {disk} [--days=3]` — optional bucket-native
   `AbortIncompleteMultipartUpload` backstop, defense-in-depth alongside the reaper.
+- `php artisan documents:make-authorizer {name=AppDocumentAuthorizer}` — scaffold a starter
+  `AuthorizesDocumentAccess` implementation in `app/Documentable`.
+- `php artisan documents:attach-model {model}` — add `use Documentable;` (and its import) to an
+  existing model.
