@@ -48,6 +48,10 @@ class InstallCommand extends Command
             $this->info("Leave config('documentable.types') empty and manage the document_types table directly.");
         }
 
+        if ($this->confirm('Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)', true)) {
+            $this->call('documents:make-authorizer');
+        }
+
         $this->info('laravel-documentable installed.');
 
         return self::SUCCESS;

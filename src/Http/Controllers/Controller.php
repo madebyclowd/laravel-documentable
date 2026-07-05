@@ -13,7 +13,15 @@ abstract class Controller extends BaseController
 {
     protected function resolveDocumentable(string $type, string $id): Model
     {
-        $class = Relation::getMorphedModel($type) ?? $type;
+        $class = Relation::getMorphedModel($type);
+
+        if ($class === null) {
+            $allowlist = config('documentable.security.allowed_documentable_types');
+
+            if (is_array($allowlist) && in_array($type, $allowlist, true)) {
+                $class = $type;
+            }
+        }
 
         if (! is_string($class) || ! class_exists($class) || ! is_subclass_of($class, Model::class)) {
             throw ValidationException::withMessages(['documentable_type' => 'Unknown documentable type.']);

@@ -165,6 +165,10 @@ class ArtisanCommandsTest extends TestCase
                 'code-first',
                 ['code-first', 'db-only']
             )
+            ->expectsConfirmation(
+                'Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)',
+                'no'
+            )
             ->assertExitCode(0);
     }
 }

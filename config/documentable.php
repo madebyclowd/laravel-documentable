@@ -152,9 +152,19 @@ return [
     | package itself, but the hook always runs so wiring one in doesn't
     | require forking.
     |
+    | allowed_documentable_types: applied to every documentable_type sent by
+    | a client. A type resolved via Relation::morphMap() always passes
+    | regardless of this setting. An unmapped type is rejected unless it
+    | appears in this array — null means "reject every unmapped type"
+    | (the safe default). Without Relation::enforceMorphMap() AND this
+    | allowlist, a client can pass any Eloquent model FQCN in the app as
+    | documentable_type; the (default-permissive) authorizer is the only
+    | other gate. See docs/feedbacks/feedback.md #3.
+    |
     */
     'security' => [
         'scanner' => null,
+        'allowed_documentable_types' => null,
     ],
 
     /*

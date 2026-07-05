@@ -2,9 +2,11 @@
 
 namespace MadeByClowd\Documentable\Tests;
 
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Schema;
 use MadeByClowd\Documentable\DocumentableServiceProvider;
+use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 
 abstract class TestCase extends OrchestraTestCase
@@ -22,6 +24,12 @@ abstract class TestCase extends OrchestraTestCase
                 $table->timestamps();
             });
         }
+
+        // Mirrors the recommended consumer setup (Relation::morphMap(), see
+        // v2.0.0/phase-9-documentable-type-allowlist.md) so the default test suite
+        // exercises the "correctly configured" path — raw-FQCN-as-documentable_type
+        // is exercised separately in DocumentableTypeAllowlistTest, not here.
+        Relation::morphMap(['test_model' => TestModel::class]);
     }
 
     /**

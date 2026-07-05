@@ -318,6 +318,7 @@ Event::listen(function (\MadeByClowd\Documentable\Events\DocumentUploaded $event
 | Command | Purpose |
 |---|---|
 | `documents:install` | Interactive installer (publish + configure). |
+| `documents:make-authorizer {name=AppDocumentAuthorizer}` | Scaffold a starter `AuthorizesDocumentAccess` implementation in `app/Documentable`. |
 | `documents:sync-types [--prune]` | Upsert `config('documentable.types')` into `document_types`. |
 | `documents:list` | Table of registered types with usage counts. |
 | `documents:verify [--repair]` | Detect (and optionally fix) `latest_marker`/`is_latest` drift. |
@@ -344,12 +345,33 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
 'lifecycle' => ['pending_ttl_hours' => 24, 'reaper_frequency' => 'hourly'],
 'authorization' => ['resolver' => null], // bind AuthorizesDocumentAccess
 'dedup' => ['scope_resolver' => null],   // bind ResolvesDedupScope
-'security' => ['scanner' => null],       // bind ScansUploadedFile
+'security' => [
+    'scanner' => null,                          // bind ScansUploadedFile
+    'allowed_documentable_types' => null,        // see "Security" section below
+],
 'storage_path' => ['generator' => null], // bind GeneratesStoragePath
 'disks' => [/* per-disk server_side_encryption / kms_key_id */],
 'throttle' => 'documents', // named rate limiter for the shipped routes
 'audit' => ['enabled' => false, 'access_log' => false],
 ```
+
+## Security
+
+Two things you should do before going to production, both flagged by the first real integrator's
+feedback (`docs/feedbacks/feedback.md`):
+
+1. **`documentable_type` allowlist.** `documentable_type` on every upload/finalize/complete request
+   is resolved via `Relation::getMorphedModel()`. If your app hasn't called
+   `Relation::enforceMorphMap()` (or `Relation::morphMap()`), an unmapped type is **rejected** by
+   default — set `config('documentable.security.allowed_documentable_types')` to an explicit array
+   of allowed FQCNs only if you need to accept unmapped types, and prefer a morph map instead where
+   possible.
+2. **`AuthorizesDocumentAccess`.** The default is `PermissiveDocumentAuthorizer` (allows everything).
+   Bind a real implementation via `config('documentable.authorization.resolver')` before production
+   use — `php artisan documents:make-authorizer` scaffolds a starting point.
+
+Neither of these is optional in combination: an allowlisted/morph-mapped type with a permissive
+authorizer still lets any caller attach/view/delete documents against any instance of that type.
 
 ## License
 
