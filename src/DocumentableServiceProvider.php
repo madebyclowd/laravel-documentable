@@ -3,8 +3,19 @@
 namespace MadeByClowd\Documentable;
 
 use Illuminate\Console\Events\CommandFinished;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use MadeByClowd\Documentable\Console\Commands\CleanOrphanedDocumentsCommand;
+use MadeByClowd\Documentable\Console\Commands\ConfigureBucketLifecycleCommand;
+use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
+use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
+use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
+use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
+use MadeByClowd\Documentable\Defaults\DefaultStoragePathGenerator;
+use MadeByClowd\Documentable\Defaults\HashOnlyDedupScope;
+use MadeByClowd\Documentable\Defaults\NullFileScanner;
+use MadeByClowd\Documentable\Defaults\PermissiveDocumentAuthorizer;
 
 class DocumentableServiceProvider extends ServiceProvider
 {
@@ -14,6 +25,26 @@ class DocumentableServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/documentable.php', 'documentable');
+
+        $this->app->bind(
+            AuthorizesDocumentAccess::class,
+            fn ($app) => $app->make(config('documentable.authorization.resolver') ?? PermissiveDocumentAuthorizer::class)
+        );
+
+        $this->app->bind(
+            ScansUploadedFile::class,
+            fn ($app) => $app->make(config('documentable.security.scanner') ?? NullFileScanner::class)
+        );
+
+        $this->app->bind(
+            ResolvesDedupScope::class,
+            fn ($app) => $app->make(config('documentable.dedup.scope_resolver') ?? HashOnlyDedupScope::class)
+        );
+
+        $this->app->bind(
+            GeneratesStoragePath::class,
+            fn ($app) => $app->make(config('documentable.storage_path.generator') ?? DefaultStoragePathGenerator::class)
+        );
     }
 
     /**
@@ -39,8 +70,16 @@ class DocumentableServiceProvider extends ServiceProvider
             ], 'documentable-boost-skills');
 
             $this->commands([
-                // Console commands registered as later phases add them.
+                CleanOrphanedDocumentsCommand::class,
+                ConfigureBucketLifecycleCommand::class,
             ]);
+
+            $this->app->booted(function () {
+                $schedule = $this->app->make(Schedule::class);
+                $frequency = config('documentable.lifecycle.reaper_frequency', 'hourly');
+
+                $schedule->command('documents:clean-orphaned')->{$frequency}();
+            });
 
             Event::listen(
                 CommandFinished::class,

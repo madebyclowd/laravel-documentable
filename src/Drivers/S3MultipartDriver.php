@@ -15,14 +15,14 @@ class S3MultipartDriver implements MultipartUploadDriver
 {
     public function create(string $disk, string $path, string $filename): array
     {
-        $result = $this->client($disk)->createMultipartUpload([
+        $result = $this->client($disk)->createMultipartUpload(array_merge([
             'Bucket' => $this->bucket($disk),
             'Key' => $path,
             'ContentType' => 'application/octet-stream',
             'Metadata' => [
                 'original_filename' => $filename,
             ],
-        ]);
+        ], $this->sseOptions($disk)));
 
         return ['upload_id' => $result['UploadId']];
     }
@@ -107,5 +107,26 @@ class S3MultipartDriver implements MultipartUploadDriver
     protected function bucket(string $disk): string
     {
         return (string) config("filesystems.disks.{$disk}.bucket");
+    }
+
+    /**
+     * Explicit SSE, passed through rather than relying on the bucket's
+     * default encryption setting (security-risks.md #2).
+     */
+    protected function sseOptions(string $disk): array
+    {
+        $sse = config("documentable.disks.{$disk}.server_side_encryption");
+
+        if (! $sse) {
+            return [];
+        }
+
+        $options = ['ServerSideEncryption' => $sse];
+
+        if ($sse === 'aws:kms' && $kmsKeyId = config("documentable.disks.{$disk}.kms_key_id")) {
+            $options['SSEKMSKeyId'] = $kmsKeyId;
+        }
+
+        return $options;
     }
 }

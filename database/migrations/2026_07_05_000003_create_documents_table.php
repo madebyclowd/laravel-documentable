@@ -33,6 +33,15 @@ return new class extends Migration
             // replacement for a Postgres/SQLite-only partial unique index.
             $table->uuid('latest_marker')->nullable();
 
+            // Explicit lifecycle status, not inferred from a nullable FK.
+            // 'committed' = permanent (whether or not documentable_id is set —
+            // uploadDetached()'s intentionally-unowned-forever case is
+            // committed with a null documentable_id, a valid permanent state).
+            // 'pending' = has expires_at; reaped by documents:clean-orphaned if
+            // never transitioned to committed via Document::commit().
+            $table->string('status')->default('committed');
+            $table->timestamp('expires_at')->nullable();
+
             $table->timestamps();
             $table->softDeletes();
 

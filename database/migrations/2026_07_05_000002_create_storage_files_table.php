@@ -10,9 +10,14 @@ return new class extends Migration
     {
         Schema::create('storage_files', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            // Plain index, not unique, on purpose: phase 5 makes dedup scope pluggable
-            // (global vs tenant-scoped), which changes what the real uniqueness key is.
-            $table->string('file_hash', 64)->index();
+            // Plain index, not unique, on purpose: dedup scope is pluggable via
+            // ResolvesDedupScope (phase 5) — this column stores whatever that
+            // resolver returns (default: the raw sha256 hex; a tenant-scoped
+            // resolver might return "tenant-id:sha256hex"), not necessarily a
+            // bare hash, hence no fixed length and no unique constraint (scope
+            // resolution, not a DB constraint, is what prevents cross-scope
+            // collisions).
+            $table->string('file_hash')->index();
             $table->string('disk');
             $table->string('path');
             $table->string('mime_type');

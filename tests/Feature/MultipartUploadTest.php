@@ -184,7 +184,7 @@ class MultipartUploadTest extends TestCase
         $type = $this->makeType(['max_size_mb' => 0]);
         $owner = TestModel::create(['name' => 'owner']);
 
-        $presigned = $this->service->createPresignedUpload($type);
+        $presigned = $this->service->createPresignedUpload($type, 'x.bin');
         Storage::disk('test_disk')->put($presigned['path'], 'oversized-content');
 
         $this->expectException(ValidationException::class);
@@ -201,7 +201,7 @@ class MultipartUploadTest extends TestCase
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
 
-        $presigned = $this->service->createPresignedUpload($type);
+        $presigned = $this->service->createPresignedUpload($type, 'x.bin');
         Storage::disk('test_disk')->put($presigned['path'], 'small content');
 
         $document = $this->service->finalizeDirectUpload(
@@ -221,11 +221,11 @@ class MultipartUploadTest extends TestCase
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
 
-        $first = $this->service->createPresignedUpload($type);
+        $first = $this->service->createPresignedUpload($type, 'a.txt');
         Storage::disk('test_disk')->put($first['path'], 'same content');
         $firstDocument = $this->service->finalizeDirectUpload($first['path'], $type, $owner, 'a.txt');
 
-        $second = $this->service->createPresignedUpload($type);
+        $second = $this->service->createPresignedUpload($type, 'b.txt');
         Storage::disk('test_disk')->put($second['path'], 'same content');
         $secondDocument = $this->service->finalizeDirectUpload($second['path'], $type, $owner, 'b.txt');
 

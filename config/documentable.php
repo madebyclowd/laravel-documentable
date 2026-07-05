@@ -97,6 +97,14 @@ return [
     |--------------------------------------------------------------------------
     | Lifecycle / Orphan Cleanup
     |--------------------------------------------------------------------------
+    |
+    | pending_ttl_hours: default TTL for documents created in 'pending' status
+    | (see MadeByClowd\Documentable\Models\Document::commit()). reaper_frequency
+    | is a Schedule fluent-method name ('hourly', 'daily', 'everyFiveMinutes',
+    | ...) applied to the documents:clean-orphaned command. Multipart session
+    | TTL uses multipart.session_ttl_hours (phase 3) — single source of truth,
+    | not duplicated here.
+    |
     */
     'lifecycle' => [
         'pending_ttl_hours' => 24,
@@ -131,6 +139,68 @@ return [
     'dedup' => [
         'scope_resolver' => null,
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Security
+    |--------------------------------------------------------------------------
+    |
+    | Bind your own implementation of
+    | MadeByClowd\Documentable\Contracts\ScansUploadedFile (e.g. a ClamAV
+    | sidecar call) to reject infected uploads. Default is a no-op that always
+    | reports clean — AV scanning infrastructure is out of scope for the
+    | package itself, but the hook always runs so wiring one in doesn't
+    | require forking.
+    |
+    */
+    'security' => [
+        'scanner' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Storage Path Generation
+    |--------------------------------------------------------------------------
+    |
+    | Bind your own implementation of
+    | MadeByClowd\Documentable\Contracts\GeneratesStoragePath to control the
+    | storage key newly-stored files are written to (e.g. date/tenant
+    | sharding). Default: "{$type->path_prefix}/{uuid}".
+    |
+    */
+    'storage_path' => [
+        'generator' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Per-Disk Server-Side Encryption
+    |--------------------------------------------------------------------------
+    |
+    | Explicit SSE, passed through to every write/presign/multipart-create
+    | call rather than relying on the bucket's default encryption setting.
+    | server_side_encryption: 'AES256' | 'aws:kms'. kms_key_id only used when
+    | server_side_encryption is 'aws:kms'.
+    |
+    | Example:
+    | 's3' => ['server_side_encryption' => 'AES256'],
+    |
+    */
+    'disks' => [
+        // 's3' => ['server_side_encryption' => 'AES256', 'kms_key_id' => null],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Throttle
+    |--------------------------------------------------------------------------
+    |
+    | Named rate limiter the package's routes (phase 7) are mounted behind.
+    | Package doesn't hardcode a specific rate — define this limiter
+    | (RateLimiter::for('documents', ...)) in your own AppServiceProvider.
+    |
+    */
+    'throttle' => 'documents',
 
     /*
     |--------------------------------------------------------------------------
