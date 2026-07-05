@@ -101,6 +101,125 @@ $invoice->documents; // MorphMany<Document>
 $service->getUrl($document, now()->addMinutes(5)); // presigned, temporary
 ```
 
+## Uploading via the shipped HTTP API
+
+Everything above calls `DocumentService` directly (your own controller, same request). The package
+also ships routes under `/documents` (`config('documentable.load_routes')`, default `true`) if you'd
+rather not write that controller yourself. Both the direct-PUT and multipart flows below assume the
+client (browser/mobile app) talks to your bucket directly for the actual bytes — your app server
+only ever handles small JSON requests, never the file body.
+
+### Small files — presigned direct PUT (files under `multipart.threshold_bytes`, default 10MB)
+
+1. Ask your server for a presigned URL:
+
+   ```
+   POST /documents/presigned
+   { "document_type_id": "...", "filename": "invoice.pdf" }
+
+   → { "url": "...", "headers": {...}, "path": "invoices/abc.pdf", "disk": "s3" }
+   ```
+
+2. Client `PUT`s the raw file bytes straight to `url` (with `headers` if any) — no auth, doesn't
+   touch your app server.
+
+3. Client tells your server it's done, including the sha256 it computed client-side:
+
+   ```
+   POST /documents/presigned/finalize
+   {
+     "path": "invoices/abc.pdf",
+     "document_type_id": "...",
+     "documentable_type": "App\\Models\\Invoice",
+     "documentable_id": "42",
+     "filename": "invoice.pdf",
+     "expected_hash": "<sha256 hex over the file>"
+   }
+
+   → Document JSON, 201
+   ```
+
+   The server re-downloads and re-hashes the object and compares it to `expected_hash`; on a
+   size/mime/hash mismatch it deletes the object and returns a validation error — you never end up
+   with an orphaned blob.
+
+### Large files — multipart (files at/above `multipart.threshold_bytes`)
+
+**1. Initiate.** Creates the multipart session on the bucket plus a DB row scoped to `user_id` —
+every later call for this session must supply the *same* `user_id` or it's rejected (this is the
+ownership check, not decorative). If you omit `user_id`, the controller falls back to
+`$request->user()->getAuthIdentifier()`.
+
+```
+POST /documents/multipart/initiate
+{ "filename": "big.zip", "document_type_id": "...", "user_id": "..." }
+
+→ { "upload_id": "...", "path": "invoices/xyz.zip", "disk": "s3" }
+```
+
+**2. Upload each part directly to the bucket.** For every part (1-indexed; S3 requires each part
+≥5MB except the last):
+
+```
+POST /documents/multipart/part-url
+{ "path": "...", "upload_id": "...", "part_number": 1, "document_type_id": "...", "user_id": "..." }
+
+→ { "url": "..." }
+```
+
+Client `PUT`s that part's bytes to `url`. **Only if `etag_strategy = client`**, capture the `ETag`
+response header from that PUT — you'll need it in step 3. Under the default
+`etag_strategy = server-authoritative`, don't bother capturing it; the server re-derives everything
+from the bucket's own `ListParts` at completion time. Repeat this step for every part.
+
+**3. Complete.**
+
+```
+POST /documents/multipart/complete
+{
+  "path": "...", "upload_id": "...", "user_id": "...",
+  "document_type_id": "...",
+  "documentable_type": "App\\Models\\Invoice", "documentable_id": "42",
+  "filename": "big.zip",
+  "expected_hash": "<sha256 hex over the whole assembled file>",
+  "parts": [{"PartNumber": 1, "ETag": "\"...\""}, {"PartNumber": 2, "ETag": "\"...\""}]
+}
+
+→ Document JSON, 201
+```
+
+`parts` is only read when `etag_strategy = client`; omit it under `server-authoritative`. The server
+assembles the object, verifies integrity (native-checksum fast path or a full re-hash — transparent
+either way), and creates the `Document`. Any failure deletes the assembled object server-side first.
+
+**Abort**, if the client gives up partway (closed tab, network drop):
+
+```
+POST /documents/multipart/abort
+{ "path": "...", "upload_id": "...", "document_type_id": "...", "user_id": "..." }
+```
+
+If nobody calls abort, `documents:clean-orphaned` (auto-scheduled) sweeps the session after
+`multipart.session_ttl_hours` and aborts it on the bucket too — not just deleting the DB row.
+
+### Same two flows without the shipped routes — direct service calls
+
+```php
+// Direct PUT:
+$presigned = $service->createPresignedUpload($type, $filename);
+// ...client PUTs to $presigned['url']...
+$document = $service->finalizeDirectUpload($presigned['path'], $type, $invoice, $filename, $expectedHash);
+
+// Multipart:
+$session = $service->initiateMultipartUpload($filename, $type, $userId);
+$url = $service->generatePartUploadUrl($session['path'], $session['upload_id'], $userId, $partNumber, $type);
+// ...client PUTs to $url for each part...
+$document = $service->completeMultipartUpload(
+    $session['path'], $session['upload_id'], $userId, $type, $invoice, $filename,
+    clientParts: null, expectedHash: $hash
+);
+```
+
 ## Advanced usage
 
 **Multiple independently-versioned slots per owner** (`allows_multiple = true`,
@@ -190,19 +309,6 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
 'throttle' => 'documents', // named rate limiter for the shipped routes
 'audit' => ['enabled' => false, 'access_log' => false],
 ```
-
-## Development status
-
-Built in phases — see `docs/implementations/` for the full history and rationale:
-
-- [x] Phase 0 — package scaffold
-- [x] Phase 1 — core schema & direct upload
-- [x] Phase 2 — versioning & multi-document groups
-- [x] Phase 3 — multipart upload
-- [x] Phase 4 — lifecycle & orphan cleanup
-- [x] Phase 5 — pluggable contracts & security
-- [x] Phase 6 — events & observability
-- [x] Phase 7 — routes, install command, docs, release
 
 ## License
 

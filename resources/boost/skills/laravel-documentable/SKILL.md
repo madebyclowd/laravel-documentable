@@ -87,6 +87,55 @@ Pending, uncommitted `uploadDetached()` documents and abandoned multipart sessio
 purged (dedup-safe) and a stale `MultipartUpload` session is aborted on the provider, not just
 deleted from the DB.
 
+## HTTP upload flows (via the shipped `/documents` routes)
+
+Client (browser/mobile) talks to the bucket directly for file bytes — the app server only ever
+handles small JSON requests, never the file body. Both flows below have a service-call-only
+equivalent (no HTTP) further down.
+
+**Small files — presigned direct PUT** (`multipart.threshold_bytes`, default 10MB):
+
+1. `POST /documents/presigned {document_type_id, filename}` → `{url, headers, path, disk}`.
+2. Client `PUT`s the raw file to `url` (no auth — this request never touches your app server).
+3. `POST /documents/presigned/finalize {path, document_type_id, documentable_type, documentable_id,
+   filename, expected_hash}` → `Document` JSON, 201. Server re-downloads, re-hashes, compares to
+   `expected_hash`; on mismatch deletes the object and returns a validation error (no orphaned blob).
+
+**Large files — multipart** (`multipart.threshold_bytes` and above):
+
+1. `POST /documents/multipart/initiate {filename, document_type_id, user_id}` →
+   `{upload_id, path, disk}`. Creates the bucket session + a DB row scoped to `user_id` — every
+   later call for this session must supply the *same* `user_id` or is rejected (real ownership
+   check, not decorative). Omit `user_id` to fall back to `$request->user()->getAuthIdentifier()`.
+2. For each part (1-indexed, ≥5MB except the last): `POST /documents/multipart/part-url {path,
+   upload_id, part_number, document_type_id, user_id}` → `{url}`; client `PUT`s that part's bytes to
+   `url`. Only capture the response `ETag` header if `etag_strategy = client` — under the default
+   `server-authoritative` it's unused, the server re-derives everything from `ListParts` at
+   completion.
+3. `POST /documents/multipart/complete {path, upload_id, user_id, document_type_id,
+   documentable_type, documentable_id, filename, expected_hash, parts?}` → `Document` JSON, 201.
+   `parts` (`[{PartNumber, ETag}]`) is only read under `etag_strategy = client`; omit under
+   `server-authoritative`.
+4. If the client gives up partway: `POST /documents/multipart/abort {path, upload_id,
+   document_type_id, user_id}`. If nobody calls this, `documents:clean-orphaned` sweeps the session
+   after `multipart.session_ttl_hours` and aborts it on the bucket too.
+
+Service-call equivalent of both flows, no HTTP:
+
+```php
+// Direct PUT:
+$presigned = $service->createPresignedUpload($type, $filename);
+$document = $service->finalizeDirectUpload($presigned['path'], $type, $invoice, $filename, $expectedHash);
+
+// Multipart:
+$session = $service->initiateMultipartUpload($filename, $type, $userId);
+$url = $service->generatePartUploadUrl($session['path'], $session['upload_id'], $userId, $partNumber, $type);
+$document = $service->completeMultipartUpload(
+    $session['path'], $session['upload_id'], $userId, $type, $invoice, $filename,
+    clientParts: null, expectedHash: $hash
+);
+```
+
 ## Multipart `etag_strategy`
 
 Two legitimate modes, not one "correct" one — pick based on whether you control your bucket's CORS
