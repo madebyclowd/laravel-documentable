@@ -36,6 +36,9 @@
         "orchestra/testbench": "^9.0|^10.0|^11.0",
         "phpunit/phpunit": "^10.0|^11.0|^12.0|^13.0"
     },
+    "suggest": {
+        "laravel/boost": "Auto-discovers this package's AI guidelines and agent skill from resources/boost/ — no extra setup needed."
+    },
     "autoload": {
         "psr-4": {
             "MadeByClowd\\Documentable\\": "src/"

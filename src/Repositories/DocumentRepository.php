@@ -48,6 +48,28 @@ class DocumentRepository
     }
 
     /**
+     * All latest-per-group rows for an owner, across every document type unless
+     * $documentTypeId narrows it — the cross-type sibling of findAllLatestForOwner()
+     * (phase 12's listing endpoint). storageFile is eager-loaded so callers don't
+     * reintroduce the bare-model gap phase 8 fixed on the upload endpoints.
+     *
+     * @return Collection<int, Document>
+     */
+    public function findAllLatestForOwnerGrouped(string $documentableType, string $documentableId, ?string $documentTypeId = null): Collection
+    {
+        $query = Document::where('documentable_type', $documentableType)
+            ->where('documentable_id', $documentableId)
+            ->whereNotNull('latest_marker')
+            ->with('storageFile');
+
+        if ($documentTypeId !== null) {
+            $query->where('document_type_id', $documentTypeId);
+        }
+
+        return $query->get();
+    }
+
+    /**
      * Full version chain for one group, oldest first.
      *
      * @return Collection<int, Document>

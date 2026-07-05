@@ -109,6 +109,30 @@ rather not write that controller yourself. Both the direct-PUT and multipart flo
 client (browser/mobile app) talks to your bucket directly for the actual bytes — your app server
 only ever handles small JSON requests, never the file body.
 
+**Middleware**: these routes mount under `config('documentable.middleware')` (default `['api']`) —
+no session, no auth, `$request->user()` is `null`. `php artisan documents:install` asks whether your
+app is a session-based monolith (sets `['web', 'auth']`) or a separate API (stays `['api']`, wire
+your own token guard in). If `$request->user()` is unexpectedly null in your authorizer or
+`created_by`/`deleted_by`, this is why — see `docs/feedbacks/feedback.md` #1.
+
+### Listing an owner's documents
+
+```
+GET /documents?documentable_type=...&documentable_id=...[&document_type_id=...][&page=1]
+```
+
+Returns every latest-per-slot document for that owner, grouped `{document_type_id: {document_group_id: document}}`
+(`storageFile` eager-loaded, same shape as the upload endpoints). `canView()` is applied per document
+after the query — a custom authorizer denying some documents excludes just those, not the whole set —
+so pagination (`config('documentable.listing.per_page')`, default 50) runs over the filtered result:
+
+```json
+{
+  "data": { "<document_type_id>": { "<document_group_id>": { "id": "...", "storage_file": {...} } } },
+  "meta": { "current_page": 1, "per_page": 50, "total": 3, "last_page": 1 }
+}
+```
+
 ### Small files — presigned direct PUT (files under `multipart.threshold_bytes`, default 10MB)
 
 1. Ask your server for a presigned URL:
@@ -318,11 +342,29 @@ Event::listen(function (\MadeByClowd\Documentable\Events\DocumentUploaded $event
 | Command | Purpose |
 |---|---|
 | `documents:install` | Interactive installer (publish + configure). |
+| `documents:make-authorizer {name=AppDocumentAuthorizer}` | Scaffold a starter `AuthorizesDocumentAccess` implementation in `app/Documentable`. |
+| `documents:attach-model {model}` | Add `use Documentable;` (and its import) to an existing model. |
 | `documents:sync-types [--prune]` | Upsert `config('documentable.types')` into `document_types`. |
 | `documents:list` | Table of registered types with usage counts. |
 | `documents:verify [--repair]` | Detect (and optionally fix) `latest_marker`/`is_latest` drift. |
 | `documents:clean-orphaned [--hours=N]` | Reaper — purges expired pending documents, aborts stale multipart sessions. Auto-scheduled. |
 | `documents:configure-bucket-lifecycle {disk} [--days=3]` | Optional bucket-native `AbortIncompleteMultipartUpload` backstop. |
+
+## AI agent context (Laravel Boost)
+
+The package ships `resources/boost/guidelines/core.blade.php` (upfront package overview) and
+`resources/boost/skills/laravel-documentable/SKILL.md` (detailed reference — upload transports,
+versioning semantics, security checklist, every artisan command). If you have
+[Laravel Boost](https://github.com/laravel/boost) installed (`composer require laravel/boost --dev`
++ `php artisan boost:install`), both are **auto-discovered from `vendor/`** — nothing to run in
+this package. Boost decides the actual per-agent install location itself (its `ClaudeCode` agent
+class targets `.claude/skills/`, other supported agents have their own conventions) — this package
+doesn't hardcode a directory for that, and no longer tries to guess one.
+
+Without Boost, read the files directly from
+`vendor/madebyclowd/laravel-documentable/resources/boost/` and copy the skill into whatever your
+AI tool expects (Claude Code: `.claude/skills/laravel-documentable/SKILL.md` project-level, or
+`~/.claude/skills/` for personal use across projects).
 
 ## Configuration
 
@@ -332,6 +374,7 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
 'disk' => env('DOCUMENTABLE_DISK', 's3'),
 'load_migrations' => true,
 'load_routes' => true,
+'middleware' => ['api'], // ['web', 'auth'] for a session-based monolith — see "Uploading via the shipped HTTP API"
 'types' => [/* code-first DocumentType catalog, keyed by code */],
 'multipart' => [
     'threshold_bytes' => 10 * 1024 * 1024,
@@ -342,14 +385,36 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
     'drivers' => ['s3' => S3MultipartDriver::class],
 ],
 'lifecycle' => ['pending_ttl_hours' => 24, 'reaper_frequency' => 'hourly'],
+'listing' => ['per_page' => 50], // GET /documents page size
 'authorization' => ['resolver' => null], // bind AuthorizesDocumentAccess
 'dedup' => ['scope_resolver' => null],   // bind ResolvesDedupScope
-'security' => ['scanner' => null],       // bind ScansUploadedFile
+'security' => [
+    'scanner' => null,                          // bind ScansUploadedFile
+    'allowed_documentable_types' => null,        // see "Security" section below
+],
 'storage_path' => ['generator' => null], // bind GeneratesStoragePath
 'disks' => [/* per-disk server_side_encryption / kms_key_id */],
 'throttle' => 'documents', // named rate limiter for the shipped routes
 'audit' => ['enabled' => false, 'access_log' => false],
 ```
+
+## Security
+
+Two things you should do before going to production, both flagged by the first real integrator's
+feedback (`docs/feedbacks/feedback.md`):
+
+1. **`documentable_type` allowlist.** `documentable_type` on every upload/finalize/complete request
+   is resolved via `Relation::getMorphedModel()`. If your app hasn't called
+   `Relation::enforceMorphMap()` (or `Relation::morphMap()`), an unmapped type is **rejected** by
+   default — set `config('documentable.security.allowed_documentable_types')` to an explicit array
+   of allowed FQCNs only if you need to accept unmapped types, and prefer a morph map instead where
+   possible.
+2. **`AuthorizesDocumentAccess`.** The default is `PermissiveDocumentAuthorizer` (allows everything).
+   Bind a real implementation via `config('documentable.authorization.resolver')` before production
+   use — `php artisan documents:make-authorizer` scaffolds a starting point.
+
+Neither of these is optional in combination: an allowlisted/morph-mapped type with a permissive
+authorizer still lets any caller attach/view/delete documents against any instance of that type.
 
 ## License
 

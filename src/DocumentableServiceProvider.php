@@ -3,15 +3,15 @@
 namespace MadeByClowd\Documentable;
 
 use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Scheduling\Schedule;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use MadeByClowd\Documentable\Console\Commands\AttachModelCommand;
 use MadeByClowd\Documentable\Console\Commands\CleanOrphanedDocumentsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketLifecycleCommand;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Console\Commands\ListDocumentTypesCommand;
+use MadeByClowd\Documentable\Console\Commands\MakeAuthorizerCommand;
 use MadeByClowd\Documentable\Console\Commands\SyncDocumentTypesCommand;
 use MadeByClowd\Documentable\Console\Commands\VerifyDocumentIntegrityCommand;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
@@ -87,14 +87,12 @@ class DocumentableServiceProvider extends ServiceProvider
                 __DIR__.'/../routes/api.php' => base_path('routes/documentable.php'),
             ], 'documentable-routes');
 
-            $this->publishes([
-                __DIR__.'/../resources/boost/skills' => base_path('.github/skills'),
-            ], 'documentable-boost-skills');
-
             $this->commands([
+                AttachModelCommand::class,
                 CleanOrphanedDocumentsCommand::class,
                 ConfigureBucketLifecycleCommand::class,
                 InstallCommand::class,
+                MakeAuthorizerCommand::class,
                 SyncDocumentTypesCommand::class,
                 ListDocumentTypesCommand::class,
                 VerifyDocumentIntegrityCommand::class,
@@ -106,59 +104,6 @@ class DocumentableServiceProvider extends ServiceProvider
 
                 $schedule->command('documents:clean-orphaned')->{$frequency}();
             });
-
-            Event::listen(
-                CommandFinished::class,
-                function (CommandFinished $event) {
-                    if (in_array($event->command, ['boost:install', 'boost:update'])) {
-                        $this->autoPublishBoostSkills();
-                    }
-                }
-            );
-        }
-    }
-
-    /**
-     * Automatically copy Boost skill markdown to project repository.
-     */
-    protected function autoPublishBoostSkills(): void
-    {
-        $source = __DIR__.'/../resources/boost/skills/laravel-documentable/SKILL.md';
-        if (! file_exists($source)) {
-            return;
-        }
-
-        $targets = [];
-        if (is_dir(base_path('.github/skills'))) {
-            $targets[] = base_path('.github/skills/laravel-documentable/SKILL.md');
-        }
-        if (is_dir(base_path('.ai/skills'))) {
-            $targets[] = base_path('.ai/skills/laravel-documentable/SKILL.md');
-        }
-
-        if (empty($targets)) {
-            $targets[] = base_path('.github/skills/laravel-documentable/SKILL.md');
-        }
-
-        foreach ($targets as $destination) {
-            if (! is_dir(dirname($destination))) {
-                mkdir(dirname($destination), 0755, true);
-            }
-            copy($source, $destination);
-        }
-
-        $boostJsonPath = base_path('boost.json');
-        if (file_exists($boostJsonPath)) {
-            $boostJson = json_decode(file_get_contents($boostJsonPath), true);
-            if (is_array($boostJson) && isset($boostJson['skills'])) {
-                if (! in_array('laravel-documentable', $boostJson['skills'])) {
-                    $boostJson['skills'][] = 'laravel-documentable';
-                    file_put_contents(
-                        $boostJsonPath,
-                        json_encode($boostJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-                    );
-                }
-            }
         }
     }
 }

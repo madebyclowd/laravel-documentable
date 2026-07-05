@@ -75,7 +75,7 @@ class MultipartUploadController extends Controller
             $request->input('document_group_id')
         );
 
-        return response()->json($document, 201);
+        return response()->json($document->load('storageFile'), 201);
     }
 
     public function abort(AbortMultipartUploadRequest $request): Response

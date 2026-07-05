@@ -152,9 +152,19 @@ return [
     | package itself, but the hook always runs so wiring one in doesn't
     | require forking.
     |
+    | allowed_documentable_types: applied to every documentable_type sent by
+    | a client. A type resolved via Relation::morphMap() always passes
+    | regardless of this setting. An unmapped type is rejected unless it
+    | appears in this array — null means "reject every unmapped type"
+    | (the safe default). Without Relation::enforceMorphMap() AND this
+    | allowlist, a client can pass any Eloquent model FQCN in the app as
+    | documentable_type; the (default-permissive) authorizer is the only
+    | other gate. See docs/feedbacks/feedback.md #3.
+    |
     */
     'security' => [
         'scanner' => null,
+        'allowed_documentable_types' => null,
     ],
 
     /*
@@ -188,6 +198,37 @@ return [
     */
     'disks' => [
         // 's3' => ['server_side_encryption' => 'AES256', 'kms_key_id' => null],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Route Middleware
+    |--------------------------------------------------------------------------
+    |
+    | Applied to every route in routes/api.php, in addition to the throttle
+    | middleware below. Default ('api') has no session/auth — $request->user()
+    | is null, so AuthorizesDocumentAccess always receives a null $user,
+    | created_by/deleted_by stay null, and resolveUserId() falls back to a
+    | client-supplied user_id field. Session-based monolith (Inertia,
+    | Livewire, classic SPA-on-same-origin): use ['web', 'auth']. Separate
+    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). See
+    | docs/feedbacks/feedback.md #1 for the failure mode this prevents.
+    |
+    */
+    'middleware' => ['api'],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Listing
+    |--------------------------------------------------------------------------
+    |
+    | Default page size for GET /documents (owner-scoped, grouped by
+    | document_type_id then document_group_id). canView() is applied per-document
+    | after the query, so pagination happens over the already-filtered set.
+    |
+    */
+    'listing' => [
+        'per_page' => 50,
     ],
 
     /*

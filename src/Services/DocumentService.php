@@ -4,6 +4,7 @@ namespace MadeByClowd\Documentable\Services;
 
 use DateTimeInterface;
 use finfo;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\UploadedFile;
@@ -158,6 +159,25 @@ class DocumentService
         $this->logAccess($document, $disposition === 'attachment' ? 'download' : 'view');
 
         return $url;
+    }
+
+    /**
+     * All latest-per-group documents for an owner, across every type unless
+     * $documentTypeId narrows it. storageFile eager-loaded (phase 8's fix, reused
+     * here rather than reintroduced). Doesn't consult AuthorizesDocumentAccess —
+     * same seam boundary as every other DocumentService method (see phase 5/7
+     * notes: authorization is a controller-layer concern, this method has no
+     * $user param to check it with).
+     *
+     * @return Collection<int, Document>
+     */
+    public function listForOwner(Model $documentable, ?string $documentTypeId = null): Collection
+    {
+        return $this->documentRepository->findAllLatestForOwnerGrouped(
+            $documentable->getMorphClass(),
+            (string) $documentable->getKey(),
+            $documentTypeId
+        );
     }
 
     /**
