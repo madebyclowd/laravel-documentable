@@ -343,6 +343,7 @@ Event::listen(function (\MadeByClowd\Documentable\Events\DocumentUploaded $event
 |---|---|
 | `documents:install` | Interactive installer (publish + configure). |
 | `documents:make-authorizer {name=AppDocumentAuthorizer}` | Scaffold a starter `AuthorizesDocumentAccess` implementation in `app/Documentable`. |
+| `documents:attach-model {model}` | Add `use Documentable;` (and its import) to an existing model. |
 | `documents:sync-types [--prune]` | Upsert `config('documentable.types')` into `document_types`. |
 | `documents:list` | Table of registered types with usage counts. |
 | `documents:verify [--repair]` | Detect (and optionally fix) `latest_marker`/`is_latest` drift. |

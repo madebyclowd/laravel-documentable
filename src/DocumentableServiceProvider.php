@@ -8,6 +8,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use MadeByClowd\Documentable\Console\Commands\AttachModelCommand;
 use MadeByClowd\Documentable\Console\Commands\CleanOrphanedDocumentsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketLifecycleCommand;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
@@ -93,6 +94,7 @@ class DocumentableServiceProvider extends ServiceProvider
             ], 'documentable-boost-skills');
 
             $this->commands([
+                AttachModelCommand::class,
                 CleanOrphanedDocumentsCommand::class,
                 ConfigureBucketLifecycleCommand::class,
                 InstallCommand::class,
