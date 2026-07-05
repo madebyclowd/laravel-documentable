@@ -202,6 +202,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Route Middleware
+    |--------------------------------------------------------------------------
+    |
+    | Applied to every route in routes/api.php, in addition to the throttle
+    | middleware below. Default ('api') has no session/auth — $request->user()
+    | is null, so AuthorizesDocumentAccess always receives a null $user,
+    | created_by/deleted_by stay null, and resolveUserId() falls back to a
+    | client-supplied user_id field. Session-based monolith (Inertia,
+    | Livewire, classic SPA-on-same-origin): use ['web', 'auth']. Separate
+    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). See
+    | docs/feedbacks/feedback.md #1 for the failure mode this prevents.
+    |
+    */
+    'middleware' => ['api'],
+
+    /*
+    |--------------------------------------------------------------------------
     | Throttle
     |--------------------------------------------------------------------------
     |

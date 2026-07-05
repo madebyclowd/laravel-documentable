@@ -109,6 +109,12 @@ rather not write that controller yourself. Both the direct-PUT and multipart flo
 client (browser/mobile app) talks to your bucket directly for the actual bytes — your app server
 only ever handles small JSON requests, never the file body.
 
+**Middleware**: these routes mount under `config('documentable.middleware')` (default `['api']`) —
+no session, no auth, `$request->user()` is `null`. `php artisan documents:install` asks whether your
+app is a session-based monolith (sets `['web', 'auth']`) or a separate API (stays `['api']`, wire
+your own token guard in). If `$request->user()` is unexpectedly null in your authorizer or
+`created_by`/`deleted_by`, this is why — see `docs/feedbacks/feedback.md` #1.
+
 ### Small files — presigned direct PUT (files under `multipart.threshold_bytes`, default 10MB)
 
 1. Ask your server for a presigned URL:
@@ -333,6 +339,7 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
 'disk' => env('DOCUMENTABLE_DISK', 's3'),
 'load_migrations' => true,
 'load_routes' => true,
+'middleware' => ['api'], // ['web', 'auth'] for a session-based monolith — see "Uploading via the shipped HTTP API"
 'types' => [/* code-first DocumentType catalog, keyed by code */],
 'multipart' => [
     'threshold_bytes' => 10 * 1024 * 1024,

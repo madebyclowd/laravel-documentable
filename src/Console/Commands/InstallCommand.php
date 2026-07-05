@@ -25,6 +25,21 @@ class InstallCommand extends Command
             $this->call('migrate');
         }
 
+        $appShape = $this->choice(
+            "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
+            "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
+            "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
+            '                (e.g. auth:sanctum) into documentable.middleware yourself.',
+            ['separate-api', 'monolith'],
+            0
+        );
+
+        if ($appShape === 'monolith') {
+            $this->writeConfigArrayValue('middleware', ['web', 'auth']);
+        } else {
+            $this->info("Routes stay under ['api'] — add your token guard to config('documentable.middleware') yourself.");
+        }
+
         $etagStrategy = $this->choice(
             "Multipart ETag strategy?\n".
             "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
@@ -75,6 +90,34 @@ class InstallCommand extends Command
         $updated = preg_replace(
             "/('{$key}'\\s*=>\\s*)'[^']*'/",
             "\${1}'{$value}'",
+            $contents,
+            1
+        );
+
+        if ($updated !== null) {
+            file_put_contents($path, $updated);
+        }
+    }
+
+    /**
+     * Sibling to writeConfigValue() for an array-literal config value written on a
+     * single line in the shipped default (e.g. 'middleware' => ['api'],). Same
+     * best-effort, first-match-only scoping — safe here since each key appears once.
+     */
+    protected function writeConfigArrayValue(string $key, array $values): void
+    {
+        $path = config_path('documentable.php');
+
+        if (! file_exists($path)) {
+            return;
+        }
+
+        $literal = '['.implode(', ', array_map(fn ($value) => "'{$value}'", $values)).']';
+
+        $contents = file_get_contents($path);
+        $updated = preg_replace(
+            "/('{$key}'\\s*=>\\s*)\\[[^\\]]*\\]/",
+            "\${1}{$literal}",
             $contents,
             1
         );

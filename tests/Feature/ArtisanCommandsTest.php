@@ -152,6 +152,14 @@ class ArtisanCommandsTest extends TestCase
         $this->artisan('documents:install')
             ->expectsConfirmation('Run migrations now?', 'no')
             ->expectsChoice(
+                "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
+                "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
+                "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
+                '                (e.g. auth:sanctum) into documentable.middleware yourself.',
+                'separate-api',
+                ['separate-api', 'monolith']
+            )
+            ->expectsChoice(
                 "Multipart ETag strategy?\n".
                 "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
                 '  server-authoritative: no CORS dependency, costs one extra ListParts call per completion.',
@@ -170,5 +178,50 @@ class ArtisanCommandsTest extends TestCase
                 'no'
             )
             ->assertExitCode(0);
+    }
+
+    public function test_install_command_monolith_choice_writes_middleware_config(): void
+    {
+        // Force a fresh publish — vendor:publish (no --force) is a no-op once the
+        // destination exists, so a stale copy from an earlier run/session would
+        // otherwise predate this config key and make the regex write-back a silent
+        // no-op. Testbench's config_path() is a shared, regenerable skeleton path.
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install')
+            ->expectsConfirmation('Run migrations now?', 'no')
+            ->expectsChoice(
+                "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
+                "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
+                "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
+                '                (e.g. auth:sanctum) into documentable.middleware yourself.',
+                'monolith',
+                ['separate-api', 'monolith']
+            )
+            ->expectsChoice(
+                "Multipart ETag strategy?\n".
+                "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
+                '  server-authoritative: no CORS dependency, costs one extra ListParts call per completion.',
+                'server-authoritative',
+                ['server-authoritative', 'client']
+            )
+            ->expectsChoice(
+                "Document type catalog?\n".
+                "  code-first: define types in config('documentable.types'), synced via documents:sync-types (git-versioned, PR-reviewed, cacheable).\n".
+                '  db-only: manage the document_types table directly through your own admin layer (runtime-editable, no deploy needed).',
+                'code-first',
+                ['code-first', 'db-only']
+            )
+            ->expectsConfirmation(
+                'Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)',
+                'no'
+            )
+            ->assertExitCode(0);
+
+        $published = file_get_contents(config_path('documentable.php'));
+        $this->assertStringContainsString("'middleware' => ['web', 'auth']", $published);
+
+        // Leave the shared skeleton unpublished again for whichever test runs next.
+        @unlink(config_path('documentable.php'));
     }
 }
