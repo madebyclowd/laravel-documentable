@@ -26,6 +26,8 @@ class Document extends Model
         'latest_marker',
         'status',
         'expires_at',
+        'created_by',
+        'deleted_by',
     ];
 
     protected $casts = [

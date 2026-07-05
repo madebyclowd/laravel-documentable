@@ -42,6 +42,11 @@ return new class extends Migration
             $table->string('status')->default('committed');
             $table->timestamp('expires_at')->nullable();
 
+            // Actor tracking, opt-in via config('documentable.audit.enabled'). String,
+            // not a fixed-type FK — same portability reasoning as documentable_id.
+            $table->string('created_by')->nullable();
+            $table->string('deleted_by')->nullable();
+
             $table->timestamps();
             $table->softDeletes();
 

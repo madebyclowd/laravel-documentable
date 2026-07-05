@@ -41,38 +41,85 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: [8.2, 8.3, 8.4]
-        laravel: [11.*, 12.*, 13.*]
         stability: [prefer-stable]
-        exclude:
-          - php: 8.2
-            laravel: 12.*
-          - php: 8.2
-            laravel: 13.*
+        # Full PHP x Laravel matrix runs on sqlite (fast). The uniqueness/
+        # versioning logic (package-plan.md §5) is the part most likely to
+        # silently pass on one engine and fail on another, so the latest
+        # PHP/Laravel combo additionally runs against mysql and pgsql.
         include:
           - php: 8.2
             laravel: 11.*
             testbench: 9.*
+            db: sqlite
           - php: 8.3
             laravel: 11.*
             testbench: 9.*
+            db: sqlite
           - php: 8.3
             laravel: 12.*
             testbench: 10.*
+            db: sqlite
           - php: 8.3
             laravel: 13.*
             testbench: 11.*
+            db: sqlite
           - php: 8.4
             laravel: 11.*
             testbench: 9.*
+            db: sqlite
           - php: 8.4
             laravel: 12.*
             testbench: 10.*
+            db: sqlite
           - php: 8.4
             laravel: 13.*
             testbench: 11.*
+            db: sqlite
+          - php: 8.4
+            laravel: 13.*
+            testbench: 11.*
+            db: mysql
+          - php: 8.4
+            laravel: 13.*
+            testbench: 11.*
+            db: pgsql
 
-    name: PHP ${{ matrix.php }} - Laravel ${{ matrix.laravel }} - ${{ matrix.stability }}
+    name: PHP ${{ matrix.php }} - Laravel ${{ matrix.laravel }} - ${{ matrix.db }}
+
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: true
+          MYSQL_DATABASE: documentable_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        # Services always start; the DB_CONNECTION env below scopes which matrix
+        # legs actually connect to it — inert otherwise.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: documentable_test
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DB_CONNECTION: ${{ matrix.db }}
+      DB_HOST: 127.0.0.1
+      DB_DATABASE: documentable_test
+      DB_USERNAME: ${{ matrix.db == 'pgsql' && 'postgres' || 'root' }}
+      DB_PASSWORD: ${{ matrix.db == 'pgsql' && 'postgres' || '' }}
 
     steps:
       - name: Checkout code
@@ -82,7 +129,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, bcmath, gd, exif, iconv
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, pdo_mysql, pdo_pgsql, bcmath, gd, exif, iconv
           coverage: none
 
       - name: Setup Problem Matchers

@@ -5,8 +5,11 @@ namespace MadeByClowd\Documentable\Services;
 use DateTimeInterface;
 use finfo;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -14,8 +17,16 @@ use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
+use MadeByClowd\Documentable\Events\DocumentDeleted;
+use MadeByClowd\Documentable\Events\DocumentPurged;
+use MadeByClowd\Documentable\Events\DocumentReassociated;
+use MadeByClowd\Documentable\Events\DocumentUploaded;
+use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
+use MadeByClowd\Documentable\Events\MultipartUploadAborted;
+use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
 use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Models\DocumentAccessLog;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -103,7 +114,7 @@ class DocumentService
 
             $groupId = (string) Str::uuid();
 
-            return $this->documentRepository->create([
+            $document = $this->documentRepository->create([
                 'storage_file_id' => $storageFile->id,
                 'document_type_id' => $type->id,
                 'document_group_id' => $groupId,
@@ -118,7 +129,12 @@ class DocumentService
                 'expires_at' => $pending
                     ? now()->addHours($ttlHours ?? (int) config('documentable.lifecycle.pending_ttl_hours', 24))
                     : null,
+                'created_by' => $this->currentActorId(),
             ]);
+
+            Event::dispatch(new DocumentUploaded($document));
+
+            return $document;
         });
     }
 
@@ -131,13 +147,37 @@ class DocumentService
 
         $filename = static::sanitizeHeaderFilename($document->client_filename);
 
-        return Storage::disk($storageFile->disk)->temporaryUrl(
+        $url = Storage::disk($storageFile->disk)->temporaryUrl(
             $storageFile->path,
             $expiration,
             [
                 'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
             ]
         );
+
+        $this->logAccess($document, $disposition === 'attachment' ? 'download' : 'view');
+
+        return $url;
+    }
+
+    /**
+     * Best-effort access log, config-gated (config('documentable.audit.access_log')) and off
+     * by default — the package can't observe requests to a presigned URL directly, so
+     * URL-generation time is the closest available proxy for "access".
+     */
+    protected function logAccess(Document $document, string $action): void
+    {
+        if (! config('documentable.audit.access_log', false)) {
+            return;
+        }
+
+        DocumentAccessLog::create([
+            'document_id' => $document->id,
+            'actor_id' => $this->resolveActorId(),
+            'action' => $action,
+            'ip_address' => app()->bound('request') ? request()->ip() : null,
+            'created_at' => now(),
+        ]);
     }
 
     /**
@@ -149,11 +189,19 @@ class DocumentService
     public function delete(Document $document): bool
     {
         return DB::transaction(function () use ($document) {
-            if ($document->latest_marker !== null) {
-                $document->update(['latest_marker' => null, 'is_latest' => false]);
+            $document->update([
+                'latest_marker' => null,
+                'is_latest' => false,
+                'deleted_by' => $this->currentActorId(),
+            ]);
+
+            $deleted = $this->documentRepository->delete($document);
+
+            if ($deleted) {
+                Event::dispatch(new DocumentDeleted($document));
             }
 
-            return $this->documentRepository->delete($document);
+            return $deleted;
         });
     }
 
@@ -169,6 +217,7 @@ class DocumentService
             $documentId = $document->id;
 
             $deleted = $this->documentRepository->forceDelete($document);
+            $storageFileAlsoDeleted = false;
 
             if ($deleted && $storageFile) {
                 $otherExists = Document::withTrashed()
@@ -181,11 +230,42 @@ class DocumentService
                         Storage::disk($storageFile->disk)->delete($storageFile->path);
                     }
                     $this->storageFileRepository->delete($storageFile);
+                    $storageFileAlsoDeleted = true;
                 }
+            }
+
+            if ($deleted) {
+                Event::dispatch(new DocumentPurged($document, $storageFileAlsoDeleted));
             }
 
             return $deleted;
         });
+    }
+
+    /**
+     * Move a document to a different owner (e.g. a detached upload finally
+     * being attached to the real record it belongs to once that record
+     * exists). $document keeps its group/version chain — only ownership
+     * changes.
+     */
+    public function reassociateDocument(Document $document, Model $newOwner): Document
+    {
+        $previousOwner = null;
+
+        if ($document->documentable_type && $document->documentable_id) {
+            $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
+
+            $previousOwner = $morphClass::find($document->documentable_id);
+        }
+
+        $document->update([
+            'documentable_type' => $newOwner->getMorphClass(),
+            'documentable_id' => $newOwner->getKey(),
+        ]);
+
+        Event::dispatch(new DocumentReassociated($document, $previousOwner));
+
+        return $document;
     }
 
     /**
@@ -252,6 +332,8 @@ class DocumentService
             'expires_at' => now()->addHours((int) config('documentable.multipart.session_ttl_hours', 24)),
         ]);
 
+        Event::dispatch(new MultipartUploadInitiated($session));
+
         return [
             'upload_id' => $session->upload_id,
             'path' => $session->path,
@@ -300,7 +382,7 @@ class DocumentService
 
         $driver->complete($type->disk, $path, $uploadId, $parts);
 
-        $result = $this->hashAndDetectMime($type->disk, $path);
+        $result = $this->resolveAssembledFileInfo($driver, $type->disk, $path);
 
         $this->validateOrDelete($type->disk, $path, $result['size'], $result['mime'], $type);
         $this->verifyIntegrityOrDelete($type->disk, $path, $result['hash'], $expectedHash);
@@ -349,6 +431,8 @@ class DocumentService
         $this->resolveMultipartDriver($disk)->abort($disk, $session->path, $session->upload_id);
 
         $this->multipartUploadRepository->delete($session);
+
+        Event::dispatch(new MultipartUploadAborted($session));
     }
 
     /**
@@ -455,6 +539,27 @@ class DocumentService
         return $options;
     }
 
+    /**
+     * Actor tracking is opt-in (config('documentable.audit.enabled')) and best-effort:
+     * null when disabled, or when there's no authenticated actor in the current
+     * context (CLI, queued jobs). Never a hard requirement to upload/delete.
+     */
+    protected function currentActorId(): ?string
+    {
+        if (! config('documentable.audit.enabled', false)) {
+            return null;
+        }
+
+        return $this->resolveActorId();
+    }
+
+    protected function resolveActorId(): ?string
+    {
+        $id = Auth::id();
+
+        return $id !== null ? (string) $id : null;
+    }
+
     protected function storeUploadedFile(UploadedFile $file, DocumentType $type): string
     {
         $path = $this->pathGenerator->generate($type, $file->getClientOriginalName());
@@ -523,6 +628,47 @@ class DocumentService
         usort($parts, fn ($a, $b) => $a['PartNumber'] <=> $b['PartNumber']);
 
         return $parts;
+    }
+
+    /**
+     * Optional fast path (missing-features.md, best-practices.md §4b): when
+     * use_native_checksum is enabled and the driver can report a provider-computed
+     * full-object checksum, skip the full re-download-and-hash — only the first
+     * chunk is read (for mime sniffing) and size comes from a HeadObject-equivalent
+     * call. Falls back to the full-stream hash whenever the driver returns null
+     * (unsupported backend, or feature disabled) — this is never the only
+     * integrity path.
+     *
+     * @return array{hash: string, mime: string, size: int}
+     */
+    protected function resolveAssembledFileInfo(MultipartUploadDriver $driver, string $disk, string $path): array
+    {
+        if (config('documentable.multipart.use_native_checksum', false)) {
+            $checksum = $driver->retrieveChecksum($disk, $path);
+
+            if ($checksum !== null) {
+                return [
+                    'hash' => $checksum,
+                    'mime' => $this->detectMimeFromHead($disk, $path),
+                    'size' => Storage::disk($disk)->size($path),
+                ];
+            }
+        }
+
+        return $this->hashAndDetectMime($disk, $path);
+    }
+
+    /**
+     * Sniff mime from only the first chunk of the object — cheap regardless of
+     * object size, since Storage::readStream() is lazy and this never drains it.
+     */
+    protected function detectMimeFromHead(string $disk, string $path): string
+    {
+        $stream = Storage::disk($disk)->readStream($path);
+        $chunk = fread($stream, 8192);
+        fclose($stream);
+
+        return (new finfo(FILEINFO_MIME_TYPE))->buffer($chunk ?: '') ?: 'application/octet-stream';
     }
 
     /**
@@ -717,6 +863,7 @@ class DocumentService
 
         $version = 1;
         $groupId = $documentGroupId;
+        $previousLatest = null;
 
         if ($groupId !== null) {
             $previousLatest = $this->documentRepository->findLatest(
@@ -730,21 +877,21 @@ class DocumentService
         } elseif ($type->allows_multiple) {
             $groupId = (string) Str::uuid();
         } else {
-            $existing = $this->documentRepository->findLatest(
+            $previousLatest = $this->documentRepository->findLatest(
                 $documentable->getMorphClass(),
                 (string) $documentable->getKey(),
                 $type->id
             );
 
-            if ($existing) {
-                $groupId = $existing->document_group_id;
-                $version = $this->demoteAndResolveVersion($existing, $type);
+            if ($previousLatest) {
+                $groupId = $previousLatest->document_group_id;
+                $version = $this->demoteAndResolveVersion($previousLatest, $type);
             } else {
                 $groupId = (string) Str::uuid();
             }
         }
 
-        return $this->documentRepository->create([
+        $document = $this->documentRepository->create([
             'storage_file_id' => $storageFile->id,
             'document_type_id' => $type->id,
             'document_group_id' => $groupId,
@@ -755,7 +902,16 @@ class DocumentService
             'version' => $version,
             'is_latest' => true,
             'latest_marker' => $groupId,
+            'created_by' => $this->currentActorId(),
         ]);
+
+        if ($previousLatest) {
+            Event::dispatch(new DocumentVersionSuperseded($previousLatest, $document));
+        }
+
+        Event::dispatch(new DocumentUploaded($document));
+
+        return $document;
     }
 
     /**

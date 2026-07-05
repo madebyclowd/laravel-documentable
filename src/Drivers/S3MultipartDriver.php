@@ -15,14 +15,20 @@ class S3MultipartDriver implements MultipartUploadDriver
 {
     public function create(string $disk, string $path, string $filename): array
     {
-        $result = $this->client($disk)->createMultipartUpload(array_merge([
+        $params = array_merge([
             'Bucket' => $this->bucket($disk),
             'Key' => $path,
             'ContentType' => 'application/octet-stream',
             'Metadata' => [
                 'original_filename' => $filename,
             ],
-        ], $this->sseOptions($disk)));
+        ], $this->sseOptions($disk));
+
+        if (config('documentable.multipart.use_native_checksum', false)) {
+            $params['ChecksumAlgorithm'] = 'SHA256';
+        }
+
+        $result = $this->client($disk)->createMultipartUpload($params);
 
         return ['upload_id' => $result['UploadId']];
     }
@@ -94,6 +100,21 @@ class S3MultipartDriver implements MultipartUploadDriver
             'Key' => $path,
             'UploadId' => $uploadId,
         ]);
+    }
+
+    public function retrieveChecksum(string $disk, string $path): ?string
+    {
+        $result = $this->client($disk)->headObject([
+            'Bucket' => $this->bucket($disk),
+            'Key' => $path,
+            'ChecksumMode' => 'ENABLED',
+        ]);
+
+        if (empty($result['ChecksumSHA256'])) {
+            return null;
+        }
+
+        return bin2hex(base64_decode($result['ChecksumSHA256']));
     }
 
     /**

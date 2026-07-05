@@ -1,0 +1,35 @@
+<?php
+
+use Illuminate\Support\Facades\Route;
+use MadeByClowd\Documentable\Http\Controllers\DirectUploadController;
+use MadeByClowd\Documentable\Http\Controllers\DocumentController;
+use MadeByClowd\Documentable\Http\Controllers\MultipartUploadController;
+
+/*
+|--------------------------------------------------------------------------
+| Documentable Routes
+|--------------------------------------------------------------------------
+|
+| Loaded only when config('documentable.load_routes') is true. Rate-limited
+| behind the named limiter in config('documentable.throttle') — define it
+| with RateLimiter::for() in your own AppServiceProvider; the package
+| doesn't hardcode a rate. Disable this file entirely and mount these
+| controllers yourself for full control over prefix/middleware/guard.
+|
+*/
+Route::prefix('documents')
+    ->middleware(['api', 'throttle:'.config('documentable.throttle', 'documents')])
+    ->group(function () {
+        Route::post('/', [DocumentController::class, 'store']);
+        Route::post('/detached', [DocumentController::class, 'storeDetached']);
+        Route::get('/{document}/url', [DocumentController::class, 'url']);
+        Route::delete('/{document}', [DocumentController::class, 'destroy']);
+
+        Route::post('/presigned', [DirectUploadController::class, 'presign']);
+        Route::post('/presigned/finalize', [DirectUploadController::class, 'finalize']);
+
+        Route::post('/multipart/initiate', [MultipartUploadController::class, 'initiate']);
+        Route::post('/multipart/part-url', [MultipartUploadController::class, 'partUrl']);
+        Route::post('/multipart/complete', [MultipartUploadController::class, 'complete']);
+        Route::post('/multipart/abort', [MultipartUploadController::class, 'abort']);
+    });

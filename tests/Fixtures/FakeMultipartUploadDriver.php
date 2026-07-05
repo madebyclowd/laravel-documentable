@@ -18,6 +18,12 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
     /** @var array<string, array<int, array{etag: string, body: string}>> */
     public static array $sessions = [];
 
+    /**
+     * Test-controllable: null (default) simulates a provider that doesn't support
+     * native checksums, forcing DocumentService's full-stream-hash fallback.
+     */
+    public static ?string $fakeChecksum = null;
+
     public function create(string $disk, string $path, string $filename): array
     {
         $uploadId = (string) Str::uuid();
@@ -63,6 +69,11 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
         unset(static::$sessions[$uploadId]);
     }
 
+    public function retrieveChecksum(string $disk, string $path): ?string
+    {
+        return static::$fakeChecksum;
+    }
+
     /**
      * Test helper simulating a client's presigned PUT of one part's bytes.
      */
@@ -78,5 +89,6 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
     public static function reset(): void
     {
         static::$sessions = [];
+        static::$fakeChecksum = null;
     }
 }
