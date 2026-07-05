@@ -15,11 +15,13 @@ abstract class TestCase extends OrchestraTestCase
 
         // Stand-in "documentable" owner model used across feature tests —
         // not part of the package, just a fixture to attach documents to.
-        Schema::create('test_models', function ($table) {
-            $table->id();
-            $table->string('name')->nullable();
-            $table->timestamps();
-        });
+        if (! Schema::hasTable('test_models')) {
+            Schema::create('test_models', function ($table) {
+                $table->id();
+                $table->string('name')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**
