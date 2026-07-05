@@ -54,6 +54,8 @@ class HttpControllersTest extends TestCase
 
         $response->assertCreated();
         $this->assertSame(1, Document::count());
+        $this->assertNotNull($response->json('storage_file.mime_type'));
+        $this->assertNotNull($response->json('storage_file.size_bytes'));
     }
 
     public function test_store_rejects_soft_deleted_document_type(): void
@@ -162,6 +164,8 @@ class HttpControllersTest extends TestCase
         ]);
 
         $finalize->assertCreated();
+        $this->assertNotNull($finalize->json('storage_file.mime_type'));
+        $this->assertNotNull($finalize->json('storage_file.size_bytes'));
     }
 
     public function test_multipart_initiate_complete_and_abort_via_http(): void
@@ -189,6 +193,8 @@ class HttpControllersTest extends TestCase
         ]);
 
         $complete->assertCreated();
+        $this->assertNotNull($complete->json('storage_file.mime_type'));
+        $this->assertNotNull($complete->json('storage_file.size_bytes'));
 
         $initiate2 = $this->postJson('/documents/multipart/initiate', [
             'filename' => 'g.bin',
