@@ -25,6 +25,7 @@ Route::prefix('documents')
         'throttle:'.config('documentable.throttle', 'documents'),
     ])
     ->group(function () {
+        Route::get('/', [DocumentController::class, 'index']);
         Route::post('/', [DocumentController::class, 'store']);
         Route::post('/detached', [DocumentController::class, 'storeDetached']);
         Route::get('/{document}/url', [DocumentController::class, 'url']);

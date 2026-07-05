@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
+use MadeByClowd\Documentable\Http\Requests\ListDocumentsRequest;
 use MadeByClowd\Documentable\Http\Requests\UploadDetachedDocumentRequest;
 use MadeByClowd\Documentable\Http\Requests\UploadDocumentRequest;
 use MadeByClowd\Documentable\Models\Document;
@@ -17,6 +18,47 @@ class DocumentController extends Controller
         protected DocumentService $service,
         protected AuthorizesDocumentAccess $authorizer
     ) {}
+
+    /**
+     * Owner-scoped listing, grouped by document_type_id then document_group_id —
+     * the query docs/feedbacks/feedback.md #6 says every consumer was hand-rolling.
+     * canView() is per-Document, so it's applied as a post-query collection filter,
+     * not a WHERE clause (see phase-12 doc for the trade-off) — pagination
+     * therefore happens on the filtered collection, not at the database level.
+     */
+    public function index(ListDocumentsRequest $request): JsonResponse
+    {
+        $documentable = $this->resolveDocumentable(
+            $request->string('documentable_type')->toString(),
+            $request->string('documentable_id')->toString()
+        );
+
+        $documentTypeId = $request->input('document_type_id');
+
+        $documents = $this->service->listForOwner($documentable, $documentTypeId)
+            ->filter(fn (Document $document) => $this->authorizer->canView($request->user(), $document))
+            ->values();
+
+        $perPage = max(1, (int) config('documentable.listing.per_page', 50));
+        $page = max(1, (int) $request->input('page', 1));
+        $total = $documents->count();
+
+        $paged = $documents->forPage($page, $perPage)->values();
+
+        $grouped = $paged
+            ->groupBy('document_type_id')
+            ->map(fn ($group) => $group->groupBy('document_group_id')->map(fn ($versions) => $versions->first()));
+
+        return response()->json([
+            'data' => $grouped,
+            'meta' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $total,
+                'last_page' => max(1, (int) ceil($total / $perPage)),
+            ],
+        ]);
+    }
 
     public function store(UploadDocumentRequest $request): JsonResponse
     {

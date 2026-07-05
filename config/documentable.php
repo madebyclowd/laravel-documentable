@@ -219,6 +219,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Listing
+    |--------------------------------------------------------------------------
+    |
+    | Default page size for GET /documents (owner-scoped, grouped by
+    | document_type_id then document_group_id). canView() is applied per-document
+    | after the query, so pagination happens over the already-filtered set.
+    |
+    */
+    'listing' => [
+        'per_page' => 50,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Throttle
     |--------------------------------------------------------------------------
     |

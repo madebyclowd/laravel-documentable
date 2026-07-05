@@ -115,6 +115,24 @@ app is a session-based monolith (sets `['web', 'auth']`) or a separate API (stay
 your own token guard in). If `$request->user()` is unexpectedly null in your authorizer or
 `created_by`/`deleted_by`, this is why — see `docs/feedbacks/feedback.md` #1.
 
+### Listing an owner's documents
+
+```
+GET /documents?documentable_type=...&documentable_id=...[&document_type_id=...][&page=1]
+```
+
+Returns every latest-per-slot document for that owner, grouped `{document_type_id: {document_group_id: document}}`
+(`storageFile` eager-loaded, same shape as the upload endpoints). `canView()` is applied per document
+after the query — a custom authorizer denying some documents excludes just those, not the whole set —
+so pagination (`config('documentable.listing.per_page')`, default 50) runs over the filtered result:
+
+```json
+{
+  "data": { "<document_type_id>": { "<document_group_id>": { "id": "...", "storage_file": {...} } } },
+  "meta": { "current_page": 1, "per_page": 50, "total": 3, "last_page": 1 }
+}
+```
+
 ### Small files — presigned direct PUT (files under `multipart.threshold_bytes`, default 10MB)
 
 1. Ask your server for a presigned URL:
@@ -350,6 +368,7 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
     'drivers' => ['s3' => S3MultipartDriver::class],
 ],
 'lifecycle' => ['pending_ttl_hours' => 24, 'reaper_frequency' => 'hourly'],
+'listing' => ['per_page' => 50], // GET /documents page size
 'authorization' => ['resolver' => null], // bind AuthorizesDocumentAccess
 'dedup' => ['scope_resolver' => null],   // bind ResolvesDedupScope
 'security' => [
