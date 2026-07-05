@@ -136,6 +136,30 @@ $document = $service->completeMultipartUpload(
 );
 ```
 
+## Frontend integration — what the client must handle itself
+
+The package doesn't run in the browser, so these are frontend responsibilities, not gaps to route
+around server-side:
+
+- **Transport choice is the frontend's job.** Nothing auto-routes small vs large files for the HTTP
+  API — compare `file.size` to `multipart.threshold_bytes` client-side and call `/documents/presigned`
+  or `/documents/multipart/initiate` accordingly. A frontend that always uses multipart regardless of
+  size defeats the direct-PUT path entirely (best-practices.md §1).
+- **No dedup pre-check/handshake endpoint ships with the package** — `package-plan.md` §2 named this
+  as a concept worth keeping from the reference implementation, but it was never actually built in
+  any phase. If a consuming app wants "skip the upload if this exact file is already stored" before
+  transferring bytes, that's a custom endpoint the host app adds itself. Content dedup still happens
+  automatically once bytes land server-side (same hash → reused `StorageFile`) — only the
+  network-transfer skip requires custom work.
+- **Responses are unwrapped JSON**, no `{status, data}` envelope — `response.data` directly.
+- **`etag_strategy = server-authoritative` (default): report `{PartNumber}` only per part**, don't
+  read the `ETag` response header. Only capture/report `ETag` under `etag_strategy = client`.
+- **Chunk size ≥5MB** (S3 minimum, except the last part); call abort proactively on
+  cancel/unmount instead of relying solely on the scheduled reaper; retry a failed part PUT before
+  failing the whole file.
+- **`documentable_type`/`documentable_id` should be the real owning record**, not reflexively the
+  authenticated user — the package's morph resolution is generic on purpose.
+
 ## Multipart `etag_strategy`
 
 Two legitimate modes, not one "correct" one — pick based on whether you control your bucket's CORS

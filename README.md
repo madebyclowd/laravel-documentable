@@ -220,6 +220,47 @@ $document = $service->completeMultipartUpload(
 );
 ```
 
+## Frontend integration notes
+
+The HTTP flows above are transport-agnostic, but a few things are the frontend's responsibility —
+the package can't enforce them from the browser:
+
+- **Pick the transport yourself.** The package does not auto-route based on size — that only
+  happens server-side inside `DocumentService::upload()` for the *owned, streamed-through-your-app*
+  path. If your frontend always calls the multipart endpoints regardless of file size, you lose the
+  whole point of the direct-PUT path (best-practices.md §1: never force multipart on small files).
+  Compare `file.size` against your app's configured `multipart.threshold_bytes` client-side (expose
+  it via a config/meta endpoint, or just hardcode the same number your backend uses) and call
+  `/documents/presigned` below it, `/documents/multipart/initiate` at/above it.
+- **No dedup pre-check endpoint exists.** If you want a "skip upload entirely if this exact file
+  already exists" handshake (client sends a hash manifest, server reports which are already stored),
+  you have to build that endpoint yourself in your host app — it's not part of this package's shipped
+  routes. Dedup still happens automatically server-side once the upload lands (same content →
+  reused `StorageFile`, no duplicate object written) — you just don't get to skip the network
+  transfer itself without a custom pre-check.
+- **Responses are not wrapped.** Every shipped endpoint returns the raw JSON body directly
+  (`{upload_id, path, disk}`, the `Document` object, etc.) — no `{status: ..., data: ...}` envelope.
+  If your app's axios instance has a global response interceptor that unwraps a different shape,
+  make sure these routes are excluded from it.
+- **Chunk size:** S3 requires each part ≥5MB except the last. 5-10MB is a reasonable default; going
+  much smaller multiplies your part-url round trips for no benefit.
+- **`etag_strategy = server-authoritative` (the default) needs the client to report `{PartNumber}`
+  only** — don't bother reading the `ETag` response header off each part PUT. Only capture it under
+  `etag_strategy = client`.
+- **Call abort on cancel.** If the user cancels or navigates away mid-upload, `POST
+  /documents/multipart/abort` proactively instead of relying solely on the scheduled reaper —
+  frees the bucket-side incomplete upload immediately instead of waiting out
+  `multipart.session_ttl_hours`.
+- **Retry failed part PUTs** a few times before giving up on the whole upload — a single dropped
+  connection on one part shouldn't fail the entire file when the other parts already succeeded.
+- **Hash client-side via `crypto.subtle.digest('SHA-256', await file.arrayBuffer())`** works fine for
+  typical document sizes but loads the whole file into memory first — be aware of that ceiling for
+  very large files; there's no incremental/streaming digest built into `SubtleCrypto`.
+- **`documentable_type`/`documentable_id`** should be the real owning record's morph class + id
+  (whatever `$model->getMorphClass()`/`getKey()` would return server-side) — not necessarily the
+  authenticated user. The package's morph design is generic; don't narrow it to "always the user"
+  unless that's actually your data model.
+
 ## Advanced usage
 
 **Multiple independently-versioned slots per owner** (`allows_multiple = true`,
