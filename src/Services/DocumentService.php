@@ -25,6 +25,7 @@ use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Events\MultipartUploadAborted;
 use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
+use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
 use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
@@ -34,6 +35,7 @@ use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
 use MadeByClowd\Documentable\Repositories\MultipartUploadRepository;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
+use RuntimeException;
 
 class DocumentService
 {
@@ -148,13 +150,17 @@ class DocumentService
 
         $filename = static::sanitizeHeaderFilename($document->client_filename);
 
-        $url = Storage::disk($storageFile->disk)->temporaryUrl(
-            $storageFile->path,
-            $expiration,
-            [
-                'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
-            ]
-        );
+        try {
+            $url = Storage::disk($storageFile->disk)->temporaryUrl(
+                $storageFile->path,
+                $expiration,
+                [
+                    'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
+                ]
+            );
+        } catch (RuntimeException $e) {
+            throw DiskDoesNotSupportTemporaryUrlsException::forDisk($storageFile->disk, $e);
+        }
 
         $this->logAccess($document, $disposition === 'attachment' ? 'download' : 'view');
 

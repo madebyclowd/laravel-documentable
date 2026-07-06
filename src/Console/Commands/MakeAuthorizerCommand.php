@@ -58,6 +58,14 @@ class MakeAuthorizerCommand extends Command
         {
             public function canUpload(?Authenticatable \$user, DocumentType \$type, ?Model \$documentable): bool
             {
+                if (\$documentable === null) {
+                    // Called from storeDetached()/multipart initiate() — no owner is
+                    // attached yet. Replace with a role/permission check that doesn't
+                    // depend on a specific model, e.g.:
+                    // return \$user !== null;
+                    return false;
+                }
+
                 // TODO: replace with a real ownership/role check, e.g.:
                 // return \$documentable instanceof \\App\\Models\\Project && \$documentable->owner()->is(\$user);
                 return false;

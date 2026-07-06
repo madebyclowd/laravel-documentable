@@ -17,6 +17,16 @@ use MadeByClowd\Documentable\Models\DocumentType;
  */
 interface AuthorizesDocumentAccess
 {
+    /**
+     * $documentable is null when called from storeDetached() (HTTP:
+     * POST /documents/detached) or initiateMultipartUpload() (HTTP:
+     * POST /documents/multipart/initiate) — the owner isn't attached to the
+     * upload yet at that point. A correct implementation must handle this
+     * case explicitly (e.g. a role/permission check independent of any
+     * specific model) rather than falling through to an ownership check that
+     * can never pass for a null $documentable, which would silently deny
+     * every detached/initiate call with no indication why.
+     */
     public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool;
 
     public function canView(?Authenticatable $user, Document $document): bool;

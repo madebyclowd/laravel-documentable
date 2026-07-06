@@ -411,7 +411,10 @@ feedback (`docs/feedbacks/feedback.md`):
    possible.
 2. **`AuthorizesDocumentAccess`.** The default is `PermissiveDocumentAuthorizer` (allows everything).
    Bind a real implementation via `config('documentable.authorization.resolver')` before production
-   use — `php artisan documents:make-authorizer` scaffolds a starting point.
+   use — `php artisan documents:make-authorizer` scaffolds a starting point. Note `canUpload()`
+   receives a `null` `$documentable` from `storeDetached()`/multipart `initiate()` (no owner attached
+   yet) — the generated stub branches on this explicitly rather than falling through to an ownership
+   check that can never pass for `null`.
 
 Neither of these is optional in combination: an allowlisted/morph-mapped type with a permissive
 authorizer still lets any caller attach/view/delete documents against any instance of that type.
