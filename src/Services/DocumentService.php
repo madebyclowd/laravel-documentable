@@ -25,6 +25,7 @@ use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Events\MultipartUploadAborted;
 use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
+use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
 use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
@@ -34,6 +35,7 @@ use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
 use MadeByClowd\Documentable\Repositories\MultipartUploadRepository;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
+use RuntimeException;
 
 class DocumentService
 {
@@ -148,13 +150,17 @@ class DocumentService
 
         $filename = static::sanitizeHeaderFilename($document->client_filename);
 
-        $url = Storage::disk($storageFile->disk)->temporaryUrl(
-            $storageFile->path,
-            $expiration,
-            [
-                'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
-            ]
-        );
+        try {
+            $url = Storage::disk($storageFile->disk)->temporaryUrl(
+                $storageFile->path,
+                $expiration,
+                [
+                    'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
+                ]
+            );
+        } catch (RuntimeException $e) {
+            throw DiskDoesNotSupportTemporaryUrlsException::forDisk($storageFile->disk, $e);
+        }
 
         $this->logAccess($document, $disposition === 'attachment' ? 'download' : 'view');
 
@@ -358,6 +364,42 @@ class DocumentService
             'upload_id' => $session->upload_id,
             'path' => $session->path,
             'disk' => $type->disk,
+        ];
+    }
+
+    /**
+     * Authoritative "which parts actually landed on the bucket" for a resuming client —
+     * diff this against local bookkeeping before re-uploading anything (feedback #7).
+     *
+     * @return array<int, array{PartNumber: int, ETag: string}>
+     */
+    public function listPartsForSession(string $path, string $uploadId, string $userId, DocumentType $type): array
+    {
+        $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+
+        return $this->resolveMultipartDriver($type->disk)->listParts($type->disk, $path, $uploadId);
+    }
+
+    /**
+     * Status check, not an ownership-gated lookup that throws on absence (feedback #8) —
+     * session absence is an expected outcome here (reaped by documents:clean-orphaned, or
+     * aborted), not an error condition. A resuming client branches on `exists` instead of
+     * handling an exception for what is, for this one call, a normal case.
+     *
+     * @return array{exists: bool, expires_at: ?string, disk: ?string}
+     */
+    public function multipartSessionStatus(string $path, string $uploadId, string $userId): array
+    {
+        $session = $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
+
+        if (! $session) {
+            return ['exists' => false, 'expires_at' => null, 'disk' => null];
+        }
+
+        return [
+            'exists' => true,
+            'expires_at' => $session->expires_at?->toIso8601String(),
+            'disk' => $session->documentType->disk,
         ];
     }
 

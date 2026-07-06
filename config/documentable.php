@@ -9,8 +9,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | Default Flysystem disk used when a DocumentType doesn't specify its own.
-    | Must be an S3-API-compatible disk for multipart uploads to work (S3, R2,
-    | MinIO, Spaces, ...). Direct/small-file uploads work on any disk.
+    | Must support Storage::temporaryUrl() (S3, R2, MinIO, Spaces, ... or any
+    | disk with a registered Storage::buildTemporaryUrlsUsing() callback) —
+    | GET /documents/{id}/url calls temporaryUrl() for every document
+    | regardless of size, not just multipart-uploaded ones. Uploading via
+    | store()/uploadDetached() works on any disk (e.g. local); *viewing* a
+    | document after upload does not, unless the disk supports temporary URLs.
     |
     */
     'disk' => env('DOCUMENTABLE_DISK', 's3'),

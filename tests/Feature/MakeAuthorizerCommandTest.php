@@ -48,6 +48,16 @@ class MakeAuthorizerCommandTest extends TestCase
         $this->assertStringContainsString('public function canDelete(', $contents);
     }
 
+    public function test_generated_stub_branches_on_null_documentable_in_can_upload(): void
+    {
+        $this->artisan('documents:make-authorizer')->assertExitCode(0);
+
+        $contents = file_get_contents($this->fakeAppPath.'/Documentable/AppDocumentAuthorizer.php');
+
+        $this->assertStringContainsString('if ($documentable === null) {', $contents);
+        $this->assertStringContainsString('multipart initiate() — no owner is', $contents);
+    }
+
     public function test_generates_authorizer_stub_with_custom_name(): void
     {
         $this->artisan('documents:make-authorizer', ['name' => 'CustomAuthorizer'])->assertExitCode(0);

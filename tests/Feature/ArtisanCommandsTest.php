@@ -150,31 +150,49 @@ class ArtisanCommandsTest extends TestCase
     public function test_install_command_runs_end_to_end_without_error(): void
     {
         $this->artisan('documents:install')
-            ->expectsConfirmation('Run migrations now?', 'no')
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
             ->expectsChoice(
-                "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
-                "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
-                "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
-                '                (e.g. auth:sanctum) into documentable.middleware yourself.',
+                "How does your app handle logging in users? This decides which security setup we\n".
+                "use for the upload routes.\n".
+                "  separate-api (default) — Your frontend is a separate app or domain (e.g. a mobile\n".
+                "                app, or a JS app on another domain) calling this Laravel app only as\n".
+                "                an API, usually with an API token like Laravel Sanctum. If that's not\n".
+                "                your setup, pick monolith below.\n".
+                '  monolith — A typical Laravel app where pages and API calls share the same domain'."\n".
+                '             and the same login session (Blade, Inertia, Livewire, or a same-origin'."\n".
+                '             SPA). Most "normal" Laravel apps should pick this.',
                 'separate-api',
                 ['separate-api', 'monolith']
             )
             ->expectsChoice(
-                "Multipart ETag strategy?\n".
-                "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
-                '  server-authoritative: no CORS dependency, costs one extra ListParts call per completion.',
+                "Which method should we use to double-check large (multipart) uploads finished\n".
+                "correctly?\n".
+                "  server-authoritative (default) — Works on any bucket, no extra setup needed. Adds\n".
+                "                        one small extra check when a big upload finishes (usually\n".
+                "                        not noticeable).\n".
+                "  client — Skips that extra check (very slightly faster), but only works if your\n".
+                '           bucket (S3/R2/Spaces/MinIO) has CORS configured to expose the ETag header.'."\n".
+                '           Only pick this if you already set that up, or plan to run'."\n".
+                '           `documents:configure-bucket-cors` afterward.',
                 'server-authoritative',
                 ['server-authoritative', 'client']
             )
             ->expectsChoice(
-                "Document type catalog?\n".
-                "  code-first: define types in config('documentable.types'), synced via documents:sync-types (git-versioned, PR-reviewed, cacheable).\n".
-                '  db-only: manage the document_types table directly through your own admin layer (runtime-editable, no deploy needed).',
+                "How do you want to manage upload \"types\" (e.g. \"invoice\", \"profile-photo\")? A type\n".
+                "sets rules like max file size and which file formats are allowed.\n".
+                "  code-first (default) — Define types in config/documentable.php (version-controlled\n".
+                "              with the rest of your code), then run `documents:sync-types` to save\n".
+                "              them to the database. Recommended for most apps.\n".
+                '  db-only — Skip the config file; manage types directly in the database yourself'."\n".
+                '            (e.g. through your own admin panel). Only pick this if you already have'."\n".
+                '            a way to do that.',
                 'code-first',
                 ['code-first', 'db-only']
             )
             ->expectsConfirmation(
-                'Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)',
+                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                'document — fine for local development, not fine for production.',
                 'no'
             )
             ->assertExitCode(0);
@@ -189,31 +207,49 @@ class ArtisanCommandsTest extends TestCase
         @unlink(config_path('documentable.php'));
 
         $this->artisan('documents:install')
-            ->expectsConfirmation('Run migrations now?', 'no')
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
             ->expectsChoice(
-                "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
-                "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
-                "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
-                '                (e.g. auth:sanctum) into documentable.middleware yourself.',
+                "How does your app handle logging in users? This decides which security setup we\n".
+                "use for the upload routes.\n".
+                "  separate-api (default) — Your frontend is a separate app or domain (e.g. a mobile\n".
+                "                app, or a JS app on another domain) calling this Laravel app only as\n".
+                "                an API, usually with an API token like Laravel Sanctum. If that's not\n".
+                "                your setup, pick monolith below.\n".
+                '  monolith — A typical Laravel app where pages and API calls share the same domain'."\n".
+                '             and the same login session (Blade, Inertia, Livewire, or a same-origin'."\n".
+                '             SPA). Most "normal" Laravel apps should pick this.',
                 'monolith',
                 ['separate-api', 'monolith']
             )
             ->expectsChoice(
-                "Multipart ETag strategy?\n".
-                "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
-                '  server-authoritative: no CORS dependency, costs one extra ListParts call per completion.',
+                "Which method should we use to double-check large (multipart) uploads finished\n".
+                "correctly?\n".
+                "  server-authoritative (default) — Works on any bucket, no extra setup needed. Adds\n".
+                "                        one small extra check when a big upload finishes (usually\n".
+                "                        not noticeable).\n".
+                "  client — Skips that extra check (very slightly faster), but only works if your\n".
+                '           bucket (S3/R2/Spaces/MinIO) has CORS configured to expose the ETag header.'."\n".
+                '           Only pick this if you already set that up, or plan to run'."\n".
+                '           `documents:configure-bucket-cors` afterward.',
                 'server-authoritative',
                 ['server-authoritative', 'client']
             )
             ->expectsChoice(
-                "Document type catalog?\n".
-                "  code-first: define types in config('documentable.types'), synced via documents:sync-types (git-versioned, PR-reviewed, cacheable).\n".
-                '  db-only: manage the document_types table directly through your own admin layer (runtime-editable, no deploy needed).',
+                "How do you want to manage upload \"types\" (e.g. \"invoice\", \"profile-photo\")? A type\n".
+                "sets rules like max file size and which file formats are allowed.\n".
+                "  code-first (default) — Define types in config/documentable.php (version-controlled\n".
+                "              with the rest of your code), then run `documents:sync-types` to save\n".
+                "              them to the database. Recommended for most apps.\n".
+                '  db-only — Skip the config file; manage types directly in the database yourself'."\n".
+                '            (e.g. through your own admin panel). Only pick this if you already have'."\n".
+                '            a way to do that.',
                 'code-first',
                 ['code-first', 'db-only']
             )
             ->expectsConfirmation(
-                'Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)',
+                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                'document — fine for local development, not fine for production.',
                 'no'
             )
             ->assertExitCode(0);
@@ -223,5 +259,60 @@ class ArtisanCommandsTest extends TestCase
 
         // Leave the shared skeleton unpublished again for whichever test runs next.
         @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_shape_flag_skips_prompt_under_no_interaction(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'monolith'])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsConfirmation(
+                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                'document — fine for local development, not fine for production.',
+                'no'
+            )
+            ->assertExitCode(0);
+
+        $published = file_get_contents(config_path('documentable.php'));
+        $this->assertStringContainsString("'middleware' => ['web', 'auth']", $published);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_no_interaction_without_shape_warns_and_keeps_unsafe_default(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsConfirmation(
+                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                'document — fine for local development, not fine for production.',
+                'no'
+            )
+            ->expectsOutputToContain("defaulting to 'separate-api'")
+            ->assertExitCode(0);
+
+        $published = file_get_contents(config_path('documentable.php'));
+        $this->assertStringContainsString("'middleware' => ['api']", $published);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_invalid_shape_option_fails_fast(): void
+    {
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'bogus'])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->assertExitCode(1);
+    }
+
+    public function test_install_command_invalid_etag_strategy_option_fails_fast(): void
+    {
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--etag-strategy' => 'bogus'])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->assertExitCode(1);
     }
 }

@@ -211,4 +211,45 @@ class HttpControllersTest extends TestCase
 
         $abort->assertNoContent();
     }
+
+    public function test_multipart_list_parts_and_status_via_http(): void
+    {
+        $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
+
+        $initiate = $this->postJson('/documents/multipart/initiate', [
+            'filename' => 'f.bin',
+            'document_type_id' => $type->id,
+            'user_id' => 'user-1',
+        ])->assertCreated()->json();
+
+        FakeMultipartUploadDriver::uploadPart($initiate['upload_id'], 1, 'hello world');
+
+        $parts = $this->getJson('/documents/multipart/parts?'.http_build_query([
+            'path' => $initiate['path'],
+            'upload_id' => $initiate['upload_id'],
+            'document_type_id' => $type->id,
+            'user_id' => 'user-1',
+        ]));
+
+        $parts->assertOk();
+        $this->assertSame([1], collect($parts->json('parts'))->pluck('PartNumber')->all());
+
+        $status = $this->getJson('/documents/multipart/status?'.http_build_query([
+            'path' => $initiate['path'],
+            'upload_id' => $initiate['upload_id'],
+            'user_id' => 'user-1',
+        ]));
+
+        $status->assertOk();
+        $this->assertTrue($status->json('exists'));
+
+        $goneStatus = $this->getJson('/documents/multipart/status?'.http_build_query([
+            'path' => 'nowhere/gone.bin',
+            'upload_id' => 'not-a-real-upload-id',
+            'user_id' => 'user-1',
+        ]));
+
+        $goneStatus->assertOk();
+        $this->assertFalse($goneStatus->json('exists'));
+    }
 }

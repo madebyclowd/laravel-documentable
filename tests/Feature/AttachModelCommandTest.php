@@ -94,7 +94,14 @@ class AttachModelCommandTest extends TestCase
 
         $this->artisan('documents:attach-model', ['model' => 'Invoice'])->assertExitCode(0);
 
-        $contents = file_get_contents($path);
+        // Normalize line endings before the structural check below — this test's own
+        // heredoc fixture is subject to the same git-checkout CRLF/LF normalization as
+        // any other tracked file, so a literal "\n" match must not depend on which style
+        // this checkout happens to use. Line-ending *consistency* of the actual written
+        // file (no mixed \n/\r\n) is what src/Console/Commands/AttachModelCommand.php is
+        // responsible for, and is why this line-ending-agnostic assertion is still a
+        // meaningful regression check, not a weakened one.
+        $contents = str_replace("\r\n", "\n", file_get_contents($path));
         $this->assertStringContainsString("use SoftDeletes;\n    use Documentable;", $contents);
         $this->assertSame(1, substr_count($contents, 'use Documentable;'));
 

@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use MadeByClowd\Documentable\Http\Controllers\DirectUploadController;
 use MadeByClowd\Documentable\Http\Controllers\DocumentController;
+use MadeByClowd\Documentable\Http\Controllers\DocumentTypeController;
 use MadeByClowd\Documentable\Http\Controllers\MultipartUploadController;
 
 /*
@@ -28,6 +29,7 @@ Route::prefix('documents')
         Route::get('/', [DocumentController::class, 'index']);
         Route::post('/', [DocumentController::class, 'store']);
         Route::post('/detached', [DocumentController::class, 'storeDetached']);
+        Route::get('/types', [DocumentTypeController::class, 'index']);
         Route::get('/{document}/url', [DocumentController::class, 'url']);
         Route::delete('/{document}', [DocumentController::class, 'destroy']);
 
@@ -36,6 +38,8 @@ Route::prefix('documents')
 
         Route::post('/multipart/initiate', [MultipartUploadController::class, 'initiate']);
         Route::post('/multipart/part-url', [MultipartUploadController::class, 'partUrl']);
+        Route::get('/multipart/parts', [MultipartUploadController::class, 'listParts']);
+        Route::get('/multipart/status', [MultipartUploadController::class, 'status']);
         Route::post('/multipart/complete', [MultipartUploadController::class, 'complete']);
         Route::post('/multipart/abort', [MultipartUploadController::class, 'abort']);
     });

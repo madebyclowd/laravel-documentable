@@ -25,10 +25,15 @@ orphan cleanup, and pluggable authorization/security/storage-path contracts.
 `config('documentable.load_routes')` (default `true`) mounts `/documents` under
 `config('documentable.middleware')` (default `['api']` — no session/auth,
 `$request->user()` is `null`). `php artisan documents:install` asks whether the app is a
-session-based monolith (sets `['web', 'auth']`) or a separate API. `GET /documents` lists an
-owner's documents grouped by type/slot; the other routes cover upload (direct-PUT and multipart)
+session-based monolith (sets `['web', 'auth']`) or a separate API — pass `--shape=`/
+`--etag-strategy=`/`--types=` to skip the prompts in a scripted install (omitting `--shape` under
+`--no-interaction` warns and defaults to `separate-api`, the one choice with a real security
+consequence). `GET /documents/types` lists the type catalog; `GET /documents` lists an owner's
+documents grouped by type/slot; `GET /documents/multipart/status` and `/multipart/parts` support
+correct client-side resume after a dropped upload. The rest cover upload (direct-PUT and multipart)
 and single-document url/delete. Disable `load_routes` and mount
-`MadeByClowd\Documentable\Http\Controllers\*` yourself for full control.
+`MadeByClowd\Documentable\Http\Controllers\*` yourself for full control. Bucket CORS for the
+direct-PUT/multipart-part flows: `php artisan documents:configure-bucket-cors {disk} --origin=...`.
 
 ### Security
 
@@ -37,9 +42,11 @@ Before production use:
 1. `Relation::enforceMorphMap()` (recommended) or set
    `config('documentable.security.allowed_documentable_types')` — an unmapped
    `documentable_type` is rejected by default, but only a morph map or explicit allowlist makes
-   that meaningful.
+   that meaningful. Send the map **alias**, not the FQCN, once a morph map is registered.
 2. `php artisan documents:make-authorizer` to scaffold a real `AuthorizesDocumentAccess`
-   implementation, then bind it via `config('documentable.authorization.resolver')`.
+   implementation, then bind it via `config('documentable.authorization.resolver')`. Its
+   `canUpload()` receives `$documentable = null` from `storeDetached()`/multipart `initiate()` (no
+   owner yet) — handle that case explicitly or those calls silently 403 with no obvious cause.
 
 @verbatim
 <code-snippet name="Attach the trait and upload a file" lang="php">
