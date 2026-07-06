@@ -127,7 +127,10 @@ class AttachModelCommand extends Command
         // explode/implode on "\n" alone (not "\r\n") deliberately — a line from
         // a CRLF file keeps its trailing "\r" as part of the element, and
         // implode("\n", ...) reconstructs the original line ending untouched.
+        // Newly-inserted elements carry the same trailing "\r" (via $cr below)
+        // so they don't end up as the one LF-only line in an otherwise-CRLF file.
         $lines = explode("\n", $after);
+        $cr = str_contains($contents, "\r\n") ? "\r" : '';
 
         $simpleUsePattern = '/^\s*use\s+[A-Za-z_\\\\]+\s*;\s*\r?$/';
         $anyUsePattern = '/^\s*use\s+/';
@@ -155,10 +158,10 @@ class AttachModelCommand extends Command
             break;
         }
 
-        $insertion = '    use '.self::TRAIT_SHORT_NAME.';';
+        $insertion = '    use '.self::TRAIT_SHORT_NAME.';'.$cr;
 
         if ($insertAfterIndex === -1) {
-            array_splice($lines, 0, 0, [$insertion, '']);
+            array_splice($lines, 0, 0, [$insertion, $cr]);
         } else {
             array_splice($lines, $insertAfterIndex + 1, 0, [$insertion]);
         }
@@ -173,12 +176,14 @@ class AttachModelCommand extends Command
      */
     protected function insertImport(string $contents): string
     {
+        $eol = str_contains($contents, "\r\n") ? "\r\n" : "\n";
+
         if (preg_match_all('/^use\s+[^\s(][^;]*;\r?\n/m', $contents, $matches, PREG_OFFSET_CAPTURE)) {
             $lastMatch = end($matches[0]);
             $insertAt = $lastMatch[1] + strlen($lastMatch[0]);
 
             return substr($contents, 0, $insertAt)
-                .'use '.self::TRAIT_FQCN.";\n"
+                .'use '.self::TRAIT_FQCN.';'.$eol
                 .substr($contents, $insertAt);
         }
 
@@ -186,7 +191,7 @@ class AttachModelCommand extends Command
             $insertAt = $match[0][1] + strlen($match[0][0]);
 
             return substr($contents, 0, $insertAt)
-                ."\n".'use '.self::TRAIT_FQCN.";\n"
+                .$eol.'use '.self::TRAIT_FQCN.';'.$eol
                 .substr($contents, $insertAt);
         }
 
