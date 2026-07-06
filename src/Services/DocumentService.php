@@ -368,6 +368,42 @@ class DocumentService
     }
 
     /**
+     * Authoritative "which parts actually landed on the bucket" for a resuming client —
+     * diff this against local bookkeeping before re-uploading anything (feedback #7).
+     *
+     * @return array<int, array{PartNumber: int, ETag: string}>
+     */
+    public function listPartsForSession(string $path, string $uploadId, string $userId, DocumentType $type): array
+    {
+        $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+
+        return $this->resolveMultipartDriver($type->disk)->listParts($type->disk, $path, $uploadId);
+    }
+
+    /**
+     * Status check, not an ownership-gated lookup that throws on absence (feedback #8) —
+     * session absence is an expected outcome here (reaped by documents:clean-orphaned, or
+     * aborted), not an error condition. A resuming client branches on `exists` instead of
+     * handling an exception for what is, for this one call, a normal case.
+     *
+     * @return array{exists: bool, expires_at: ?string, disk: ?string}
+     */
+    public function multipartSessionStatus(string $path, string $uploadId, string $userId): array
+    {
+        $session = $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
+
+        if (! $session) {
+            return ['exists' => false, 'expires_at' => null, 'disk' => null];
+        }
+
+        return [
+            'exists' => true,
+            'expires_at' => $session->expires_at?->toIso8601String(),
+            'disk' => $session->documentType->disk,
+        ];
+    }
+
+    /**
      * Presign one part's upload URL. TTL comes from config, not a hardcoded
      * literal (reference code hardcoded '+1 hour' inline).
      */

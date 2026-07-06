@@ -251,6 +251,27 @@ POST /documents/multipart/abort
 If nobody calls abort, `documents:clean-orphaned` (auto-scheduled) sweeps the session after
 `multipart.session_ttl_hours` and aborts it on the bucket too — not just deleting the DB row.
 
+**Resuming after a dropped connection.** Before re-uploading anything, check what actually landed:
+
+```
+GET /documents/multipart/status?path=...&upload_id=...&user_id=...
+→ { "exists": true, "expires_at": "2026-01-01T00:00:00+00:00", "disk": "s3" }
+```
+
+`exists: false` (still a `200`, not an error) means the session is gone — reaped, aborted, or never
+existed — start a new `initiate` instead of retrying against it. If it exists, diff your local
+part-tracking against the bucket's own record before resuming:
+
+```
+GET /documents/multipart/parts?path=...&upload_id=...&document_type_id=...&user_id=...
+→ { "parts": [{"PartNumber": 1, "ETag": "\"...\""}] }
+```
+
+Re-upload only the part numbers missing from this list — re-uploading a part that's already there
+is always safe (last-write-wins across S3/R2/MinIO/Spaces — see the `MultipartUploadDriver`
+interface docblock for the exact provider-by-provider guarantee, including one R2 edge case), but
+diffing first avoids the wasted transfer.
+
 ### Same two flows without the shipped routes — direct service calls
 
 ```php
@@ -337,6 +358,12 @@ configuration and works everywhere, at the cost of one extra `ListParts` call pe
 completion. `client` saves that round trip but requires `ExposeHeaders: ["ETag"]` on your bucket's
 CORS policy — only pick it if you control the bucket.
 
+**Bucket CORS**: both the direct-PUT and multipart part-upload flows have the browser `PUT` bytes
+straight to the bucket, cross-origin from your app — this requires the bucket to allow `PUT` (and,
+under `etag_strategy = client`, `ExposeHeaders: ["ETag"]`) from your app's origin.
+`php artisan documents:configure-bucket-cors {disk} --origin=https://your-app.example.com` applies
+this for you; `--verify` runs a live presigned-PUT smoke test afterward.
+
 **Scoping dedup per tenant** instead of the default global-by-hash:
 
 ```php
@@ -374,6 +401,7 @@ Event::listen(function (\MadeByClowd\Documentable\Events\DocumentUploaded $event
 | `documents:verify [--repair]` | Detect (and optionally fix) `latest_marker`/`is_latest` drift. |
 | `documents:clean-orphaned [--hours=N]` | Reaper — purges expired pending documents, aborts stale multipart sessions. Auto-scheduled. |
 | `documents:configure-bucket-lifecycle {disk} [--days=3]` | Optional bucket-native `AbortIncompleteMultipartUpload` backstop. |
+| `documents:configure-bucket-cors {disk} --origin=... [--verify]` | Apply/verify the bucket CORS policy direct-PUT and multipart part uploads need. |
 
 ## AI agent context (Laravel Boost)
 
@@ -434,6 +462,27 @@ feedback (`docs/feedbacks/feedback.md`):
    default — set `config('documentable.security.allowed_documentable_types')` to an explicit array
    of allowed FQCNs only if you need to accept unmapped types, and prefer a morph map instead where
    possible.
+
+   Once a morph map is registered, send the **alias**, not the FQCN, as `documentable_type`:
+
+   ```php
+   // AppServiceProvider::boot()
+   Relation::enforceMorphMap([
+       'user' => \App\Models\User::class,
+   ]);
+   ```
+
+   ```json
+   // POST /documents
+   {
+       "documentable_type": "user",
+       "documentable_id": "…",
+       "document_type_id": "…"
+   }
+   ```
+
+   Sending `"App\\Models\\User"` here is rejected once `enforceMorphMap()` is active, unless it's
+   also present in `allowed_documentable_types`.
 2. **`AuthorizesDocumentAccess`.** The default is `PermissiveDocumentAuthorizer` (allows everything).
    Bind a real implementation via `config('documentable.authorization.resolver')` before production
    use — `php artisan documents:make-authorizer` scaffolds a starting point. Note `canUpload()`

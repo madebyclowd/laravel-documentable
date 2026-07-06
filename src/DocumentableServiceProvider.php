@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use MadeByClowd\Documentable\Console\Commands\AttachModelCommand;
 use MadeByClowd\Documentable\Console\Commands\CleanOrphanedDocumentsCommand;
+use MadeByClowd\Documentable\Console\Commands\ConfigureBucketCorsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketLifecycleCommand;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Console\Commands\ListDocumentTypesCommand;
@@ -90,6 +91,7 @@ class DocumentableServiceProvider extends ServiceProvider
             $this->commands([
                 AttachModelCommand::class,
                 CleanOrphanedDocumentsCommand::class,
+                ConfigureBucketCorsCommand::class,
                 ConfigureBucketLifecycleCommand::class,
                 InstallCommand::class,
                 MakeAuthorizerCommand::class,

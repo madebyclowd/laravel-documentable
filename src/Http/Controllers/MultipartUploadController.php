@@ -8,6 +8,8 @@ use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Http\Requests\AbortMultipartUploadRequest;
 use MadeByClowd\Documentable\Http\Requests\CompleteMultipartUploadRequest;
 use MadeByClowd\Documentable\Http\Requests\InitiateMultipartUploadRequest;
+use MadeByClowd\Documentable\Http\Requests\ListPartsRequest;
+use MadeByClowd\Documentable\Http\Requests\MultipartSessionStatusRequest;
 use MadeByClowd\Documentable\Http\Requests\PartUploadUrlRequest;
 use MadeByClowd\Documentable\Services\DocumentService;
 
@@ -76,6 +78,34 @@ class MultipartUploadController extends Controller
         );
 
         return response()->json($document->load('storageFile'), 201);
+    }
+
+    public function listParts(ListPartsRequest $request): JsonResponse
+    {
+        $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
+        $userId = $this->resolveUserId($request);
+
+        $parts = $this->service->listPartsForSession(
+            $request->string('path')->toString(),
+            $request->string('upload_id')->toString(),
+            $userId,
+            $type
+        );
+
+        return response()->json(['parts' => $parts]);
+    }
+
+    public function status(MultipartSessionStatusRequest $request): JsonResponse
+    {
+        $userId = $this->resolveUserId($request);
+
+        $status = $this->service->multipartSessionStatus(
+            $request->string('path')->toString(),
+            $request->string('upload_id')->toString(),
+            $userId
+        );
+
+        return response()->json($status);
     }
 
     public function abort(AbortMultipartUploadRequest $request): Response

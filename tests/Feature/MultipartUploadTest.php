@@ -311,4 +311,60 @@ class MultipartUploadTest extends TestCase
 
         $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
     }
+
+    public function test_list_parts_for_session_returns_parts_actually_uploaded(): void
+    {
+        $type = $this->makeType();
+
+        [$session, $clientParts] = $this->initiateAndUploadParts($type, 'user-1', ['hello ', 'world']);
+
+        $parts = $this->service->listPartsForSession($session['path'], $session['upload_id'], 'user-1', $type);
+
+        $this->assertSame(
+            collect($clientParts)->pluck('PartNumber')->all(),
+            collect($parts)->pluck('PartNumber')->all()
+        );
+    }
+
+    public function test_list_parts_for_session_rejects_a_different_owner(): void
+    {
+        $type = $this->makeType();
+
+        [$session] = $this->initiateAndUploadParts($type, 'user-1', ['data']);
+
+        $this->expectException(ValidationException::class);
+
+        $this->service->listPartsForSession($session['path'], $session['upload_id'], 'user-2', $type);
+    }
+
+    public function test_multipart_session_status_reports_exists_for_an_active_session(): void
+    {
+        $type = $this->makeType();
+
+        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
+
+        $status = $this->service->multipartSessionStatus($session['path'], $session['upload_id'], 'user-1');
+
+        $this->assertTrue($status['exists']);
+        $this->assertNotNull($status['expires_at']);
+        $this->assertSame('test_disk', $status['disk']);
+    }
+
+    public function test_multipart_session_status_reports_not_exists_for_a_gone_session(): void
+    {
+        $status = $this->service->multipartSessionStatus('nowhere/gone.bin', 'not-a-real-upload-id', 'user-1');
+
+        $this->assertSame(['exists' => false, 'expires_at' => null, 'disk' => null], $status);
+    }
+
+    public function test_multipart_session_status_does_not_leak_existence_of_another_users_session(): void
+    {
+        $type = $this->makeType();
+
+        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
+
+        $status = $this->service->multipartSessionStatus($session['path'], $session['upload_id'], 'user-2');
+
+        $this->assertFalse($status['exists']);
+    }
 }

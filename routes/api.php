@@ -38,6 +38,8 @@ Route::prefix('documents')
 
         Route::post('/multipart/initiate', [MultipartUploadController::class, 'initiate']);
         Route::post('/multipart/part-url', [MultipartUploadController::class, 'partUrl']);
+        Route::get('/multipart/parts', [MultipartUploadController::class, 'listParts']);
+        Route::get('/multipart/status', [MultipartUploadController::class, 'status']);
         Route::post('/multipart/complete', [MultipartUploadController::class, 'complete']);
         Route::post('/multipart/abort', [MultipartUploadController::class, 'abort']);
     });
