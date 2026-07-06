@@ -224,4 +224,55 @@ class ArtisanCommandsTest extends TestCase
         // Leave the shared skeleton unpublished again for whichever test runs next.
         @unlink(config_path('documentable.php'));
     }
+
+    public function test_install_command_shape_flag_skips_prompt_under_no_interaction(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'monolith'])
+            ->expectsConfirmation('Run migrations now?', 'no')
+            ->expectsConfirmation(
+                'Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)',
+                'no'
+            )
+            ->assertExitCode(0);
+
+        $published = file_get_contents(config_path('documentable.php'));
+        $this->assertStringContainsString("'middleware' => ['web', 'auth']", $published);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_no_interaction_without_shape_warns_and_keeps_unsafe_default(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true])
+            ->expectsConfirmation('Run migrations now?', 'no')
+            ->expectsConfirmation(
+                'Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)',
+                'no'
+            )
+            ->expectsOutputToContain("defaulting to 'separate-api'")
+            ->assertExitCode(0);
+
+        $published = file_get_contents(config_path('documentable.php'));
+        $this->assertStringContainsString("'middleware' => ['api']", $published);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_invalid_shape_option_fails_fast(): void
+    {
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'bogus'])
+            ->expectsConfirmation('Run migrations now?', 'no')
+            ->assertExitCode(1);
+    }
+
+    public function test_install_command_invalid_etag_strategy_option_fails_fast(): void
+    {
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--etag-strategy' => 'bogus'])
+            ->expectsConfirmation('Run migrations now?', 'no')
+            ->assertExitCode(1);
+    }
 }

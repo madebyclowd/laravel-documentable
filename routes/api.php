@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use MadeByClowd\Documentable\Http\Controllers\DirectUploadController;
 use MadeByClowd\Documentable\Http\Controllers\DocumentController;
+use MadeByClowd\Documentable\Http\Controllers\DocumentTypeController;
 use MadeByClowd\Documentable\Http\Controllers\MultipartUploadController;
 
 /*
@@ -28,6 +29,7 @@ Route::prefix('documents')
         Route::get('/', [DocumentController::class, 'index']);
         Route::post('/', [DocumentController::class, 'store']);
         Route::post('/detached', [DocumentController::class, 'storeDetached']);
+        Route::get('/types', [DocumentTypeController::class, 'index']);
         Route::get('/{document}/url', [DocumentController::class, 'url']);
         Route::delete('/{document}', [DocumentController::class, 'destroy']);
 

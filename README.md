@@ -43,10 +43,24 @@ php artisan documents:install
 ```
 
 `documents:install` publishes the config and migrations, offers to run migrations, and walks you
-through the `etag_strategy` and DocumentType-catalog choices (writing the answers into your
-published config instead of leaving unconsidered defaults in place).
+through the app-shape, `etag_strategy`, and DocumentType-catalog choices (writing the answers into
+your published config instead of leaving unconsidered defaults in place).
 
-Manual/non-interactive equivalent:
+Scripted/CI install — pass `--shape`/`--etag-strategy`/`--types` to skip the interactive prompts:
+
+```bash
+php artisan documents:install --no-interaction \
+    --shape=monolith \
+    --etag-strategy=server-authoritative \
+    --types=code-first
+```
+
+Running `--no-interaction` **without** `--shape` prints a loud warning and falls back to
+`separate-api` (`middleware => ['api']`, no session/auth — `$request->user()` stays `null`) rather
+than silently keeping that default with no indication it happened. `--etag-strategy`/`--types` have
+no comparable security consequence, so they default silently under `--no-interaction` when omitted.
+
+Manual, fully non-interactive equivalent (no installer at all):
 
 ```bash
 php artisan vendor:publish --tag=documentable-config
@@ -114,6 +128,17 @@ no session, no auth, `$request->user()` is `null`. `php artisan documents:instal
 app is a session-based monolith (sets `['web', 'auth']`) or a separate API (stays `['api']`, wire
 your own token guard in). If `$request->user()` is unexpectedly null in your authorizer or
 `created_by`/`deleted_by`, this is why — see `docs/feedbacks/feedback.md` #1.
+
+### Listing document types
+
+```
+GET /documents/types
+```
+
+Read-only catalog of active `DocumentType`s — `id`/`code`/`name`/`max_size_mb`/`allowed_mimes`/
+`allows_multiple`/`requires_versioning`, no pagination. Gives the frontend a way to fetch a
+`document_type_id` without direct DB access or `php artisan documents:list` (CLI-only). Soft-deleted
+(deactivated) types are excluded.
 
 ### Listing an owner's documents
 

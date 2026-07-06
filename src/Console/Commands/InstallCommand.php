@@ -9,7 +9,10 @@ use Illuminate\Console\Command;
  */
 class InstallCommand extends Command
 {
-    protected $signature = 'documents:install';
+    protected $signature = 'documents:install
+        {--shape= : App shape — separate-api or monolith. Skips the interactive prompt when set.}
+        {--etag-strategy= : Multipart ETag strategy — server-authoritative or client. Skips the interactive prompt when set.}
+        {--types= : Document type catalog mode — code-first or db-only. Skips the interactive prompt when set.}';
 
     protected $description = 'Publish config/migrations and configure laravel-documentable.';
 
@@ -24,14 +27,31 @@ class InstallCommand extends Command
             $this->call('migrate');
         }
 
-        $appShape = $this->choice(
-            "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
-            "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
-            "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
-            '                (e.g. auth:sanctum) into documentable.middleware yourself.',
-            ['separate-api', 'monolith'],
-            0
-        );
+        $appShape = $this->option('shape');
+
+        if ($appShape === null) {
+            if ($this->input->isInteractive()) {
+                $appShape = $this->choice(
+                    "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
+                    "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
+                    "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
+                    '                (e.g. auth:sanctum) into documentable.middleware yourself.',
+                    ['separate-api', 'monolith'],
+                    0
+                );
+            } else {
+                $appShape = 'separate-api';
+                $this->warn(
+                    "No --shape given and running non-interactively — defaulting to 'separate-api'. Routes stay ".
+                    "under ['api'] with no session/auth: \$request->user() will be null on every request. Pass ".
+                    '--shape=monolith explicitly if this is a session-based app, or --shape=separate-api to silence this warning.'
+                );
+            }
+        } elseif (! in_array($appShape, ['separate-api', 'monolith'], true)) {
+            $this->error("Invalid --shape value: '{$appShape}'. Expected 'separate-api' or 'monolith'.");
+
+            return self::FAILURE;
+        }
 
         if ($appShape === 'monolith') {
             $this->writeConfigArrayValue('middleware', ['web', 'auth']);
@@ -39,22 +59,42 @@ class InstallCommand extends Command
             $this->info("Routes stay under ['api'] — add your token guard to config('documentable.middleware') yourself.");
         }
 
-        $etagStrategy = $this->choice(
-            "Multipart ETag strategy?\n".
-            "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
-            '  server-authoritative: no CORS dependency, costs one extra ListParts call per completion.',
-            ['server-authoritative', 'client'],
-            0
-        );
+        $etagStrategy = $this->option('etag-strategy');
+
+        if ($etagStrategy === null) {
+            $etagStrategy = $this->input->isInteractive()
+                ? $this->choice(
+                    "Multipart ETag strategy?\n".
+                    "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
+                    '  server-authoritative: no CORS dependency, costs one extra ListParts call per completion.',
+                    ['server-authoritative', 'client'],
+                    0
+                )
+                : 'server-authoritative';
+        } elseif (! in_array($etagStrategy, ['server-authoritative', 'client'], true)) {
+            $this->error("Invalid --etag-strategy value: '{$etagStrategy}'. Expected 'server-authoritative' or 'client'.");
+
+            return self::FAILURE;
+        }
         $this->writeConfigValue('etag_strategy', $etagStrategy);
 
-        $typesMode = $this->choice(
-            "Document type catalog?\n".
-            "  code-first: define types in config('documentable.types'), synced via documents:sync-types (git-versioned, PR-reviewed, cacheable).\n".
-            '  db-only: manage the document_types table directly through your own admin layer (runtime-editable, no deploy needed).',
-            ['code-first', 'db-only'],
-            0
-        );
+        $typesMode = $this->option('types');
+
+        if ($typesMode === null) {
+            $typesMode = $this->input->isInteractive()
+                ? $this->choice(
+                    "Document type catalog?\n".
+                    "  code-first: define types in config('documentable.types'), synced via documents:sync-types (git-versioned, PR-reviewed, cacheable).\n".
+                    '  db-only: manage the document_types table directly through your own admin layer (runtime-editable, no deploy needed).',
+                    ['code-first', 'db-only'],
+                    0
+                )
+                : 'code-first';
+        } elseif (! in_array($typesMode, ['code-first', 'db-only'], true)) {
+            $this->error("Invalid --types value: '{$typesMode}'. Expected 'code-first' or 'db-only'.");
+
+            return self::FAILURE;
+        }
 
         if ($typesMode === 'code-first') {
             $this->info("Define your types in config('documentable.types'), then run `php artisan documents:sync-types` after each change — add it to your deploy pipeline alongside `migrate`.");
