@@ -8,6 +8,136 @@ Customizable, S3-compatible-first document storage for Laravel — content-addre
 composable versioning, multipart uploads, and orphan cleanup, without forcing you to adopt one
 opinionated storage backend or admin UI.
 
+**In short:** it's the file-upload/storage system your app needs, already built — so you don't have
+to reinvent versioning, deduplication, or secure uploads yourself.
+
+## New here? Start with this section
+
+If you've never used a package like this before, read this section first — it explains what the
+package actually does, walks through your very first upload step by step, and defines every piece
+of jargon you'll see later in this README. Already comfortable with S3/multipart uploads? Skip
+straight to [Features](#features).
+
+### What does this package actually do?
+
+Does your app need to let users upload files — invoices, photos, contracts, avatars — and reliably
+store, retrieve, and manage them afterward? That's what this package handles, so you don't have to
+write that plumbing yourself:
+
+- You add **one line** to any Eloquent model (`Invoice`, `User`, `Project`, ...) and it can now have
+  documents attached to it.
+- You define **"types"** of upload (e.g. `"invoice"`, `"profile-photo"`) — each type is just a set of
+  rules: max file size, which file formats are allowed, whether old versions are kept.
+- The package stores the actual files in an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO,
+  DigitalOcean Spaces) — **not** on your app server's own disk, which doesn't scale past one server.
+- It automatically avoids storing the exact same file twice, and can optionally keep a full version
+  history every time a file is replaced.
+
+None of this requires you to already know how S3 or multipart uploads work — the quick start below
+walks through everything with copy-paste commands, and the [Glossary](#glossary) explains every term
+before you hit it.
+
+### 5-minute quick start
+
+Follow these five steps in order. By the end you'll have uploaded your first file. Every step is a
+command or a small code snippet you can copy-paste as-is.
+
+**1. Install the package:**
+
+```bash
+composer require madebyclowd/laravel-documentable
+```
+
+**2. Run the installer.** It asks a few plain-language questions and sets everything up for you —
+config file, database tables, and (optionally) a starter security file:
+
+```bash
+php artisan documents:install
+```
+
+Not sure how to answer a question it asks? The **first option shown is a safe default** for most
+apps — just press Enter to accept it.
+
+**3. Let one of your models hold documents.** Pick any model you already have — this example uses
+`Invoice`, but any model works the same way:
+
+```bash
+php artisan documents:attach-model Invoice
+```
+
+This adds one line (`use Documentable;`) to `app/Models/Invoice.php` for you — no manual editing
+needed. Prefer to do it yourself? It's just this:
+
+```php
+use MadeByClowd\Documentable\Traits\Documentable;
+
+class Invoice extends Model
+{
+    use Documentable;
+}
+```
+
+**4. Tell the package what kind of file you'll be uploading.** Open `config/documentable.php`, find
+the `'types'` array near the top, and add an entry:
+
+```php
+'types' => [
+    'invoice-pdf' => [
+        'name' => 'Invoice PDF',
+        'max_size_mb' => 10,
+        'allowed_mimes' => ['application/pdf'],
+        'disk' => 's3', // whatever your bucket disk is called in config/filesystems.php
+        'path_prefix' => 'invoices',
+        'requires_versioning' => true,
+        'allows_multiple' => false,
+    ],
+],
+```
+
+Then save that type into the database (safe to run again any time you change this array):
+
+```bash
+php artisan documents:sync-types
+```
+
+**5. Upload your first file**, from any controller action:
+
+```php
+$service = app(\MadeByClowd\Documentable\Services\DocumentService::class);
+$type = \MadeByClowd\Documentable\Models\DocumentType::where('code', 'invoice-pdf')->firstOrFail();
+
+$document = $service->upload($request->file('file'), $type, $invoice);
+```
+
+Done — `$document` is saved, `$invoice->documents` lists it, and you can get a temporary link to
+view/download it whenever you need one:
+
+```php
+$service->getUrl($document, now()->addMinutes(5));
+```
+
+**What's next?** The five steps above happen entirely in PHP code you write (a controller). If your
+frontend (React, Vue, a mobile app) should talk to this package directly over HTTP instead —
+including for large files, without routing bytes through your Laravel server — see
+["Uploading via the shipped HTTP API"](#uploading-via-the-shipped-http-api) further down.
+
+### Glossary
+
+Terms used throughout the rest of this README, explained in plain language before you hit them:
+
+| Term | Plain-English meaning |
+|---|---|
+| **Disk** | Laravel's name for "where files are stored" (`config/filesystems.php`). This package needs an S3-compatible disk — real AWS S3, or a compatible alternative like Cloudflare R2, MinIO, or DigitalOcean Spaces. |
+| **DocumentType** | A named "kind" of upload (e.g. "invoice", "profile-photo") with its own rules — max size, allowed formats, whether old versions are kept. |
+| **Documentable** | "The model a document belongs to" — e.g. an `Invoice`, a `User`, a `Project`. Any Eloquent model becomes documentable by adding the `Documentable` trait to it. |
+| **Dedup (deduplication)** | If the exact same file is uploaded twice, the package stores the bytes once and links both uploads to that same underlying file — no wasted storage. |
+| **Versioning** | Keeping the history of past uploads for the same "slot" instead of throwing the old file away the moment a new one replaces it. |
+| **Presigned URL / direct-PUT upload** | A short-lived, temporary link that lets the browser send file bytes straight to your S3 bucket — the file never passes through your Laravel app server. Used for smaller files. |
+| **Multipart upload** | The technique used for large files: the file is split into pieces ("parts"), each uploaded separately (often in parallel), then assembled on the bucket. Handles slow or flaky connections far better than one giant upload. |
+| **ETag** | A checksum the storage provider returns for each uploaded part, used to confirm a multipart upload assembled correctly. |
+| **Morph type / `documentable_type`** | Laravel's internal name for "which kind of model" a document is attached to (e.g. `App\Models\Invoice`) — you'll see this field in the HTTP request examples below. |
+| **Authorizer** | The piece of code that decides who's allowed to upload, view, or delete a given document. The package ships a permissive default (allows everyone) plus a command to generate a real one — see [Security](#security). |
+
 ## Features
 
 - **Content-addressable storage** — sha256 dedup, reference-counted delete on purge (a physical
@@ -68,53 +198,6 @@ php artisan vendor:publish --tag=documentable-migrations
 php artisan migrate
 ```
 
-## Basic usage
-
-Attach the trait to any model you want to hold documents:
-
-```php
-use MadeByClowd\Documentable\Traits\Documentable;
-
-class Invoice extends Model
-{
-    use Documentable;
-}
-```
-
-Define a document type — code-first (recommended, git-versioned) or manage `document_types`
-directly:
-
-```php
-// config/documentable.php
-'types' => [
-    'invoice' => [
-        'name' => 'Invoice',
-        'max_size_mb' => 10,
-        'allowed_mimes' => ['application/pdf'],
-        'disk' => 's3',
-        'path_prefix' => 'invoices',
-        'requires_versioning' => true,
-        'allows_multiple' => false,
-    ],
-],
-```
-
-```bash
-php artisan documents:sync-types
-```
-
-Upload:
-
-```php
-$service = app(\MadeByClowd\Documentable\Services\DocumentService::class);
-$type = \MadeByClowd\Documentable\Models\DocumentType::where('code', 'invoice')->firstOrFail();
-
-$document = $service->upload($request->file('file'), $type, $invoice);
-
-$invoice->documents; // MorphMany<Document>
-$service->getUrl($document, now()->addMinutes(5)); // presigned, temporary
-```
-
 ## Uploading via the shipped HTTP API
 
 Everything above calls `DocumentService` directly (your own controller, same request). The package
@@ -126,8 +209,9 @@ only ever handles small JSON requests, never the file body.
 **Middleware**: these routes mount under `config('documentable.middleware')` (default `['api']`) —
 no session, no auth, `$request->user()` is `null`. `php artisan documents:install` asks whether your
 app is a session-based monolith (sets `['web', 'auth']`) or a separate API (stays `['api']`, wire
-your own token guard in). If `$request->user()` is unexpectedly null in your authorizer or
-`created_by`/`deleted_by`, this is why — see `docs/feedbacks/feedback.md` #1.
+your own token guard in). If `$request->user()` is unexpectedly `null` in your authorizer or
+`created_by`/`deleted_by`, this is why — see the Troubleshooting section of this package's Boost
+skill, or re-run `documents:install` and pick "monolith".
 
 ### Listing document types
 
@@ -298,7 +382,7 @@ the package can't enforce them from the browser:
 - **Pick the transport yourself.** The package does not auto-route based on size — that only
   happens server-side inside `DocumentService::upload()` for the *owned, streamed-through-your-app*
   path. If your frontend always calls the multipart endpoints regardless of file size, you lose the
-  whole point of the direct-PUT path (best-practices.md §1: never force multipart on small files).
+  whole point of the direct-PUT path — never force multipart on small files.
   Compare `file.size` against your app's configured `multipart.threshold_bytes` client-side (expose
   it via a config/meta endpoint, or just hardcode the same number your backend uses) and call
   `/documents/presigned` below it, `/documents/multipart/initiate` at/above it.
@@ -314,9 +398,8 @@ the package can't enforce them from the browser:
   make sure these routes are excluded from it.
 - **Chunk size:** S3 requires each part ≥5MB except the last. 5-10MB is a reasonable default; going
   much smaller multiplies your part-url round trips for no benefit.
-- **`etag_strategy = server-authoritative` (the default) needs the client to report `{PartNumber}`
-  only** — don't bother reading the `ETag` response header off each part PUT. Only capture it under
-  `etag_strategy = client`.
+- **Only capture the `ETag` response header under `etag_strategy = client`** — see step 2 of the
+  multipart walkthrough above for exactly when it matters.
 - **Call abort on cancel.** If the user cancels or navigates away mid-upload, `POST
   /documents/multipart/abort` proactively instead of relying solely on the scheduled reaper —
   frees the bucket-side incomplete upload immediately instead of waiting out
@@ -453,8 +536,8 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
 
 ## Security
 
-Two things you should do before going to production, both flagged by the first real integrator's
-feedback (`docs/feedbacks/feedback.md`):
+Two things you should do before going to production — the out-of-the-box defaults are intentionally
+permissive so the package works immediately, not because they're safe to ship as-is:
 
 1. **`documentable_type` allowlist.** `documentable_type` on every upload/finalize/complete request
    is resolved via `Relation::getMorphedModel()`. If your app hasn't called

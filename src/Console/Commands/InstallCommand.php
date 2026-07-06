@@ -18,12 +18,13 @@ class InstallCommand extends Command
 
     public function handle(): int
     {
-        $this->info('Installing laravel-documentable...');
+        $this->info("Installing laravel-documentable — this will ask you a few questions, then publish\nconfig/migrations and generate a couple of starter files. Not sure about an answer? The\ndefault (first option, or press Enter) is a safe choice for most apps.");
+        $this->newLine();
 
         $this->call('vendor:publish', ['--tag' => 'documentable-config']);
         $this->call('vendor:publish', ['--tag' => 'documentable-migrations']);
 
-        if ($this->confirm('Run migrations now?', true)) {
+        if ($this->confirm('Run the new database migrations now?', true)) {
             $this->call('migrate');
         }
 
@@ -32,10 +33,15 @@ class InstallCommand extends Command
         if ($appShape === null) {
             if ($this->input->isInteractive()) {
                 $appShape = $this->choice(
-                    "Is this app a session-based monolith (Inertia/Livewire/same-origin SPA) or a separate API/SPA?\n".
-                    "  monolith: mounts routes under ['web', 'auth'] — \$request->user() populated, CSRF applies.\n".
-                    "  separate-api: mounts under ['api'] only (default) — wire your own token guard\n".
-                    '                (e.g. auth:sanctum) into documentable.middleware yourself.',
+                    "How does your app handle logging in users? This decides which security setup we\n".
+                    "use for the upload routes.\n".
+                    "  separate-api (default) — Your frontend is a separate app or domain (e.g. a mobile\n".
+                    "                app, or a JS app on another domain) calling this Laravel app only as\n".
+                    "                an API, usually with an API token like Laravel Sanctum. If that's not\n".
+                    "                your setup, pick monolith below.\n".
+                    '  monolith — A typical Laravel app where pages and API calls share the same domain'."\n".
+                    '             and the same login session (Blade, Inertia, Livewire, or a same-origin'."\n".
+                    '             SPA). Most "normal" Laravel apps should pick this.',
                     ['separate-api', 'monolith'],
                     0
                 );
@@ -55,8 +61,9 @@ class InstallCommand extends Command
 
         if ($appShape === 'monolith') {
             $this->writeConfigArrayValue('middleware', ['web', 'auth']);
+            $this->info('Done — upload routes now require a logged-in user, same as the rest of your app.');
         } else {
-            $this->info("Routes stay under ['api'] — add your token guard to config('documentable.middleware') yourself.");
+            $this->info("Routes stay under ['api'] — add your own API token guard (e.g. Sanctum) to config('documentable.middleware') whenever you're ready to lock this down.");
         }
 
         $etagStrategy = $this->option('etag-strategy');
@@ -64,9 +71,15 @@ class InstallCommand extends Command
         if ($etagStrategy === null) {
             $etagStrategy = $this->input->isInteractive()
                 ? $this->choice(
-                    "Multipart ETag strategy?\n".
-                    "  client: fewer round trips, but requires bucket CORS ExposeHeaders: [\"ETag\"].\n".
-                    '  server-authoritative: no CORS dependency, costs one extra ListParts call per completion.',
+                    "Which method should we use to double-check large (multipart) uploads finished\n".
+                    "correctly?\n".
+                    "  server-authoritative (default) — Works on any bucket, no extra setup needed. Adds\n".
+                    "                        one small extra check when a big upload finishes (usually\n".
+                    "                        not noticeable).\n".
+                    "  client — Skips that extra check (very slightly faster), but only works if your\n".
+                    '           bucket (S3/R2/Spaces/MinIO) has CORS configured to expose the ETag header.'."\n".
+                    '           Only pick this if you already set that up, or plan to run'."\n".
+                    '           `documents:configure-bucket-cors` afterward.',
                     ['server-authoritative', 'client'],
                     0
                 )
@@ -83,9 +96,14 @@ class InstallCommand extends Command
         if ($typesMode === null) {
             $typesMode = $this->input->isInteractive()
                 ? $this->choice(
-                    "Document type catalog?\n".
-                    "  code-first: define types in config('documentable.types'), synced via documents:sync-types (git-versioned, PR-reviewed, cacheable).\n".
-                    '  db-only: manage the document_types table directly through your own admin layer (runtime-editable, no deploy needed).',
+                    "How do you want to manage upload \"types\" (e.g. \"invoice\", \"profile-photo\")? A type\n".
+                    "sets rules like max file size and which file formats are allowed.\n".
+                    "  code-first (default) — Define types in config/documentable.php (version-controlled\n".
+                    "              with the rest of your code), then run `documents:sync-types` to save\n".
+                    "              them to the database. Recommended for most apps.\n".
+                    '  db-only — Skip the config file; manage types directly in the database yourself'."\n".
+                    '            (e.g. through your own admin panel). Only pick this if you already have'."\n".
+                    '            a way to do that.',
                     ['code-first', 'db-only'],
                     0
                 )
@@ -97,16 +115,36 @@ class InstallCommand extends Command
         }
 
         if ($typesMode === 'code-first') {
-            $this->info("Define your types in config('documentable.types'), then run `php artisan documents:sync-types` after each change — add it to your deploy pipeline alongside `migrate`.");
+            $this->info("Next step for types: open config/documentable.php, add your types under the 'types'\nkey, then run `php artisan documents:sync-types` (also add that command to your deploy\npipeline, right alongside `migrate`, so it runs on every deploy).");
         } else {
             $this->info("Leave config('documentable.types') empty and manage the document_types table directly.");
         }
 
-        if ($this->confirm('Generate a starter AuthorizesDocumentAccess implementation? (default is permissive — allows everything)', true)) {
+        $generatedAuthorizer = false;
+
+        if ($this->confirm(
+            "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+            "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+            'document — fine for local development, not fine for production.',
+            true
+        )) {
             $this->call('documents:make-authorizer');
+            $generatedAuthorizer = true;
         }
 
-        $this->info('laravel-documentable installed.');
+        $this->newLine();
+        $this->info('✔ laravel-documentable is installed. Here is what to do next:');
+        $this->line('  1. Attach a model: run `php artisan documents:attach-model YourModel` (e.g. Invoice).');
+        $this->line('  2. Define at least one upload type in config/documentable.php, then run `php artisan documents:sync-types`.');
+
+        if ($generatedAuthorizer) {
+            $this->line('  3. Open the authorizer file we just generated in app/Documentable and fill in your real ownership/role checks.');
+        } else {
+            $this->line('  3. Before going to production, run `php artisan documents:make-authorizer` — right now ANY user can upload/view/delete ANY document.');
+        }
+
+        $this->line('  4. Upload your first file: $document = app(\MadeByClowd\Documentable\Services\DocumentService::class)->upload($file, $type, $owner);');
+        $this->line('See the README for a full walkthrough and every HTTP route the package ships.');
 
         return self::SUCCESS;
     }
