@@ -6,13 +6,16 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     name: Code Styling Check (Pint)
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -22,7 +25,7 @@ jobs:
           coverage: none
 
       - name: Cache Composer Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.composer/cache
           key: ${{ runner.os }}-composer-lint-${{ hashFiles('**/composer.json') }}
@@ -34,6 +37,33 @@ jobs:
 
       - name: Run Pint
         run: vendor/bin/pint --test
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    name: Static Analysis (Larastan)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.3
+          coverage: none
+
+      - name: Cache Composer Dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-composer-stan-${{ hashFiles('**/composer.json') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-stan-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction
+
+      - name: Run Larastan
+        run: vendor/bin/phpstan analyse --no-progress --error-format=github
 
   test:
     needs: lint
@@ -123,20 +153,23 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, pdo_mysql, pdo_pgsql, bcmath, gd, exif, iconv
-          coverage: none
+          # Coverage is collected on exactly one leg — the newest PHP/Laravel
+          # combo on sqlite — and uploaded to Codecov below. Every other leg
+          # runs with coverage off for speed.
+          coverage: ${{ (matrix.php == '8.4' && matrix.laravel == '13.*' && matrix.db == 'sqlite') && 'pcov' || 'none' }}
 
       - name: Setup Problem Matchers
         run: echo "::add-matcher::${{ runner.tool_cache }}/phpunit.json"
 
       - name: Cache Composer Dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.composer/cache
           key: ${{ runner.os }}-composer-${{ matrix.php }}-${{ matrix.laravel }}-${{ hashFiles('**/composer.json') }}
@@ -151,4 +184,12 @@ jobs:
           composer update --${{ matrix.stability }} --prefer-dist --no-interaction
 
       - name: Execute tests
-        run: vendor/bin/phpunit
+        run: vendor/bin/phpunit ${{ (matrix.php == '8.4' && matrix.laravel == '13.*' && matrix.db == 'sqlite') && '--coverage-clover=coverage.xml' || '' }}
+
+      - name: Upload coverage to Codecov
+        if: matrix.php == '8.4' && matrix.laravel == '13.*' && matrix.db == 'sqlite'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

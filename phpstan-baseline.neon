@@ -1,0 +1,79 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Console/Commands/ConfigureBucketCorsCommand.php
+
+		-
+			message: '#^Parameter \#2 \$expiration of method Illuminate\\Filesystem\\FilesystemAdapter\:\:temporaryUploadUrl\(\) expects DateTimeInterface, string given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Console/Commands/ConfigureBucketCorsCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Console/Commands/ConfigureBucketLifecycleCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$latest_count\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$pending_count\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$total_versions\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,MadeByClowd\\Documentable\\Models\\DocumentType\>\:\:map\(\) contains unresolvable type\.$#'
+			identifier: argument.unresolvableType
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Drivers/S3MultipartDriver.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$disk\.$#'
+			identifier: property.notFound
+			count: 6
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$path\.$#'
+			identifier: property.notFound
+			count: 3
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Cannot call method toIso8601String\(\) on string\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Parameter \#1 \$storageFile of method MadeByClowd\\Documentable\\Repositories\\StorageFileRepository\:\:delete\(\) expects MadeByClowd\\Documentable\\Models\\StorageFile, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Trait MadeByClowd\\Documentable\\Traits\\Documentable is used zero times and is not analysed\.$#'
+			identifier: trait.unused
+			count: 1
+			path: src/Traits/Documentable.php

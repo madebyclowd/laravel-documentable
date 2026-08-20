@@ -1,0 +1,116 @@
+name: Version
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  version-pr:
+    name: Open/update Version PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.3
+          coverage: none
+
+      - name: Aggregate pending changesets
+        id: aggregate
+        run: |
+          if [ "$(find .changes -maxdepth 1 -name '*.md' ! -name 'README.md' ! -name 'TEMPLATE.md' | wc -l)" -eq 0 ]; then
+            echo "No pending changesets."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION=$(php bin/aggregate-changesets.php)
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # A fixed branch/PR, force-pushed each time — mirrors how Changesets
+      # keeps a single running "Version Packages" PR up to date as more
+      # changesets land on main, rather than opening a new PR per push.
+      - name: Open or update the Version PR
+        if: steps.aggregate.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.aggregate.outputs.version }}
+        run: |
+          BRANCH="chore/next-release"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add CHANGELOG.md .changes
+          git commit -m "chore(release): v${VERSION}"
+          git push origin "$BRANCH" --force
+
+          # `gh pr view` matches a PR by branch name regardless of state, so
+          # it can find a merged PR from a previous release cycle (the
+          # branch is force-pushed and reused). Only edit an *open* PR;
+          # otherwise open a new one.
+          OPEN_PR=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')
+
+          if [ -n "$OPEN_PR" ]; then
+            gh pr edit "$OPEN_PR" --title "chore(release): v${VERSION}"
+          else
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "chore(release): v${VERSION}" \
+              --body "Aggregates pending changesets in \`.changes/\`. Merging this PR tags and releases v${VERSION}."
+          fi
+
+  tag-release:
+    name: Tag release if the version was just bumped
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # package.json doesn't exist in this repo — CHANGELOG.md's top
+      # version heading is the source of truth. Once the Version PR above
+      # is merged, that heading no longer matches the latest git tag;
+      # that's the signal to cut the actual release by tagging, which
+      # triggers release.yml (SBOM + GitHub release) exactly like a manual
+      # `git tag && git push` always has.
+      - name: Tag if the top CHANGELOG version isn't tagged yet
+        run: |
+          TOP_VERSION=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+
+          if [ -z "$TOP_VERSION" ]; then
+            echo "No version heading found in CHANGELOG.md."
+            exit 0
+          fi
+
+          TAG="v${TOP_VERSION}"
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already tagged — nothing to release."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          # A tag pushed with GITHUB_TOKEN doesn't trigger release.yml's
+          # `push: tags:` event (GitHub suppresses it to avoid recursive
+          # workflow runs) — dispatch it explicitly instead.
+          gh workflow run release.yml -f "tag=$TAG"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
