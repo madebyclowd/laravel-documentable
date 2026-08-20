@@ -181,6 +181,8 @@ class MultipartUploadTest extends TestCase
 
     public function test_direct_upload_finalize_rejects_oversized_and_disallowed_mime_same_as_multipart(): void
     {
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
+
         $type = $this->makeType(['max_size_mb' => 0]);
         $owner = TestModel::create(['name' => 'owner']);
 
@@ -198,6 +200,8 @@ class MultipartUploadTest extends TestCase
 
     public function test_direct_upload_finalize_succeeds_for_small_file_under_threshold(): void
     {
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
+
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
 
@@ -218,6 +222,8 @@ class MultipartUploadTest extends TestCase
 
     public function test_direct_upload_dedup_deletes_redundant_duplicate_blob(): void
     {
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
+
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
 
