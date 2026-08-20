@@ -10,3 +10,5 @@ Thumbs.db
 composer.lock
 /docs/
 /references/
+AGENTS.local.md
+CLAUDE.local.md

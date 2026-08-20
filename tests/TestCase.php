@@ -5,6 +5,7 @@ namespace MadeByClowd\Documentable\Tests;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\DocumentableServiceProvider;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
@@ -83,5 +84,22 @@ abstract class TestCase extends OrchestraTestCase
         });
 
         $app['config']->set('documentable.load_migrations', true);
+    }
+
+    /**
+     * Storage::fake()'s local disk only started faking temporaryUploadUrl()
+     * once Laravel added buildTemporaryUploadUrlsUsing() — Laravel 11's
+     * FilesystemAdapter class doesn't have that method at all, so any fake
+     * disk there throws "This driver does not support creating temporary
+     * upload URLs." on createPresignedUpload(). A real S3 disk always
+     * supports temporaryUploadUrl() regardless of Laravel version, so this
+     * is a gap in what the test double can fake on old Laravel, not a
+     * package bug — skip rather than weaken the assertion.
+     */
+    protected function skipUnlessFakeDiskSupportsUploadUrls(string $disk = 'test_disk'): void
+    {
+        if (! method_exists(Storage::disk($disk), 'buildTemporaryUploadUrlsUsing')) {
+            $this->markTestSkipped('Storage::fake() cannot fake temporaryUploadUrl() before Laravel 12 (buildTemporaryUploadUrlsUsing() was added later); the real S3 driver always supports this in production.');
+        }
     }
 }

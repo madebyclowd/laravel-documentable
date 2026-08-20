@@ -144,6 +144,8 @@ class HttpControllersTest extends TestCase
 
     public function test_presign_and_finalize_direct_upload_via_http(): void
     {
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
+
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
 

@@ -1,0 +1,205 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Console/Commands/ConfigureBucketCorsCommand.php
+
+		-
+			message: '#^Parameter \#2 \$expiration of method Illuminate\\Filesystem\\FilesystemAdapter\:\:temporaryUploadUrl\(\) expects DateTimeInterface, string given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Console/Commands/ConfigureBucketCorsCommand.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Console/Commands/ConfigureBucketLifecycleCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$code\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$latest_count\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$name\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$pending_count\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$total_versions\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection\<int,MadeByClowd\\Documentable\\Models\\DocumentType\>\:\:map\(\) contains unresolvable type\.$#'
+			identifier: argument.unresolvableType
+			count: 1
+			path: src/Console/Commands/ListDocumentTypesCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$is_latest\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/VerifyDocumentIntegrityCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$latest_marker\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Console/Commands/VerifyDocumentIntegrityCommand.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$path_prefix\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Defaults/DefaultStoragePathGenerator.php
+
+		-
+			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Drivers/S3MultipartDriver.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$disk\.$#'
+			identifier: property.notFound
+			count: 6
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$path\.$#'
+			identifier: property.notFound
+			count: 3
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$client_filename\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$document_group_id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$documentable_id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$documentable_type\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$storage_file_id\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\Document\:\:\$version\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$allowed_mimes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$allows_multiple\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$disk\.$#'
+			identifier: property.notFound
+			count: 27
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$max_size_mb\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$requires_versioning\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\MultipartUpload\:\:\$expires_at\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\MultipartUpload\:\:\$path\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\MultipartUpload\:\:\$upload_id\.$#'
+			identifier: property.notFound
+			count: 2
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\StorageFile\:\:\$mime_type\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\StorageFile\:\:\$size_bytes\.$#'
+			identifier: property.notFound
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Parameter \#1 \$storageFile of method MadeByClowd\\Documentable\\Repositories\\StorageFileRepository\:\:delete\(\) expects MadeByClowd\\Documentable\\Models\\StorageFile, Illuminate\\Database\\Eloquent\\Model given\.$#'
+			identifier: argument.type
+			count: 1
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Parameter \#3 \$documentTypeId of method MadeByClowd\\Documentable\\Repositories\\DocumentRepository\:\:findLatest\(\) expects string, int given\.$#'
+			identifier: argument.type
+			count: 2
+			path: src/Services/DocumentService.php
+
+		-
+			message: '#^Trait MadeByClowd\\Documentable\\Traits\\Documentable is used zero times and is not analysed\.$#'
+			identifier: trait.unused
+			count: 1
+			path: src/Traits/Documentable.php

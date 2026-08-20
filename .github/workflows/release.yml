@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  # A tag pushed by a workflow using the default GITHUB_TOKEN (as
+  # version.yml's tag-release job does) does not trigger the `push: tags:`
+  # event above — GitHub suppresses it to prevent recursive workflow runs.
+  # version.yml explicitly dispatches this instead via `gh workflow run`.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.2.0)'
+        required: true
 
 permissions:
   contents: write
@@ -13,11 +22,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.3
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction
+
+      - name: Generate SBOM
+        run: |
+          composer config allow-plugins.cyclonedx/cyclonedx-php-composer true
+          composer require --dev cyclonedx/cyclonedx-php-composer --no-interaction --with-all-dependencies
+          composer CycloneDX:make-sbom --output-format=JSON --output-file=bom.json --omit=dev
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true
+          files: bom.json
