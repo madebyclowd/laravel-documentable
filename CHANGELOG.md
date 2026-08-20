@@ -7,6 +7,18 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [2.1.2] - 2026-08-20
+
+### Fixed
+- `S3MultipartDriver::presignPartUpload()` now respects the disk's `temporary_url`
+  config, matching `getUrl()` and `createPresignedUpload()`. Previously it signed
+  directly against the raw SDK client and returned the internal endpoint
+  unconditionally, so multipart uploads (files over `multipart.threshold_bytes`,
+  10MB by default) silently bypassed `temporary_url` while small-file uploads
+  respected it — breaking part-upload URLs for any setup relying on
+  `temporary_url` to expose a different public endpoint than the internal one
+  (e.g. MinIO/S3-compatible storage behind a reverse proxy).
+
 ## [2.1.1] - 2026-08-20
 
 ### Fixed
@@ -81,3 +93,5 @@ Initial release.
 [1.0.0]: https://github.com/madebyclowd/laravel-documentable/releases/tag/v1.0.0
 
 [2.1.1]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.0...v2.1.1
+
+[2.1.2]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.1...v2.1.2
