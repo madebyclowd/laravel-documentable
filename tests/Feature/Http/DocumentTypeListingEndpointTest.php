@@ -1,6 +1,6 @@
 <?php
 
-namespace MadeByClowd\Documentable\Tests\Feature;
+namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use MadeByClowd\Documentable\Models\DocumentType;

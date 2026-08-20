@@ -1,6 +1,6 @@
 <?php
 
-namespace MadeByClowd\Documentable\Tests\Feature;
+namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;

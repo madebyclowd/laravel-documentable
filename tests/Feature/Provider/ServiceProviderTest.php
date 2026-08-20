@@ -1,6 +1,6 @@
 <?php
 
-namespace MadeByClowd\Documentable\Tests\Feature;
+namespace MadeByClowd\Documentable\Tests\Feature\Provider;
 
 use MadeByClowd\Documentable\Tests\TestCase;
 

@@ -1,6 +1,6 @@
 <?php
 
-namespace MadeByClowd\Documentable\Tests\Feature;
+namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
 use Illuminate\Support\Facades\Route;
 use MadeByClowd\Documentable\Tests\TestCase;

@@ -1,6 +1,6 @@
 <?php
 
-namespace MadeByClowd\Documentable\Tests\Feature;
+namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
 use Illuminate\Support\Facades\File;
 use MadeByClowd\Documentable\Tests\TestCase;

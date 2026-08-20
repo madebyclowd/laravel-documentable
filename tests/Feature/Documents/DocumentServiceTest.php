@@ -1,11 +1,13 @@
 <?php
 
-namespace MadeByClowd\Documentable\Tests\Feature;
+namespace MadeByClowd\Documentable\Tests\Feature\Documents;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use MadeByClowd\Documentable\Contracts\ScanResult;
+use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -129,5 +131,82 @@ class DocumentServiceTest extends TestCase
         $this->assertSame(2, Document::withTrashed()->count());
         $this->assertSame(2, $latest->version);
         $this->assertTrue($latest->is_latest);
+    }
+
+    public function test_finalize_direct_upload_rejects_a_path_with_no_file_on_disk(): void
+    {
+        $type = $this->makeType();
+        $owner = TestModel::create(['name' => 'a']);
+
+        $this->expectException(ValidationException::class);
+
+        $this->service->finalizeDirectUpload('nowhere/gone.bin', $type, $owner, 'gone.bin');
+    }
+
+    public function test_create_presigned_upload_applies_configured_aes256_server_side_encryption(): void
+    {
+        $this->skipUnlessFakeDiskSupportsUploadUrls('s3');
+
+        config()->set('documentable.disks.s3.server_side_encryption', 'AES256');
+
+        $type = $this->makeType();
+
+        $presigned = $this->service->createPresignedUpload($type, 'a.txt');
+
+        $this->assertNotEmpty($presigned['url']);
+    }
+
+    public function test_create_presigned_upload_applies_configured_kms_server_side_encryption(): void
+    {
+        $this->skipUnlessFakeDiskSupportsUploadUrls('s3');
+
+        config()->set('documentable.disks.s3.server_side_encryption', 'aws:kms');
+        config()->set('documentable.disks.s3.kms_key_id', 'arn:aws:kms:us-east-1:123:key/abc');
+
+        $type = $this->makeType();
+
+        $presigned = $this->service->createPresignedUpload($type, 'a.txt');
+
+        $this->assertNotEmpty($presigned['url']);
+    }
+
+    public function test_upload_deletes_file_and_rejects_when_security_scan_finds_infection(): void
+    {
+        $this->app->bind(ScansUploadedFile::class, fn () => new class implements ScansUploadedFile
+        {
+            public function scan(string $disk, string $path): ScanResult
+            {
+                return ScanResult::Infected;
+            }
+        });
+
+        $service = $this->app->make(DocumentService::class);
+        $type = $this->makeType();
+        $owner = TestModel::create(['name' => 'a']);
+
+        $this->expectException(ValidationException::class);
+
+        try {
+            $service->upload(UploadedFile::fake()->createWithContent('a.txt', 'infected-bytes'), $type, $owner);
+        } finally {
+            $this->assertSame(0, StorageFile::count());
+        }
+    }
+
+    public function test_demote_and_resolve_version_treats_a_concurrently_deleted_previous_latest_as_absent(): void
+    {
+        $type = $this->makeType();
+        $owner = TestModel::create(['name' => 'a']);
+
+        $previousLatest = $this->service->upload(UploadedFile::fake()->createWithContent('v1.txt', 'v1'), $type, $owner);
+        // Simulates another process winning the race and deleting the row between this
+        // method being handed the reference and its own lockForUpdate() lookup.
+        $previousLatest->delete();
+
+        $method = new \ReflectionMethod($this->service, 'demoteAndResolveVersion');
+        $method->setAccessible(true);
+        $version = $method->invoke($this->service, $previousLatest, $type);
+
+        $this->assertSame(1, $version);
     }
 }

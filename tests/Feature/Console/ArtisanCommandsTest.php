@@ -1,9 +1,11 @@
 <?php
 
-namespace MadeByClowd\Documentable\Tests\Feature;
+namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -314,5 +316,115 @@ class ArtisanCommandsTest extends TestCase
         $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--etag-strategy' => 'bogus'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
             ->assertExitCode(1);
+    }
+
+    public function test_install_command_invalid_types_option_fails_fast(): void
+    {
+        $this->artisan('documents:install', [
+            '--no-interaction' => true,
+            '--shape' => 'separate-api',
+            '--etag-strategy' => 'server-authoritative',
+            '--types' => 'bogus',
+        ])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->assertExitCode(1);
+    }
+
+    public function test_install_command_db_only_types_migrates_and_generates_authorizer_when_confirmed(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $fakeAppPath = sys_get_temp_dir().'/documentable-install-test-'.uniqid();
+        File::ensureDirectoryExists($fakeAppPath);
+        $this->app->getNamespace();
+        $this->app->useAppPath($fakeAppPath);
+
+        try {
+            $this->artisan('documents:install')
+                ->expectsConfirmation('Run the new database migrations now?', 'yes')
+                ->expectsChoice(
+                    "How does your app handle logging in users? This decides which security setup we\n".
+                    "use for the upload routes.\n".
+                    "  separate-api (default) — Your frontend is a separate app or domain (e.g. a mobile\n".
+                    "                app, or a JS app on another domain) calling this Laravel app only as\n".
+                    "                an API, usually with an API token like Laravel Sanctum. If that's not\n".
+                    "                your setup, pick monolith below.\n".
+                    '  monolith — A typical Laravel app where pages and API calls share the same domain'."\n".
+                    '             and the same login session (Blade, Inertia, Livewire, or a same-origin'."\n".
+                    '             SPA). Most "normal" Laravel apps should pick this.',
+                    'separate-api',
+                    ['separate-api', 'monolith']
+                )
+                ->expectsChoice(
+                    "Which method should we use to double-check large (multipart) uploads finished\n".
+                    "correctly?\n".
+                    "  server-authoritative (default) — Works on any bucket, no extra setup needed. Adds\n".
+                    "                        one small extra check when a big upload finishes (usually\n".
+                    "                        not noticeable).\n".
+                    "  client — Skips that extra check (very slightly faster), but only works if your\n".
+                    '           bucket (S3/R2/Spaces/MinIO) has CORS configured to expose the ETag header.'."\n".
+                    '           Only pick this if you already set that up, or plan to run'."\n".
+                    '           `documents:configure-bucket-cors` afterward.',
+                    'server-authoritative',
+                    ['server-authoritative', 'client']
+                )
+                ->expectsChoice(
+                    "How do you want to manage upload \"types\" (e.g. \"invoice\", \"profile-photo\")? A type\n".
+                    "sets rules like max file size and which file formats are allowed.\n".
+                    "  code-first (default) — Define types in config/documentable.php (version-controlled\n".
+                    "              with the rest of your code), then run `documents:sync-types` to save\n".
+                    "              them to the database. Recommended for most apps.\n".
+                    '  db-only — Skip the config file; manage types directly in the database yourself'."\n".
+                    '            (e.g. through your own admin panel). Only pick this if you already have'."\n".
+                    '            a way to do that.',
+                    'db-only',
+                    ['code-first', 'db-only']
+                )
+                ->expectsConfirmation(
+                    "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                    "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                    'document — fine for local development, not fine for production.',
+                    'yes'
+                )
+                ->expectsOutputToContain("Leave config('documentable.types') empty and manage the document_types table directly.")
+                ->expectsOutputToContain('Open the authorizer file we just generated in app/Documentable and fill in your real ownership/role checks.')
+                ->assertExitCode(0);
+
+            $this->assertFileExists($fakeAppPath.'/Documentable/AppDocumentAuthorizer.php');
+        } finally {
+            File::deleteDirectory($fakeAppPath);
+            @unlink(config_path('documentable.php'));
+        }
+    }
+
+    public function test_write_config_value_is_a_noop_when_config_file_missing(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $command = $this->app->make(InstallCommand::class);
+        $method = new \ReflectionMethod($command, 'writeConfigValue');
+        $method->setAccessible(true);
+        $method->invoke($command, 'etag_strategy', 'client');
+
+        $this->assertFileDoesNotExist(config_path('documentable.php'));
+    }
+
+    public function test_write_config_array_value_is_a_noop_when_config_file_missing(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $command = $this->app->make(InstallCommand::class);
+        $method = new \ReflectionMethod($command, 'writeConfigArrayValue');
+        $method->setAccessible(true);
+        $method->invoke($command, 'middleware', ['web', 'auth']);
+
+        $this->assertFileDoesNotExist(config_path('documentable.php'));
+    }
+
+    public function test_list_command_reports_when_no_document_types_registered(): void
+    {
+        $this->artisan('documents:list')
+            ->expectsOutputToContain('No document types registered yet.')
+            ->assertExitCode(0);
     }
 }
