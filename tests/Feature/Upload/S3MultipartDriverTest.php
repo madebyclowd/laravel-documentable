@@ -142,6 +142,18 @@ class S3MultipartDriverTest extends TestCase
         $this->assertStringContainsString('uploadId=upload-123', $url);
     }
 
+    public function test_presign_part_upload_swaps_host_when_temporary_url_configured(): void
+    {
+        $this->setUpDisk(['handler' => new MockHandler, 'temporary_url' => 'https://public.example.com']);
+        $driver = new S3MultipartDriver;
+
+        $url = $driver->presignPartUpload('s3_driver_test', 'uploads/a.bin', 'upload-123', 2);
+
+        $this->assertStringStartsWith('https://public.example.com', $url);
+        $this->assertStringContainsString('uploads/a.bin', $url);
+        $this->assertStringContainsString('partNumber=2', $url);
+    }
+
     public function test_list_parts_returns_flattened_part_number_and_etag(): void
     {
         $this->setUpDisk();

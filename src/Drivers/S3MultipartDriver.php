@@ -46,7 +46,16 @@ class S3MultipartDriver implements MultipartUploadDriver
 
         $ttl = config('documentable.multipart.part_upload_url_ttl', '+1 hour');
 
-        return (string) $client->createPresignedRequest($command, $ttl)->getUri();
+        $uri = $client->createPresignedRequest($command, $ttl)->getUri();
+
+        if ($publicBase = config("filesystems.disks.{$disk}.temporary_url")) {
+            $parsed = parse_url($publicBase);
+            $uri = $uri->withScheme($parsed['scheme'])
+                ->withHost($parsed['host'])
+                ->withPort($parsed['port'] ?? null);
+        }
+
+        return (string) $uri;
     }
 
     public function listParts(string $disk, string $path, string $uploadId): array
