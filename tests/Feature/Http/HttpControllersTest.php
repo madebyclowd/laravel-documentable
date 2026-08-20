@@ -254,4 +254,308 @@ class HttpControllersTest extends TestCase
         $goneStatus->assertOk();
         $this->assertFalse($goneStatus->json('exists'));
     }
+
+    public function test_store_detached_uploads_a_document_without_an_owner_via_http(): void
+    {
+        $type = $this->makeType();
+
+        $response = $this->postJson('/documents/detached', [
+            'file' => UploadedFile::fake()->create('a.txt', 1),
+            'document_type_id' => $type->id,
+        ]);
+
+        $response->assertCreated();
+        $this->assertSame(1, Document::count());
+        $this->assertNull(Document::first()->documentable_id);
+    }
+
+    public function test_store_detached_denied_when_authorizer_rejects_upload(): void
+    {
+        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
+        {
+            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
+            {
+                return false;
+            }
+
+            public function canView(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+
+            public function canDelete(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+        });
+
+        $type = $this->makeType();
+
+        $response = $this->postJson('/documents/detached', [
+            'file' => UploadedFile::fake()->create('a.txt', 1),
+            'document_type_id' => $type->id,
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_url_denied_when_authorizer_rejects_view(): void
+    {
+        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
+        {
+            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
+            {
+                return true;
+            }
+
+            public function canView(?Authenticatable $user, Document $document): bool
+            {
+                return false;
+            }
+
+            public function canDelete(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+        });
+
+        $type = $this->makeType();
+        $owner = TestModel::create(['name' => 'owner']);
+        $document = app(DocumentService::class)->upload(UploadedFile::fake()->create('a.txt', 1), $type, $owner);
+
+        $response = $this->getJson("/documents/{$document->id}/url");
+
+        $response->assertStatus(403);
+    }
+
+    public function test_destroy_denied_when_authorizer_rejects_delete(): void
+    {
+        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
+        {
+            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
+            {
+                return true;
+            }
+
+            public function canView(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+
+            public function canDelete(?Authenticatable $user, Document $document): bool
+            {
+                return false;
+            }
+        });
+
+        $type = $this->makeType();
+        $owner = TestModel::create(['name' => 'owner']);
+        $document = app(DocumentService::class)->upload(UploadedFile::fake()->create('a.txt', 1), $type, $owner);
+
+        $response = $this->deleteJson("/documents/{$document->id}");
+
+        $response->assertStatus(403);
+        $this->assertNull($document->fresh()->deleted_at);
+    }
+
+    public function test_multipart_part_url_via_http(): void
+    {
+        $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
+
+        $initiate = $this->postJson('/documents/multipart/initiate', [
+            'filename' => 'f.bin',
+            'document_type_id' => $type->id,
+            'user_id' => 'user-1',
+        ])->assertCreated()->json();
+
+        $response = $this->postJson('/documents/multipart/part-url', [
+            'path' => $initiate['path'],
+            'upload_id' => $initiate['upload_id'],
+            'part_number' => 1,
+            'document_type_id' => $type->id,
+            'user_id' => 'user-1',
+        ]);
+
+        $response->assertOk();
+        $this->assertStringContainsString((string) $initiate['upload_id'], $response->json('url'));
+    }
+
+    public function test_multipart_initiate_denied_when_authorizer_rejects_upload(): void
+    {
+        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
+        {
+            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
+            {
+                return false;
+            }
+
+            public function canView(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+
+            public function canDelete(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+        });
+
+        $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
+
+        $response = $this->postJson('/documents/multipart/initiate', [
+            'filename' => 'f.bin',
+            'document_type_id' => $type->id,
+            'user_id' => 'user-1',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_multipart_complete_denied_when_authorizer_rejects_upload(): void
+    {
+        $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
+        $owner = TestModel::create(['name' => 'owner']);
+
+        $initiate = $this->postJson('/documents/multipart/initiate', [
+            'filename' => 'f.bin',
+            'document_type_id' => $type->id,
+            'user_id' => 'user-1',
+        ])->assertCreated()->json();
+
+        FakeMultipartUploadDriver::uploadPart($initiate['upload_id'], 1, 'hello world');
+
+        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
+        {
+            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
+            {
+                return false;
+            }
+
+            public function canView(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+
+            public function canDelete(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+        });
+
+        $response = $this->postJson('/documents/multipart/complete', [
+            'path' => $initiate['path'],
+            'upload_id' => $initiate['upload_id'],
+            'document_type_id' => $type->id,
+            'documentable_type' => $owner->getMorphClass(),
+            'documentable_id' => (string) $owner->getKey(),
+            'filename' => 'f.bin',
+            'user_id' => 'user-1',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_part_url_rejects_missing_user_id_when_unauthenticated(): void
+    {
+        $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
+
+        $initiate = $this->postJson('/documents/multipart/initiate', [
+            'filename' => 'f.bin',
+            'document_type_id' => $type->id,
+            'user_id' => 'user-1',
+        ])->assertCreated()->json();
+
+        $response = $this->postJson('/documents/multipart/part-url', [
+            'path' => $initiate['path'],
+            'upload_id' => $initiate['upload_id'],
+            'part_number' => 1,
+            'document_type_id' => $type->id,
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['user_id']);
+    }
+
+    public function test_presign_denied_when_authorizer_rejects_upload(): void
+    {
+        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
+        {
+            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
+            {
+                return false;
+            }
+
+            public function canView(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+
+            public function canDelete(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+        });
+
+        $type = $this->makeType();
+
+        $response = $this->postJson('/documents/presigned', [
+            'document_type_id' => $type->id,
+            'filename' => 'small.txt',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_finalize_denied_when_authorizer_rejects_upload(): void
+    {
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
+
+        $type = $this->makeType();
+        $owner = TestModel::create(['name' => 'owner']);
+
+        $presign = $this->postJson('/documents/presigned', [
+            'document_type_id' => $type->id,
+            'filename' => 'small.txt',
+        ])->assertOk()->json();
+
+        Storage::disk('test_disk')->put($presign['path'], 'small content');
+
+        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
+        {
+            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
+            {
+                return false;
+            }
+
+            public function canView(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+
+            public function canDelete(?Authenticatable $user, Document $document): bool
+            {
+                return true;
+            }
+        });
+
+        $response = $this->postJson('/documents/presigned/finalize', [
+            'path' => $presign['path'],
+            'document_type_id' => $type->id,
+            'documentable_type' => $owner->getMorphClass(),
+            'documentable_id' => (string) $owner->getKey(),
+            'filename' => 'small.txt',
+        ]);
+
+        $response->assertStatus(403);
+    }
+
+    public function test_index_rejects_documentable_that_does_not_exist(): void
+    {
+        $owner = TestModel::create(['name' => 'owner']);
+
+        $response = $this->getJson('/documents?documentable_type='.$owner->getMorphClass().'&documentable_id=999999');
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['documentable_id']);
+    }
 }

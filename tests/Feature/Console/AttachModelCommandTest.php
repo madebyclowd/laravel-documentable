@@ -164,4 +164,114 @@ class AttachModelCommandTest extends TestCase
 
         $this->assertFileDoesNotExist($this->fakeAppPath.'/Models/DoesNotExist.php');
     }
+
+    public function test_errors_when_class_declaration_not_found_in_file(): void
+    {
+        $path = $this->writeModel('Invoice', <<<'PHP'
+        <?php
+
+        namespace App\Models;
+
+        // No `class Invoice` declaration in this file at all.
+        PHP);
+
+        $this->artisan('documents:attach-model', ['model' => 'Invoice'])
+            ->expectsOutputToContain('No `class Invoice` declaration found')
+            ->assertExitCode(1);
+
+        $this->assertStringNotContainsString('Documentable', file_get_contents($path));
+    }
+
+    public function test_errors_when_opening_brace_not_found_on_its_own_line(): void
+    {
+        $path = $this->writeModel('Invoice', <<<'PHP'
+        <?php
+
+        namespace App\Models;
+
+        use Illuminate\Database\Eloquent\Model;
+
+        class Invoice extends Model { protected $guarded = []; }
+
+        PHP);
+
+        $original = file_get_contents($path);
+
+        $this->artisan('documents:attach-model', ['model' => 'Invoice'])
+            ->expectsOutputToContain('Could not find the opening `{` for `class Invoice`')
+            ->assertExitCode(1);
+
+        $this->assertSame($original, file_get_contents($path));
+    }
+
+    public function test_errors_on_comma_list_trait_use_it_cannot_disambiguate(): void
+    {
+        $path = $this->writeModel('Invoice', <<<'PHP'
+        <?php
+
+        namespace App\Models;
+
+        use Illuminate\Database\Eloquent\Model;
+        use Illuminate\Database\Eloquent\SoftDeletes;
+
+        class Invoice extends Model
+        {
+            use SoftDeletes, Sluggable;
+
+            protected $guarded = [];
+        }
+
+        PHP);
+
+        $original = file_get_contents($path);
+
+        $this->artisan('documents:attach-model', ['model' => 'Invoice'])
+            ->expectsOutputToContain("can't safely disambiguate")
+            ->assertExitCode(1);
+
+        $this->assertSame($original, file_get_contents($path));
+    }
+
+    public function test_already_namespace_qualified_model_argument_is_used_as_is(): void
+    {
+        $path = $this->writeModel('Invoice', <<<'PHP'
+        <?php
+
+        namespace App\Models;
+
+        use Illuminate\Database\Eloquent\Model;
+
+        class Invoice extends Model
+        {
+            protected $guarded = [];
+        }
+
+        PHP);
+
+        $this->artisan('documents:attach-model', ['model' => 'App\\Models\\Invoice'])->assertExitCode(0);
+
+        $contents = file_get_contents($path);
+        $this->assertStringContainsString('use MadeByClowd\Documentable\Traits\Documentable;', $contents);
+    }
+
+    public function test_leaves_contents_untouched_when_file_has_no_namespace_or_imports(): void
+    {
+        $path = $this->writeModel('Invoice', <<<'PHP'
+        <?php
+
+        class Invoice extends \Illuminate\Database\Eloquent\Model
+        {
+            protected $guarded = [];
+        }
+
+        PHP);
+
+        $this->artisan('documents:attach-model', ['model' => 'Invoice'])->assertExitCode(0);
+
+        $contents = file_get_contents($path);
+        $this->assertStringContainsString('    use Documentable;', $contents);
+        // No `namespace` and no top-level `use` statement to anchor an import onto —
+        // insertImport() refuses to guess and leaves the file without the import.
+        $this->assertStringNotContainsString('use MadeByClowd\Documentable\Traits\Documentable;', $contents);
+    }
 }

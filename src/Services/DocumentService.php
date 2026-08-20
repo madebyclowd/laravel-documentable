@@ -117,6 +117,12 @@ class DocumentService
 
             $groupId = (string) Str::uuid();
 
+            $expiresAt = null;
+
+            if ($pending) {
+                $expiresAt = now()->addHours($ttlHours ?? (int) config('documentable.lifecycle.pending_ttl_hours', 24));
+            }
+
             $document = $this->documentRepository->create([
                 'storage_file_id' => $storageFile->id,
                 'document_type_id' => $type->id,
@@ -129,9 +135,7 @@ class DocumentService
                 'is_latest' => true,
                 'latest_marker' => $groupId,
                 'status' => $pending ? 'pending' : 'committed',
-                'expires_at' => $pending
-                    ? now()->addHours($ttlHours ?? (int) config('documentable.lifecycle.pending_ttl_hours', 24))
-                    : null,
+                'expires_at' => $expiresAt,
                 'created_by' => $this->currentActorId(),
             ]);
 
