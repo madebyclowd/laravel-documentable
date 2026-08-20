@@ -71,7 +71,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        stability: [prefer-stable]
+        # `include`-only, no other top-level matrix key: GitHub Actions' matrix
+        # merge rule collapses these into a single job if a sibling key (e.g. a
+        # top-level `stability: [prefer-stable]`) doesn't share a key with each
+        # include entry — verified this was silently happening (only the last
+        # entry, php 8.4/laravel 13.*/pgsql, ever actually ran, since this
+        # project's first commit). `stability` now lives inside each entry
+        # instead of as a separate axis, which is GitHub's documented pattern
+        # for a fully custom (non-cartesian) matrix and reliably yields one job
+        # per entry.
+        #
         # Full PHP x Laravel matrix runs on sqlite (fast). The uniqueness/
         # versioning logic (package-plan.md §5) is the part most likely to
         # silently pass on one engine and fail on another, so the latest
@@ -81,38 +90,47 @@ jobs:
             laravel: 11.*
             testbench: 9.*
             db: sqlite
+            stability: prefer-stable
           - php: 8.3
             laravel: 11.*
             testbench: 9.*
             db: sqlite
+            stability: prefer-stable
           - php: 8.3
             laravel: 12.*
             testbench: 10.*
             db: sqlite
+            stability: prefer-stable
           - php: 8.3
             laravel: 13.*
             testbench: 11.*
             db: sqlite
+            stability: prefer-stable
           - php: 8.4
             laravel: 11.*
             testbench: 9.*
             db: sqlite
+            stability: prefer-stable
           - php: 8.4
             laravel: 12.*
             testbench: 10.*
             db: sqlite
+            stability: prefer-stable
           - php: 8.4
             laravel: 13.*
             testbench: 11.*
             db: sqlite
+            stability: prefer-stable
           - php: 8.4
             laravel: 13.*
             testbench: 11.*
             db: mysql
+            stability: prefer-stable
           - php: 8.4
             laravel: 13.*
             testbench: 11.*
             db: pgsql
+            stability: prefer-stable
 
     name: PHP ${{ matrix.php }} - Laravel ${{ matrix.laravel }} - ${{ matrix.db }}
 
