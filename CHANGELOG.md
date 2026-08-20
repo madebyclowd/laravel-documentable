@@ -7,6 +7,13 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [2.1.1] - 2026-08-20
+
+### Fixed
+- Added `.gitattributes` to normalize line endings to LF for tracked text files, fixing spurious
+  `vendor/bin/pint --test` failures for contributors whose local git config checks files out with
+  CRLF (e.g. `core.autocrlf=true` on Windows/WSL) even though CI itself was never affected.
+
 ## [2.1.0] - 2026-08-20
 
 ### Added
@@ -72,3 +79,5 @@ Initial release.
 [2.1.0]: https://github.com/madebyclowd/laravel-documentable/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/madebyclowd/laravel-documentable/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/madebyclowd/laravel-documentable/releases/tag/v1.0.0
+
+[2.1.1]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.0...v2.1.1
