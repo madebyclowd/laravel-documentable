@@ -13,6 +13,7 @@ use MadeByClowd\Documentable\Events\DocumentPurged;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Repositories\DocumentRepository;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
@@ -171,5 +172,34 @@ class PurgeStorageFailureTest extends TestCase
         $this->artisan('documents:sync-types')
             ->expectsOutputToContain("Disk [quiet_disk] has 'throw' => false")
             ->assertExitCode(0);
+    }
+
+    public function test_a_blob_that_is_already_missing_counts_as_deleted(): void
+    {
+        $document = $this->upload();
+        Storage::disk('test_disk')->delete($document->storageFile->path);
+
+        $this->assertTrue($this->service->purge($document));
+        $this->assertSame(0, StorageFile::count());
+    }
+
+    public function test_removing_a_storage_file_that_is_already_gone_succeeds(): void
+    {
+        $storageFile = $this->upload()->storageFile;
+        $storageFile->delete();
+
+        $this->assertTrue($this->service->removeStorageFileIfUnreferenced($storageFile));
+    }
+
+    public function test_a_document_the_repository_could_not_delete_leaves_the_blob_and_reports_failure(): void
+    {
+        $document = $this->upload();
+        $repository = Mockery::mock(DocumentRepository::class);
+        $repository->shouldReceive('forceDelete')->once()->andReturn(false);
+        $this->app->instance(DocumentRepository::class, $repository);
+
+        $this->assertFalse($this->app->make(DocumentService::class)->purge($document));
+
+        Storage::disk('test_disk')->assertExists($document->storageFile->path);
     }
 }

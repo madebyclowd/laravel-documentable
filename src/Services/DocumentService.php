@@ -355,7 +355,7 @@ class DocumentService
             $supersedes = null;
 
             $alreadyOwned = $document->documentable_type === $morphType && (string) $document->documentable_id === $ownerId;
-            $type = $document->documentType()->withTrashed()->first();
+            $type = DocumentType::withTrashed()->find($document->document_type_id);
 
             if (! $alreadyOwned && $document->is_latest && $type !== null && ! $type->allows_multiple) {
                 $supersedes = $this->documentRepository->findLatest($morphType, $ownerId, $type->id);

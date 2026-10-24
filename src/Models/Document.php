@@ -11,8 +11,21 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
 /**
+ * @property string $id
+ * @property string $storage_file_id
+ * @property string $document_type_id
+ * @property string $document_group_id
+ * @property string|null $documentable_type
+ * @property string|null $documentable_id
+ * @property string $client_filename
+ * @property array<string, mixed>|null $metadata
+ * @property int $version
+ * @property bool $is_latest
+ * @property string|null $latest_marker
  * @property string $status
  * @property Carbon|null $expires_at
+ * @property string|null $created_by
+ * @property string|null $deleted_by
  */
 class Document extends Model
 {
@@ -62,11 +75,17 @@ class Document extends Model
         return $query->where('status', 'pending');
     }
 
+    /**
+     * @return BelongsTo<StorageFile, $this>
+     */
     public function storageFile(): BelongsTo
     {
         return $this->belongsTo(StorageFile::class);
     }
 
+    /**
+     * @return BelongsTo<DocumentType, $this>
+     */
     public function documentType(): BelongsTo
     {
         return $this->belongsTo(DocumentType::class);
