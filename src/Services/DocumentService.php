@@ -273,29 +273,54 @@ class DocumentService
     }
 
     /**
-     * Move a document to a different owner (e.g. a detached upload finally
-     * being attached to the real record it belongs to once that record
-     * exists). $document keeps its group/version chain — only ownership
-     * changes.
+     * Move a document to a different owner, typically a detached upload that finally has its real owner.
+     *
+     * The move goes through the same slot and version resolution as an upload. For a single-slot type whose new
+     * owner already holds a latest document, the moved document joins that slot's chain: it takes the group, the
+     * previous latest is demoted (or soft-deleted when the type does not keep history) and the version is
+     * incremented, so the owner never ends up with two "latest" documents. A multi-slot type keeps the moved
+     * document in its own slot, and moving a document to the owner it already has changes nothing.
      */
     public function reassociateDocument(Document $document, Model $newOwner): Document
     {
-        $previousOwner = null;
+        return DB::transaction(function () use ($document, $newOwner) {
+            $previousOwner = null;
 
-        if ($document->documentable_type && $document->documentable_id) {
-            $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
+            if ($document->documentable_type && $document->documentable_id) {
+                $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
 
-            $previousOwner = $morphClass::find($document->documentable_id);
-        }
+                $previousOwner = $morphClass::find($document->documentable_id);
+            }
 
-        $document->update([
-            'documentable_type' => $newOwner->getMorphClass(),
-            'documentable_id' => $newOwner->getKey(),
-        ]);
+            $morphType = $newOwner->getMorphClass();
+            $ownerId = (string) $newOwner->getKey();
 
-        Event::dispatch(new DocumentReassociated($document, $previousOwner));
+            $attributes = ['documentable_type' => $morphType, 'documentable_id' => $ownerId];
+            $supersedes = null;
 
-        return $document;
+            $alreadyOwned = $document->documentable_type === $morphType && (string) $document->documentable_id === $ownerId;
+            $type = $document->documentType()->withTrashed()->first();
+
+            if (! $alreadyOwned && $document->is_latest && $type !== null && ! $type->allows_multiple) {
+                $supersedes = $this->documentRepository->findLatest($morphType, $ownerId, $type->id);
+
+                if ($supersedes !== null) {
+                    $attributes['document_group_id'] = $supersedes->document_group_id;
+                    $attributes['latest_marker'] = $supersedes->document_group_id;
+                    $attributes['version'] = $this->demoteAndResolveVersion($supersedes, $type);
+                }
+            }
+
+            $document->update($attributes);
+
+            if ($supersedes !== null) {
+                Event::dispatch(new DocumentVersionSuperseded($supersedes, $document));
+            }
+
+            Event::dispatch(new DocumentReassociated($document, $previousOwner));
+
+            return $document;
+        });
     }
 
     /**
