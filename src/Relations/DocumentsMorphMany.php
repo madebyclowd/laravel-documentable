@@ -56,7 +56,7 @@ final class DocumentsMorphMany extends MorphMany
         $grammar = $query->getQuery()->getGrammar();
 
         return $query->select($columns)
-            ->whereRaw($this->castToString($grammar->wrap($this->getQualifiedParentKeyName()), $query->getConnection()->getDriverName()).' = '.$grammar->wrap($this->getExistenceCompareKey()))
+            ->whereRaw($this->castToString($grammar->wrap($this->getQualifiedParentKeyName()), $query->getModel()->getConnection()->getDriverName()).' = '.$grammar->wrap($this->getExistenceCompareKey()))
             ->where($query->qualifyColumn($this->getMorphType()), $this->morphClass);
     }
 
