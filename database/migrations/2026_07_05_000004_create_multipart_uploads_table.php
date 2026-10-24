@@ -19,7 +19,7 @@ return new class extends Migration
 
             $table->foreignUuid('document_type_id')->constrained('document_types');
 
-            // Nullable for now; phase 4's reaper is what actually reads this to
+            // Nullable for now; the reaper is what actually reads this to
             // decide whether a session is abandoned. Column exists here so that
             // migration is additive, not a schema change to this table.
             $table->timestamp('expires_at')->nullable();

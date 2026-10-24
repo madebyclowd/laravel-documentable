@@ -106,7 +106,7 @@ return [
     | (see MadeByClowd\Documentable\Models\Document::commit()). reaper_frequency
     | is a Schedule fluent-method name ('hourly', 'daily', 'everyFiveMinutes',
     | ...) applied to the documents:clean-orphaned command. Multipart session
-    | TTL uses multipart.session_ttl_hours (phase 3) — single source of truth,
+    | TTL uses multipart.session_ttl_hours — single source of truth,
     | not duplicated here.
     |
     */
@@ -167,7 +167,7 @@ return [
     | (the safe default). Without Relation::enforceMorphMap() AND this
     | allowlist, a client can pass any Eloquent model FQCN in the app as
     | documentable_type; the (default-permissive) authorizer is the only
-    | other gate. See docs/feedbacks/feedback.md #3.
+    | other gate.
     |
     */
     'security' => [
@@ -249,8 +249,9 @@ return [
     | created_by/deleted_by stay null, and resolveUserId() falls back to a
     | client-supplied user_id field. Session-based monolith (Inertia,
     | Livewire, classic SPA-on-same-origin): use ['web', 'auth']. Separate
-    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). See
-    | docs/feedbacks/feedback.md #1 for the failure mode this prevents.
+    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). With only
+    | ['api'] there is no session or auth, so $request->user() is null on
+    | every request.
     |
     */
     'middleware' => ['api'],
@@ -274,7 +275,7 @@ return [
     | Throttle
     |--------------------------------------------------------------------------
     |
-    | Named rate limiter the package's routes (phase 7) are mounted behind.
+    | Named rate limiter the package's routes are mounted behind.
     | Package doesn't hardcode a specific rate — define this limiter
     | (RateLimiter::for('documents', ...)) in your own AppServiceProvider.
     |

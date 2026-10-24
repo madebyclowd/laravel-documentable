@@ -7,8 +7,8 @@ use Illuminate\Console\Command;
 /**
  * Scaffolds a starter AuthorizesDocumentAccess implementation in app/Documentable,
  * matching the make:policy convention. Default (PermissiveDocumentAuthorizer)
- * allows everything (docs/feedbacks/feedback.md #2) — this command exists so
- * "bind your own implementation" isn't the last a consumer hears of it.
+ * allows everything, so this command exists to make "bind your own
+ * implementation" a one-step action rather than a line in the README.
  */
 class MakeAuthorizerCommand extends Command
 {

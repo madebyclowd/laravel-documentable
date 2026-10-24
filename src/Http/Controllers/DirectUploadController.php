@@ -10,8 +10,10 @@ use MadeByClowd\Documentable\Services\DocumentService;
 
 /**
  * Direct/presigned single-PUT path for files under multipart.threshold_bytes
- * (best-practices.md §1) — separate from MultipartUploadController, which
- * handles the initiate/part-url/complete/abort session lifecycle.
+ * — separate from MultipartUploadController, which handles the
+ * initiate/part-url/complete/abort session lifecycle. Small files skip
+ * multipart because its per-part round trips only add overhead below the
+ * threshold.
  */
 class DirectUploadController extends Controller
 {

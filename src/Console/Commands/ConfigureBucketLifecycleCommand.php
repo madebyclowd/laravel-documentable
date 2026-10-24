@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Defense in depth per best-practices.md §2: the app-level reaper alone is
+ * Defense in depth: the app-level reaper alone is
  * not the enterprise standard, it must be paired with a bucket-native
  * backstop that still fires even if the reaper's schedule dies or a deploy
  * drops it. Not run automatically — mutating bucket-level config should be

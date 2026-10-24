@@ -13,7 +13,7 @@ use Throwable;
 /**
  * Replaces the reference app's CleanOrphanedPendingDocumentsCommand, which
  * only ever swept one app's hardcoded metadata flag and never touched
- * multipart_uploads at all (bugs.md #5). This sweeps both: pending Document
+ * multipart_uploads at all. This sweeps both: pending Document
  * rows past expiry (via DocumentService::purge() — dedup-safe, won't delete
  * a physical file another Document still references) and stale
  * MultipartUpload sessions past expiry (via abortMultipartUploadSession() —

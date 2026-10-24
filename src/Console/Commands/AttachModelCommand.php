@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
  * Wires the Documentable trait into an existing model — the 2-line manual edit
  * (import + `use Documentable;`) a make:model-style generator can do instead,
  * matching the "do things the Laravel way" feel of the framework's own
- * generators (docs/feedbacks/feedback.md #4). Intentionally a conservative
+ * generators. Intentionally a conservative
  * string edit, not an AST rewrite — refuses rather than guessing whenever the
  * target file's shape isn't simple enough to edit safely.
  */

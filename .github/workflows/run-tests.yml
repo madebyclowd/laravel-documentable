@@ -38,6 +38,22 @@ jobs:
       - name: Run Pint
         run: vendor/bin/pint --test
 
+  shipped-text:
+    runs-on: ubuntu-latest
+    name: Shipped text (no internal references)
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      # Comments and docs that ship to Packagist must stand on their own. The same rule is enforced by
+      # tests/Unit/ShippedTextTest.php; this step fails fast without installing dependencies.
+      - name: Reject references to internal planning documents
+        run: |
+          if grep -rnEi 'phase[ -]?[0-9]|docs/feedbacks|docs/implementations|bugs\.md|best-practices\.md|missing-features\.md|feedback\.md' src config routes database resources README.md; then
+            echo "::error::Shipped files must not point at internal planning documents. Rewrite the match as a self-contained sentence."
+            exit 1
+          fi
+
   static-analysis:
     runs-on: ubuntu-latest
     name: Static Analysis (Larastan)
