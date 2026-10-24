@@ -18,6 +18,7 @@ use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
+use MadeByClowd\Documentable\Contracts\ScanResult;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Events\DocumentDeleted;
 use MadeByClowd\Documentable\Events\DocumentPurged;
@@ -915,14 +916,24 @@ class DocumentService
      */
     protected function scanOrDelete(string $disk, string $path): void
     {
-        if (! $this->fileScanner->scan($disk, $path)->isInfected()) {
+        $result = $this->fileScanner->scan($disk, $path);
+
+        if ($result === ScanResult::Clean) {
+            return;
+        }
+
+        if ($result === ScanResult::Error && config('documentable.security.scan_error_policy', 'reject') === 'allow') {
+            Log::warning("Documentable stored [{$path}] on disk [{$disk}] without a scan verdict, because the scanner reported an error and security.scan_error_policy is 'allow'.");
+
             return;
         }
 
         Storage::disk($disk)->delete($path);
 
         throw ValidationException::withMessages([
-            'file' => 'Uploaded file failed a security scan.',
+            'file' => $result->isInfected()
+                ? 'Uploaded file failed a security scan.'
+                : 'Uploaded file could not be scanned. Try again later.',
         ]);
     }
 

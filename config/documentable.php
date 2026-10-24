@@ -185,6 +185,11 @@ return [
         // owner, so only enable it for a device/guest flow you protect another way (signed URLs, a
         // device token checked by your own middleware). Authenticated requests always use the real user.
         'allow_guest_user_id' => false,
+
+        // What to do when the scanner returns ScanResult::Error (it could not reach a verdict). `reject`
+        // (default) refuses the file, so a scanner outage cannot silently turn scanning off. `allow` stores
+        // it and logs a warning; only choose it if availability matters more than scanning.
+        'scan_error_policy' => 'reject',
     ],
 
     /*
