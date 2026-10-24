@@ -547,6 +547,12 @@ class DocumentService
     ): Document {
         $this->assertTypeActive($type);
 
+        if ($this->storageFileRepository->existsAtPath($type->disk, $path)) {
+            throw ValidationException::withMessages([
+                'path' => 'This path already backs a stored file and cannot be finalized again.',
+            ]);
+        }
+
         if (! Storage::disk($type->disk)->exists($path)) {
             throw ValidationException::withMessages([
                 'path' => 'No file found at the presigned upload path.',
