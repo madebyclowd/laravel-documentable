@@ -1,6 +1,9 @@
 ---
 name: laravel-documentable
-description: Build and work with laravel-documentable — S3-compatible document storage, versioning, multipart/presigned uploads, and authorization for madebyclowd/laravel-documentable.
+description: "Use this skill for the madebyclowd/laravel-documentable package in Laravel applications. ALWAYS use this skill when attaching documents or file uploads to Eloquent models, defining DocumentType rules (size, mimes, disk, versioning), setting up presigned direct-PUT or multipart uploads to S3/R2/MinIO, binding an AuthorizesDocumentAccess authorizer, reassociating or purging documents, or running documents:* artisan commands. Covers: Documentable trait, DocumentService, document versioning and slots, upload transports, bucket CORS and lifecycle, security checklist, and troubleshooting."
+license: MIT
+metadata:
+  author: madebyclowd
 ---
 
 # Laravel Documentable
@@ -122,6 +125,16 @@ $service->reassociateDocument($document, $invoice);
 $document->commit(); // clears expires_at, marks permanent
 ```
 
+`reassociateDocument()` follows the same slot rules as an upload. If `$invoice` already has a latest
+document of that single-slot type, the moved document becomes the next version of the slot (or replaces it,
+for a type without `requires_versioning`), so an owner never has two "latest" documents. A multi-slot type
+keeps the moved document in its own slot.
+
+`purge()` deletes the document row, then the stored file once nothing else references it. If the disk
+cannot delete the file it returns `false`, logs an error and keeps the `StorageFile` row, which
+`documents:clean-orphaned --storage-files` retries. Set `'throw' => true` on the documents disk, because
+Laravel's default for `s3` reports a failed delete as `false` instead of an exception.
+
 Pending, uncommitted `uploadDetached()` documents and abandoned multipart sessions are swept by the
 `documents:clean-orphaned` command (scheduled automatically per
 `config('documentable.lifecycle.reaper_frequency')`) — past `expires_at`, a pending `Document` is
@@ -141,15 +154,20 @@ equivalent (no HTTP) further down. Every route lives under `config('documentable
 2. Client `PUT`s the raw file to `url` (no auth — this request never touches your app server).
 3. `POST /documents/presigned/finalize {path, document_type_id, documentable_type, documentable_id,
    filename, expected_hash}` → `Document` JSON (with `storage_file` eager-loaded), 201. Server
-   re-downloads, re-hashes, compares to `expected_hash`; on mismatch deletes the object and returns a
-   validation error (no orphaned blob left behind either way).
+   re-downloads, re-hashes and compares to `expected_hash`. `path` must be a relative key (no leading
+   `/`, no `..`, no backslash, at most 1,024 characters) that no stored file uses yet. A rejected finalize
+   does **not** delete the object, because the path is only a client claim, so add a bucket lifecycle rule
+   for upload prefixes. `security.enforce_path_prefix` (off by default) restricts a finalize to the type's
+   `path_prefix`.
 
 **Large files — multipart** (`multipart.threshold_bytes` and above):
 
 1. `POST /documents/multipart/initiate {filename, document_type_id, user_id}` →
-   `{upload_id, path, disk}`. Creates the bucket session + a DB row scoped to `user_id` — every
-   later call for this session must supply the *same* `user_id` or is rejected (real ownership
-   check, not decorative). Omit `user_id` to fall back to `$request->user()->getAuthIdentifier()`.
+   `{upload_id, path, disk}`. Creates the bucket session + a DB row owned by `$request->user()`. A body
+   `user_id` is ignored unless `security.allow_guest_user_id` is true (discouraged: anyone who can reach
+   the route can then name any owner), so an unauthenticated call without that flag is a 422. The session
+   is bound to its `document_type_id` and owner; every later call must match both. `part-url`, `parts`,
+   `status` and `abort` consult `canUpload()` like `initiate` does.
 2. For each part (1-indexed, ≥5MB except the last): `POST /documents/multipart/part-url {path,
    upload_id, part_number, document_type_id, user_id}` → `{url}`; client `PUT`s that part's bytes to
    `url`. Only capture the response `ETag` header if `etag_strategy = client` — under the default
@@ -169,11 +187,11 @@ Two read-only endpoints exist specifically for building correct resume logic on 
 re-upload everything from scratch after a dropped connection, and don't trust client-side
 bookkeeping alone (it can be stale, lost, or lying about what actually reached the bucket):
 
-- `GET /documents/multipart/status?path=...&upload_id=...&user_id=...` →
+- `GET /documents/multipart/status?path=...&upload_id=...` (plus `&user_id=...` only for a guest flow) →
   `{exists, expires_at, disk}`. `exists: false` is a normal `200`, not an error — it means the
   session is gone (reaped, aborted, or never existed): start a fresh `initiate` instead of retrying
   against it.
-- `GET /documents/multipart/parts?path=...&upload_id=...&document_type_id=...&user_id=...` →
+- `GET /documents/multipart/parts?path=...&upload_id=...&document_type_id=...` (plus `&user_id=...` only for a guest flow) →
   `{parts: [{PartNumber, ETag}]}` — the parts the bucket *actually* has, straight from the provider's
   own `ListParts`. Diff this against what the client thinks it uploaded, and only re-upload what's
   missing.
@@ -241,7 +259,10 @@ config:
   (`--verify` runs a live presigned-PUT smoke test afterward).
 
 Either way, integrity is verified independently via a server-computed sha256 compared against the
-client's declared hash — an ETag is never a real content checksum on any provider.
+client's declared hash — an ETag is never a real content checksum on any provider. Leave
+`multipart.use_native_checksum` false: an S3 multipart checksum is composite (a checksum of the part
+checksums), so it never equals the file's SHA-256 and the option breaks both the integrity check and
+deduplication.
 
 ### Multipart part retry safety
 
@@ -261,7 +282,8 @@ Full citations live in the `MultipartUploadDriver` interface docblock in source.
 GET /documents/types
 ```
 
-Read-only, active-only (`whereNull('deleted_at')`) catalog: `id`, `code`, `name`, `max_size_mb`,
+Read-only, active-only (`whereNull('deleted_at')`) catalog, filtered to the types the authorizer's
+`canUpload($user, $type, null)` accepts: `id`, `code`, `name`, `max_size_mb`,
 `allowed_mimes`, `allows_multiple`, `requires_versioning`. No pagination (type catalogs are small,
 config/DB-managed, not a growing per-user collection). This is how a frontend gets a
 `document_type_id` to build an upload request without direct DB access or the `documents:list` CLI
@@ -280,6 +302,16 @@ authorizer denying some documents excludes just those, not the whole set — so
 a raw DB query. Service-call equivalent: `DocumentService::listForOwner($documentable, $documentTypeId = null)`
 (returns the flat `Collection<Document>`, no grouping/pagination/authorization — that's the
 controller's job, same seam as everywhere else in this package).
+
+## Temporary URLs
+
+```
+GET /documents/{document}/url?disposition=inline|attachment&expires_in_minutes=5
+```
+
+`disposition` is `inline` (default) or `attachment`; `expires_in_minutes` is 1 to
+`documentable.url.max_ttl_minutes` (default 1440). Anything else is a 422, and an expired `pending`
+document is a 404.
 
 ## HTTP routes
 
@@ -311,30 +343,36 @@ default silently when omitted non-interactively.
 
 ## Security
 
-Two things to do before production use — the out-of-the-box state is intentionally permissive so
-the package works immediately, not because either default is safe to ship:
+Do these before production. The package starts out allowing everything so it works immediately, and booting
+in production with the routes mounted and that default logs a warning and shows
+`Insecure in production: yes` in `php artisan about`:
 
 1. **`documentable_type` allowlist.** Every `documentable_type` on an upload/finalize/complete/list
    request is resolved via `Relation::getMorphedModel()`. An unmapped type is **rejected** unless
    it's in `config('documentable.security.allowed_documentable_types')` (default `null` = reject
    all unmapped types) — call `Relation::enforceMorphMap()` in your app instead where possible;
    only reach for the allowlist if you can't. Once a morph map is registered, send the **alias**
-   (e.g. `"invoice"`), not the FQCN (`"App\\Models\\Invoice"`), as `documentable_type` — sending the
-   FQCN is rejected once the map is active unless it's also in the allowlist.
+   (e.g. `"invoice"`), not the FQCN (`"App\\Models\\Invoice"`), as `documentable_type`.
 2. **`AuthorizesDocumentAccess`.** Default is `PermissiveDocumentAuthorizer` (allows everything).
-   Bind a real implementation via `config('documentable.authorization.resolver')` — the shipped
-   HTTP controllers consult it (`canUpload`/`canView`/`canDelete`); `DocumentService` itself does
-   not (no request/user context of its own) — a direct service caller (job, command) must consult
-   the authorizer itself if it needs to. `php artisan documents:make-authorizer` scaffolds a
-   starting implementation in `app/Documentable` instead of a blank-page interface. **Watch the
-   `null` `$documentable` case**: `canUpload()` is called with `$documentable = null` from
-   `storeDetached()` and multipart `initiate()` (no owner attached yet) — the generated stub
-   branches on this explicitly and denies by default; if you write your own implementation from the
-   interface directly, handle this case too, or every detached/initiate call silently 403s with no
-   obvious cause.
+   Bind a real implementation via `config('documentable.authorization.resolver')`. The shipped HTTP
+   controllers consult it (`canUpload`/`canView`/`canDelete`); `DocumentService` does not (no request or
+   user context of its own), so a direct caller such as a job or command must check it itself.
+   `php artisan documents:make-authorizer` scaffolds a starting point. **Handle the `null`
+   `$documentable` case**: `canUpload()` gets `null` from `storeDetached()`, multipart `initiate()`, the
+   follow-up multipart calls and `GET /documents/types`, because no owner exists yet. Decide those from
+   `$type` and the user. An implementation that falls through to an ownership check denies every one of
+   them, and one that returns `true` for `null` lets anyone start an upload.
+3. **Guest `user_id`.** Leave `security.allow_guest_user_id` false. It lets an unauthenticated caller
+   name the owner of a multipart session.
+4. **Scanner errors.** A `ScansUploadedFile` result of `ScanResult::Error` rejects the upload by default.
+   `security.scan_error_policy = 'allow'` stores it with a warning instead.
+5. **Rate limit.** If you define no limiter named by `documentable.throttle`, the package registers one
+   that limits nothing. Define `RateLimiter::for('documents', ...)`.
+6. **Bucket.** Keep it private to the package: a finalize can only name keys, so unrelated objects under
+   other prefixes should not share the bucket. Add lifecycle rules for upload prefixes.
 
-Neither is optional in combination: an allowlisted/morph-mapped type with a permissive authorizer
-still lets any caller act on any instance of that type.
+Combined, a morph-mapped type with the default authorizer still lets any caller act on any instance of
+that type.
 
 ## Other pluggable contracts
 
@@ -351,6 +389,11 @@ still lets any caller act on any instance of that type.
 `DocumentReassociated`, `MultipartUploadInitiated`, `MultipartUploadAborted` — listen instead of
 subclassing `DocumentService` for side effects (thumbnailing, external audit sinks, notifications).
 
+They implement `ShouldDispatchAfterCommit`: immediate outside a transaction, after the outermost commit
+inside one, dropped on rollback. A listener always sees the committed row but cannot abort the transaction
+by throwing. Queued listeners should implement `ShouldQueueAfterCommit` (or set `$afterCommit = true`), and
+jobs they dispatch should set `$afterCommit` too.
+
 ## Audit / observability
 
 `config('documentable.audit.enabled')` — populates `created_by`/`deleted_by` on `Document` from the
@@ -365,11 +408,15 @@ default to stay lean.
   publishes config/migrations, prompts for app shape (monolith vs. separate API — sets
   `documentable.middleware`), `etag_strategy`, type-catalog mode, and optionally scaffolds an
   authorizer. Pass the options to skip prompts (see "HTTP routes" above).
-- `php artisan documents:sync-types [--prune]` — see "Defining a DocumentType" above.
+- `php artisan documents:sync-types [--prune]` — see "Defining a DocumentType" above. Run it on every
+  deploy. It reports what it created and updated and lists types that exist only in the database.
 - `php artisan documents:list` — table of registered types with usage counts.
 - `php artisan documents:verify [--repair]` — drift-detector for the `latest_marker`/`is_latest`
   invariant; should never find anything if `DocumentService` is the only writer.
-- `php artisan documents:clean-orphaned [--hours=N]` — the reaper (auto-scheduled).
+- `php artisan documents:clean-orphaned [--hours=N] [--storage-files]` — the reaper (auto-scheduled).
+  A multipart session the provider already dropped is removed; any other per-session failure is logged,
+  kept for the next run and makes the command exit non-zero. `--storage-files` also retries deleting stored
+  files no document references (older than `lifecycle.storage_file_grace_hours`).
 - `php artisan documents:configure-bucket-lifecycle {disk} [--days=3]` — optional bucket-native
   `AbortIncompleteMultipartUpload` backstop, defense-in-depth alongside the reaper.
 - `php artisan documents:configure-bucket-cors {disk} --origin=... [--verify]` — applies the bucket
@@ -387,10 +434,25 @@ default to stay lean.
   routes are mounted under the default `['api']` middleware (no session/auth). If this is a
   session-based app (Blade/Inertia/Livewire), re-run `php artisan documents:install` and pick
   "monolith" this time, or set `config('documentable.middleware', ['web', 'auth'])` yourself.
-- **Every upload gets a 403, and I can't tell why.** Check whether your `AuthorizesDocumentAccess`
-  implementation handles `$documentable === null` in `canUpload()` — it's called that way from
-  `storeDetached()`/multipart `initiate()`. A custom implementation that falls through to an
-  ownership check (which can never pass for `null`) silently denies every one of those calls.
+- **Every detached or multipart upload gets a 403 with no obvious cause.** Check whether your
+  `AuthorizesDocumentAccess` handles `$documentable === null` in `canUpload()` — it's called that way from
+  `storeDetached()`, multipart `initiate()` and the follow-up multipart calls. An implementation that
+  falls through to an ownership check (which can never pass for `null`) denies every one of those calls.
+- **`/documents/types` is empty or short.** It lists only the types `canUpload($user, $type, null)` accepts.
+- **A multipart call returns 422 on `user_id`.** The caller is unauthenticated and
+  `security.allow_guest_user_id` is false. Authenticate the route, or enable the flag knowingly.
+- **`operator does not exist: character varying = integer` on PostgreSQL.** Fixed for `documents()` on
+  owners with integer keys, so remove any `idAsString` accessor or `$keyType = 'string'` workaround.
+  Hand-written queries against `documents.documentable_id` must still pass the key as a string.
+- **`value too long for type character varying(255)` when starting a multipart upload.** Run
+  `php artisan migrate`: the 2.1.3 migrations widen `multipart_uploads.path`, `upload_id` and
+  `storage_files.path` to `text` (R2 upload ids are 343 characters).
+- **`purge()` returned `false`.** The document is gone but the disk could not delete the file. Check the
+  error log, set `'throw' => true` on the disk, and run `documents:clean-orphaned --storage-files`.
+- **A queued listener fires before the document exists.** The event is dispatched after commit, but the
+  listener's own jobs must set `$afterCommit` too.
+- **Uploads are rejected with "could not be scanned".** The scanner returned `ScanResult::Error`. Fix the
+  scanner, or set `security.scan_error_policy = 'allow'` if availability matters more.
 - **`GET /documents/{id}/url` throws `RuntimeException: This driver does not support creating
   temporary URLs.`** — the document's disk doesn't support `Storage::temporaryUrl()`. This affects
   *every* document on that disk regardless of size, not just multipart uploads — `local`/`public`
@@ -405,8 +467,8 @@ default to stay lean.
   the FQCN to `config('documentable.security.allowed_documentable_types')` if you can't use a morph
   map. An unmapped, non-allowlisted type is rejected by design (see "Security" above).
 - **Any consumer can upload/view/delete any document right after install.** Expected out-of-the-box
-  behavior — the default authorizer is permissive on purpose so the package works immediately in
-  development. Run `php artisan documents:make-authorizer` and bind a real implementation before
+  behavior — the default authorizer allows everything so the package works in development.
+  Production boots log a warning. Run `php artisan documents:make-authorizer` and bind a real implementation before
   production.
 - **`documents:install --no-interaction` in CI silently used the wrong app shape.** Pass `--shape=`
   explicitly in scripted installs — omitting it under `--no-interaction` prints a warning and
