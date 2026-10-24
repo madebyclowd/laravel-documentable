@@ -459,7 +459,7 @@ class DocumentService
      */
     public function listPartsForSession(string $path, string $uploadId, string $userId, DocumentType $type): array
     {
-        $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
 
         return $this->resolveMultipartDriver($type->disk)->listParts($type->disk, $path, $uploadId);
     }
@@ -502,7 +502,7 @@ class DocumentService
      */
     public function generatePartUploadUrl(string $path, string $uploadId, string $userId, int $partNumber, DocumentType $type): string
     {
-        $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
 
         return $this->resolveMultipartDriver($type->disk)
             ->presignPartUpload($type->disk, $path, $uploadId, $partNumber);
@@ -530,7 +530,7 @@ class DocumentService
     ): Document {
         $this->assertTypeActive($type);
 
-        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
         $driver = $this->resolveMultipartDriver($type->disk);
 
         $parts = $this->resolvePartsForCompletion($driver, $type->disk, $path, $uploadId, $clientParts);
@@ -566,7 +566,7 @@ class DocumentService
      */
     public function abortMultipartUpload(string $path, string $uploadId, string $userId, DocumentType $type): void
     {
-        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
 
         $this->abortSession($session, $type->disk);
     }
@@ -768,13 +768,23 @@ class DocumentService
         return app($driverClass);
     }
 
-    protected function findOwnedSessionOrFail(string $path, string $uploadId, string $userId): MultipartUpload
+    /**
+     * The caller's own session, which must also belong to `$type`: a session is started for one type (disk,
+     * prefix, size limit, mime allow-list), and acting on it under another would sidestep those limits.
+     */
+    protected function findOwnedSessionOrFail(string $path, string $uploadId, string $userId, ?DocumentType $type = null): MultipartUpload
     {
         $session = $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
 
         if (! $session) {
             throw ValidationException::withMessages([
                 'upload_id' => 'Multipart upload session not found or not owned by this user.',
+            ]);
+        }
+
+        if ($type !== null && $session->document_type_id !== $type->id) {
+            throw ValidationException::withMessages([
+                'document_type_id' => 'This upload session was started for a different document type.',
             ]);
         }
 
