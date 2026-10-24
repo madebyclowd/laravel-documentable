@@ -109,24 +109,6 @@ parameters:
 			path: src/Services/DocumentService.php
 
 		-
-			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\MultipartUpload\:\:\$expires_at\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Services/DocumentService.php
-
-		-
-			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\MultipartUpload\:\:\$path\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Services/DocumentService.php
-
-		-
-			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\MultipartUpload\:\:\$upload_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: src/Services/DocumentService.php
-
-		-
 			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\StorageFile\:\:\$mime_type\.$#'
 			identifier: property.notFound
 			count: 1
