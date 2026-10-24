@@ -67,6 +67,57 @@ class FinalizeHardeningTest extends TestCase
         $this->assertSame(1, Document::count());
     }
 
+    public function test_a_path_outside_the_type_prefix_is_accepted_by_default_so_custom_path_generators_keep_working(): void
+    {
+        $type = $this->makeType(['path_prefix' => 'invoices']);
+        $owner = TestModel::create(['name' => 'owner']);
+        Storage::disk('test_disk')->put('tenant-7/2026/sharded.bin', 'sharded layout');
+
+        $document = $this->service->finalizeDirectUpload('tenant-7/2026/sharded.bin', $type, $owner, 'sharded.bin');
+
+        $this->assertSame('tenant-7/2026/sharded.bin', $document->storageFile->path);
+    }
+
+    public function test_enforce_path_prefix_rejects_a_path_outside_the_type_prefix_and_keeps_the_object(): void
+    {
+        config()->set('documentable.security.enforce_path_prefix', true);
+        $type = $this->makeType(['path_prefix' => 'invoices']);
+        $owner = TestModel::create(['name' => 'owner']);
+        Storage::disk('test_disk')->put('payroll/2026/salaries.bin', 'belongs to another type');
+
+        try {
+            $this->service->finalizeDirectUpload('payroll/2026/salaries.bin', $type, $owner, 'salaries.bin');
+            $this->fail('A path outside the type prefix must be rejected when the prefix is enforced.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('path', $e->errors());
+            $this->assertTrue(Storage::disk('test_disk')->exists('payroll/2026/salaries.bin'));
+        }
+    }
+
+    public function test_enforce_path_prefix_accepts_a_path_inside_the_type_prefix(): void
+    {
+        config()->set('documentable.security.enforce_path_prefix', true);
+        $type = $this->makeType(['path_prefix' => 'invoices']);
+        $owner = TestModel::create(['name' => 'owner']);
+        Storage::disk('test_disk')->put('invoices/9d1c.bin', 'invoice bytes');
+
+        $document = $this->service->finalizeDirectUpload('invoices/9d1c.bin', $type, $owner, 'invoice.bin');
+
+        $this->assertSame('invoices/9d1c.bin', $document->storageFile->path);
+    }
+
+    public function test_enforce_path_prefix_does_not_treat_a_sibling_prefix_as_a_match(): void
+    {
+        config()->set('documentable.security.enforce_path_prefix', true);
+        $type = $this->makeType(['path_prefix' => 'invoices']);
+        $owner = TestModel::create(['name' => 'owner']);
+        Storage::disk('test_disk')->put('invoices-archive/old.bin', 'sibling directory');
+
+        $this->expectException(ValidationException::class);
+
+        $this->service->finalizeDirectUpload('invoices-archive/old.bin', $type, $owner, 'old.bin');
+    }
+
     public function test_finalize_with_a_wrong_expected_hash_rejects_without_deleting_the_object(): void
     {
         $type = $this->makeType();

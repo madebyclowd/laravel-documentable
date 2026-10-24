@@ -553,6 +553,8 @@ class DocumentService
             ]);
         }
 
+        $this->assertPathIsWithinTypePrefix($type, $path);
+
         if (! Storage::disk($type->disk)->exists($path)) {
             throw ValidationException::withMessages([
                 'path' => 'No file found at the presigned upload path.',
@@ -573,6 +575,23 @@ class DocumentService
             $metadata,
             $documentGroupId
         ));
+    }
+
+    /**
+     * Opt-in (`security.enforce_path_prefix`): a presigned finalize may only name a key inside the type's
+     * own prefix. Compared on a trailing slash so `invoices-archive/` is not mistaken for `invoices/`.
+     */
+    protected function assertPathIsWithinTypePrefix(DocumentType $type, string $path): void
+    {
+        if (! config('documentable.security.enforce_path_prefix', false)) {
+            return;
+        }
+
+        if (! str_starts_with($path, rtrim($type->path_prefix, '/').'/')) {
+            throw ValidationException::withMessages([
+                'path' => 'The path is outside the storage prefix of this document type.',
+            ]);
+        }
     }
 
     /**

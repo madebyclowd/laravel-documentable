@@ -169,6 +169,12 @@ return [
     'security' => [
         'scanner' => null,
         'allowed_documentable_types' => null,
+
+        // When true, a presigned finalize only accepts a path that starts with the document type's
+        // `path_prefix`. Off by default because a custom storage path generator (for example date or
+        // tenant sharding) legitimately produces other layouts. Turn it on if you keep the default
+        // "{path_prefix}/{uuid}" layout.
+        'enforce_path_prefix' => false,
     ],
 
     /*
