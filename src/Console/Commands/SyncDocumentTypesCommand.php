@@ -3,6 +3,7 @@
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
+use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Repositories\DocumentTypeRepository;
 
 /**
@@ -23,18 +24,33 @@ class SyncDocumentTypesCommand extends Command
     {
         $defined = config('documentable.types', []);
 
+        if ($defined === []) {
+            $this->warn("No types are defined in config('documentable.types'), so there is nothing to sync. That is expected if you manage document types directly in the database.");
+        }
+
+        $created = [];
+        $updated = [];
+
         foreach ($defined as $code => $attributes) {
-            $repository->updateOrCreate((string) $code, $attributes);
+            $type = $repository->updateOrCreate((string) $code, $attributes);
+
+            $type->wasRecentlyCreated ? $created[] = (string) $code : $updated[] = (string) $code;
         }
 
         $this->info(count($defined).' document type(s) synced.');
+        $created === [] || $this->line('Created: '.implode(', ', $created));
+        $updated === [] || $this->line('Updated: '.implode(', ', $updated));
 
-        $this->warnAboutDisksThatHideFailedDeletes($defined);
+        $leftBehind = DocumentType::whereNotIn('code', array_keys($defined))->pluck('code')->all();
 
         if ($this->option('prune')) {
             $deactivated = $repository->deactivateMissing(array_keys($defined));
             $this->info("{$deactivated} document type(s) deactivated (missing from config).");
+        } elseif ($leftBehind !== []) {
+            $this->warn('In the database but not in config (kept, use --prune to deactivate): '.implode(', ', $leftBehind));
         }
+
+        $this->warnAboutDisksThatHideFailedDeletes($defined);
 
         return self::SUCCESS;
     }

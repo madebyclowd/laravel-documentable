@@ -25,6 +25,7 @@ use MadeByClowd\Documentable\Defaults\DefaultStoragePathGenerator;
 use MadeByClowd\Documentable\Defaults\HashOnlyDedupScope;
 use MadeByClowd\Documentable\Defaults\NullFileScanner;
 use MadeByClowd\Documentable\Defaults\PermissiveDocumentAuthorizer;
+use MadeByClowd\Documentable\Models\DocumentType;
 
 class DocumentableServiceProvider extends ServiceProvider
 {
@@ -148,7 +149,27 @@ class DocumentableServiceProvider extends ServiceProvider
             'Middleware' => implode(', ', (array) config('documentable.middleware', ['api'])),
             'Throttle' => (string) config('documentable.throttle', 'documents'),
             'Guest user_id' => config('documentable.security.allow_guest_user_id', false) ? 'allowed' : 'ignored',
+            'Document types' => $this->documentTypeSummary(),
             'Insecure in production' => $this->isInsecureProductionSetup() ? 'yes' : 'no',
         ]);
+    }
+
+    /**
+     * How the code-first catalog in config compares with the table, so a deploy that forgot
+     * `documents:sync-types` shows up in `php artisan about`.
+     */
+    protected function documentTypeSummary(): string
+    {
+        $configured = array_keys((array) config('documentable.types', []));
+
+        try {
+            $active = DocumentType::pluck('code')->all();
+        } catch (\Throwable) {
+            return count($configured).' in config, database not reachable';
+        }
+
+        $notSynced = count(array_diff($configured, $active));
+
+        return count($configured).' in config, '.count($active).' active in database, '.$notSynced.' in config not yet synced';
     }
 }

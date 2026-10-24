@@ -22,10 +22,11 @@ class DocumentController extends Controller
 
     /**
      * Owner-scoped listing, grouped by document_type_id then document_group_id —
-     * the query docs/feedbacks/feedback.md #6 says every consumer was hand-rolling.
+     * the query every consumer otherwise hand-rolls.
      * canView() is per-Document, so it's applied as a post-query collection filter,
-     * not a WHERE clause (see phase-12 doc for the trade-off) — pagination
-     * therefore happens on the filtered collection, not at the database level.
+     * not a WHERE clause — pagination therefore happens on the filtered collection
+     * (so `total` counts only the documents the caller may view), not at the
+     * database level.
      */
     public function index(ListDocumentsRequest $request): JsonResponse
     {

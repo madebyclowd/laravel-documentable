@@ -50,8 +50,8 @@ class DocumentRepository
     /**
      * All latest-per-group rows for an owner, across every document type unless
      * $documentTypeId narrows it — the cross-type sibling of findAllLatestForOwner()
-     * (phase 12's listing endpoint). storageFile is eager-loaded so callers don't
-     * reintroduce the bare-model gap phase 8 fixed on the upload endpoints.
+     * (used by the listing endpoint). storageFile is eager-loaded so callers don't
+     * hand back a document without its stored file details.
      *
      * @return Collection<int, Document>
      */

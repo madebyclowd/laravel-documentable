@@ -91,6 +91,9 @@ return [
         'etag_strategy' => 'server-authoritative',
         'part_upload_url_ttl' => '+1 hour',
         'session_ttl_hours' => 24,
+        // Leave false. S3 multipart checksums are composite (a checksum of the part checksums), so
+        // the value this reads back never equals the file's SHA-256: an upload with an expected_hash
+        // is rejected, and one without stores a hash that breaks deduplication. Slated for removal.
         'use_native_checksum' => false,
         'drivers' => [
             's3' => S3MultipartDriver::class,
@@ -106,7 +109,7 @@ return [
     | (see MadeByClowd\Documentable\Models\Document::commit()). reaper_frequency
     | is a Schedule fluent-method name ('hourly', 'daily', 'everyFiveMinutes',
     | ...) applied to the documents:clean-orphaned command. Multipart session
-    | TTL uses multipart.session_ttl_hours (phase 3) — single source of truth,
+    | TTL uses multipart.session_ttl_hours — single source of truth,
     | not duplicated here.
     |
     */
@@ -167,7 +170,7 @@ return [
     | (the safe default). Without Relation::enforceMorphMap() AND this
     | allowlist, a client can pass any Eloquent model FQCN in the app as
     | documentable_type; the (default-permissive) authorizer is the only
-    | other gate. See docs/feedbacks/feedback.md #3.
+    | other gate.
     |
     */
     'security' => [
@@ -246,11 +249,13 @@ return [
     | Applied to every route in routes/api.php, in addition to the throttle
     | middleware below. Default ('api') has no session/auth — $request->user()
     | is null, so AuthorizesDocumentAccess always receives a null $user,
-    | created_by/deleted_by stay null, and resolveUserId() falls back to a
-    | client-supplied user_id field. Session-based monolith (Inertia,
+    | created_by/deleted_by stay null, and the multipart endpoints reject the
+    | request unless security.allow_guest_user_id lets a client-supplied
+    | user_id stand in as the session owner. Session-based monolith (Inertia,
     | Livewire, classic SPA-on-same-origin): use ['web', 'auth']. Separate
-    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). See
-    | docs/feedbacks/feedback.md #1 for the failure mode this prevents.
+    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). With only
+    | ['api'] there is no session or auth, so $request->user() is null on
+    | every request.
     |
     */
     'middleware' => ['api'],
@@ -261,8 +266,10 @@ return [
     |--------------------------------------------------------------------------
     |
     | Default page size for GET /documents (owner-scoped, grouped by
-    | document_type_id then document_group_id). canView() is applied per-document
-    | after the query, so pagination happens over the already-filtered set.
+    | document_type_id then document_group_id). The owner's latest documents are
+    | loaded, canView() is applied to each in PHP, and only then is the result
+    | paged, so `total` counts just what the caller may view. For an owner with
+    | thousands of documents, list a narrower set with document_type_id.
     |
     */
     'listing' => [
@@ -274,7 +281,7 @@ return [
     | Throttle
     |--------------------------------------------------------------------------
     |
-    | Named rate limiter the package's routes (phase 7) are mounted behind.
+    | Named rate limiter the package's routes are mounted behind.
     | Package doesn't hardcode a specific rate — define this limiter
     | (RateLimiter::for('documents', ...)) in your own AppServiceProvider.
     |

@@ -14,8 +14,8 @@ class UploadDocumentRequest extends FormRequest
 
     /**
      * document_type_id is scoped to non-soft-deleted rows — defense in depth
-     * alongside DocumentService::assertTypeActive() (bugs.md #4): a request
-     * naming a deactivated type is rejected before it reaches the service.
+     * alongside DocumentService::assertTypeActive(): a request naming a
+     * deactivated type is rejected before it reaches the service.
      */
     public function rules(): array
     {

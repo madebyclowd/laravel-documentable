@@ -6,7 +6,7 @@ use Illuminate\Console\Command;
 use MadeByClowd\Documentable\Models\Document;
 
 /**
- * Drift-detector for the phase 2 invariant (latest_marker = document_group_id
+ * Drift-detector for the versioning invariant (latest_marker = document_group_id
  * exactly when is_latest = true, NULL otherwise) — same spirit as the
  * reference package's counter-drift `sequence:verify --repair`. Should never
  * find anything if DocumentService is the only writer; exists as a

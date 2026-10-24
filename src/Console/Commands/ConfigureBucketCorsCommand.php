@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Sibling to ConfigureBucketLifecycleCommand: both the direct-PUT and multipart part
  * uploads have the browser PUT bytes cross-origin straight to the bucket, which requires
- * a CORS policy the package can't assume is already there (docs/feedbacks/v2.0.0-feedback.md
- * #5). Not run automatically — mutating bucket-level config should be an explicit,
+ * a CORS policy the package can't assume is already there. Not run
+ * automatically — mutating bucket-level config should be an explicit,
  * confirmed action, not a side effect of composer install.
  */
 class ConfigureBucketCorsCommand extends Command

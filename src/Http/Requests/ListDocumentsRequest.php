@@ -16,7 +16,7 @@ class ListDocumentsRequest extends FormRequest
      * This is an owner-scoped listing, not a global one — documentable_type/id
      * are required together. document_type_id narrows to one type when given,
      * scoped to non-soft-deleted rows same as every other document_type_id rule
-     * in this package (bugs.md #4).
+     * in this package.
      */
     public function rules(): array
     {

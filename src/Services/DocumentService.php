@@ -95,7 +95,7 @@ class DocumentService
      * later via the model's Documentable relation.
      *
      * $pending: false (default) — permanent, valid state (not garbage), same as
-     * before phase 4 existed. true — temporary, expires after $ttlHours (or
+     * before pending documents existed. true — temporary, expires after $ttlHours (or
      * config('documentable.lifecycle.pending_ttl_hours') if omitted) unless the
      * consumer calls $document->commit() before it lapses (e.g. once the real
      * owner is finally created and this document is reassociated to it).
@@ -176,11 +176,10 @@ class DocumentService
 
     /**
      * All latest-per-group documents for an owner, across every type unless
-     * $documentTypeId narrows it. storageFile eager-loaded (phase 8's fix, reused
-     * here rather than reintroduced). Doesn't consult AuthorizesDocumentAccess —
-     * same seam boundary as every other DocumentService method (see phase 5/7
-     * notes: authorization is a controller-layer concern, this method has no
-     * $user param to check it with).
+     * $documentTypeId narrows it. storageFile is eager-loaded. Doesn't consult
+     * AuthorizesDocumentAccess — same seam boundary as every other DocumentService
+     * method: authorization is a controller-layer concern, and this method has no
+     * $user param to check it with.
      *
      * @return Collection<int, Document>
      */
@@ -383,7 +382,7 @@ class DocumentService
      * Strip every ASCII control character (not just the '"'/CR/LF originally
      * flagged) — a raw client-supplied filename interpolated into a
      * Content-Disposition header value is a header-injection primitive
-     * (bugs.md #6). Public/static because it's a pure function useful to any
+     * Public/static because it's a pure function useful to any
      * consumer building their own download endpoint against the same data.
      */
     public static function sanitizeHeaderFilename(string $filename): string
@@ -399,9 +398,8 @@ class DocumentService
     /**
      * The one entry point every transport funnels through — local UploadedFile
      * (upload()/uploadDetached()), multipart finalize, and direct-PUT finalize
-     * all resolve size/mime first, then call this. Closes bugs.md #2/#3 (a
-     * previous version let multipart skip validation and trusted a
-     * client-asserted mime type).
+     * all resolve size/mime first, then call this, so no transport can skip
+     * validation or trust a client-asserted mime type.
      */
     protected function validateSizeAndMime(int $sizeBytes, ?string $mimeType, DocumentType $type): void
     {
@@ -573,7 +571,7 @@ class DocumentService
     }
 
     /**
-     * Non-ownership-gated abort, for system-initiated cleanup (phase 4's
+     * Non-ownership-gated abort, for system-initiated cleanup (the
      * reaper) that already has the loaded MultipartUpload row in hand and has
      * no "user it's acting as" to re-verify against.
      */
@@ -599,7 +597,7 @@ class DocumentService
      * Presign a single PUT URL for a file under multipart.threshold_bytes —
      * avoids proxying small-file bytes through the app server, and avoids
      * multipart's per-part round-trip overhead for tiny files
-     * (best-practices.md §1 — never force multipart below the threshold).
+     * (never force multipart below the threshold).
      *
      * @return array{url: string, headers: array, path: string, disk: string}
      */
@@ -689,9 +687,9 @@ class DocumentService
     }
 
     /**
-     * Soft-deleted DocumentTypes must not accept new uploads (bugs.md #4).
+     * Soft-deleted DocumentTypes must not accept new uploads.
      * A FormRequest-level `Rule::exists(...)->whereNull('deleted_at')` check
-     * is still recommended at the phase 7 controller layer, but this is the
+     * is still recommended at the controller layer, but this is the
      * business rule living where it belongs regardless of caller — service
      * methods called directly (tests, jobs, artisan commands) get the same
      * protection a validated HTTP request would.
@@ -800,7 +798,7 @@ class DocumentService
      * client strategy: reconcile the client-reported part list against the
      * provider's authoritative listParts() before completing — fail fast on
      * a truncated/partial list instead of discovering it after a full
-     * download+hash (bugs.md #7). server-authoritative strategy: always use
+     * download+hash. server-authoritative strategy: always use
      * listParts(), client input is never consulted.
      */
     protected function resolvePartsForCompletion(MultipartUploadDriver $driver, string $disk, string $path, string $uploadId, ?array $clientParts): array
@@ -830,7 +828,7 @@ class DocumentService
     }
 
     /**
-     * Optional fast path (missing-features.md, best-practices.md §4b): when
+     * Optional fast path: when
      * use_native_checksum is enabled and the driver can report a provider-computed
      * full-object checksum, skip the full re-download-and-hash — only the first
      * chunk is read (for mime sniffing) and size comes from a HeadObject-equivalent

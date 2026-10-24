@@ -20,8 +20,8 @@ return new class extends Migration
             $table->string('path_prefix')->default('uploads');
             $table->boolean('requires_versioning')->default(false);
             $table->boolean('allows_multiple')->default(false);
-            // Nullable = unlimited (no pruning). Pruning job itself is deferred —
-            // see docs/implementations/phase-2-versioning-and-multi-document-groups.md.
+            // Nullable = unlimited (no pruning). The pruning job itself is not
+            // implemented yet, so the value is stored but not enforced.
             $table->unsignedInteger('max_versions_to_keep')->nullable();
 
             $table->timestamps();

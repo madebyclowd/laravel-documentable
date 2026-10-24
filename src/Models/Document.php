@@ -58,9 +58,9 @@ class Document extends Model
     /**
      * Transition a 'pending' document to permanent 'committed' status,
      * clearing its expiry — the explicit alternative to inferring lifecycle
-     * intent from a nullable documentable_id (bugs.md #5 / best-practices.md
-     * §2). Consumer calls this once the document is actually attached to its
-     * real owner; if never called before expires_at lapses, the
+     * intent from a nullable documentable_id. Consumer calls this once the
+     * document is actually attached to its real owner; if never called before
+     * expires_at lapses, the
      * documents:clean-orphaned reaper purges it.
      */
     public function commit(): static

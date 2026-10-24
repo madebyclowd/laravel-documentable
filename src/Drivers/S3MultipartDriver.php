@@ -11,7 +11,7 @@ use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 /**
  * Covers S3, R2, MinIO, DigitalOcean Spaces, and any other S3-API-compatible
  * backend registered under Flysystem's 's3' driver — the overwhelming majority
- * case. Ships as the only driver in phase 3.
+ * case. It is the only driver the package ships.
  */
 class S3MultipartDriver implements MultipartUploadDriver
 {
