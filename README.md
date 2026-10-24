@@ -276,8 +276,12 @@ so pagination (`config('documentable.listing.per_page')`, default 50) runs over 
    ```
 
    The server re-downloads and re-hashes the object and compares it to `expected_hash`; on a
-   size/mime/hash mismatch it deletes the object and returns a validation error — you never end up
-   with an orphaned blob.
+   size/mime/hash mismatch it returns a validation error. It does **not** delete the object: on this
+   transport `path` is only a claim made by the client, so deleting it could destroy a file the caller
+   never uploaded. A rejected upload stays in the bucket until your bucket lifecycle rule expires it, so
+   add an expiration rule for your upload prefixes. Finalizing a path that already backs a stored file
+   is refused, and `path` must be a relative key (no leading `/`, no `..` segment, no backslash, at most
+   1,024 characters).
 
 ### Large files — multipart (files at/above `multipart.threshold_bytes`)
 
@@ -578,6 +582,19 @@ permissive so the package works immediately, not because they're safe to ship as
 
 Neither of these is optional in combination: an allowlisted/morph-mapped type with a permissive
 authorizer still lets any caller attach/view/delete documents against any instance of that type.
+
+### Presigned finalize and the bucket
+
+`POST /documents/presigned/finalize` receives only a `path` from the client, and the package keeps no
+record of which keys it presigned. Two consequences:
+
+- A caller who passes `canUpload` can still name any **unregistered** key in the bucket and turn it
+  into a document they own (a key already backing a stored file is refused). Keep the bucket private
+  to this package, or keep unrelated data under prefixes the document types do not use.
+- If you keep the default `{path_prefix}/{uuid}` storage layout, set
+  `config('documentable.security.enforce_path_prefix')` to `true` so a finalize may only name a key
+  inside its own type's prefix. It is off by default because a custom `GeneratesStoragePath`
+  (date or tenant sharding) produces other layouts.
 
 ## License
 
