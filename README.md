@@ -484,6 +484,18 @@ $service->reassociateDocument($document, $invoice);
 $document->commit();
 ```
 
+Reassociating follows the same slot rules as an upload. If `$invoice` already holds a latest document of
+the same single-slot type, the moved document becomes the next version of that slot (or replaces it, for a
+type without `requires_versioning`), so the owner never has two "latest" documents. A multi-slot type keeps
+the moved document in its own slot.
+
+**Purging.** `purge()` removes the document row, then the stored file once no other document uses it. If
+the disk cannot delete the file (a disk with `'throw' => false`, which is Laravel's default for `s3`,
+reports that as `false`), `purge()` returns `false`, logs an error and keeps the `StorageFile` row as the
+record of the orphaned object. `php artisan documents:clean-orphaned --storage-files` retries those. Set
+`'throw' => true` on the documents disk so other failed writes and deletes raise instead of passing quietly;
+`documents:sync-types` warns when a type uses a disk without it.
+
 **Choosing an `etag_strategy`:** `server-authoritative` (default) needs no bucket CORS
 configuration and works everywhere, at the cost of one extra `ListParts` call per multipart
 completion. `client` saves that round trip but requires `ExposeHeaders: ["ETag"]` on your bucket's
@@ -530,7 +542,7 @@ Event::listen(function (\MadeByClowd\Documentable\Events\DocumentUploaded $event
 | `documents:sync-types [--prune]` | Upsert `config('documentable.types')` into `document_types`. |
 | `documents:list` | Table of registered types with usage counts. |
 | `documents:verify [--repair]` | Detect (and optionally fix) `latest_marker`/`is_latest` drift. |
-| `documents:clean-orphaned [--hours=N]` | Reaper — purges expired pending documents, aborts stale multipart sessions. Auto-scheduled. |
+| `documents:clean-orphaned [--hours=N] [--storage-files]` | Reaper — purges expired pending documents, aborts stale multipart sessions (a session the provider no longer knows is simply removed; a failing one is logged, kept for the next run and makes the command exit non-zero). `--storage-files` also retries deleting stored files no document references, older than `lifecycle.storage_file_grace_hours` (24). Auto-scheduled without the flag. |
 | `documents:configure-bucket-lifecycle {disk} [--days=3]` | Optional bucket-native `AbortIncompleteMultipartUpload` backstop. |
 | `documents:configure-bucket-cors {disk} --origin=... [--verify]` | Apply/verify the bucket CORS policy direct-PUT and multipart part uploads need. |
 
@@ -575,6 +587,7 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
 'security' => [
     'scanner' => null,                          // bind ScansUploadedFile
     'allowed_documentable_types' => null,        // see "Security" section below
+    'scan_error_policy' => 'reject',             // scanner returned Error: reject | allow
 ],
 'storage_path' => ['generator' => null], // bind GeneratesStoragePath
 'disks' => [/* per-disk server_side_encryption / kms_key_id */],
@@ -626,6 +639,13 @@ shows `Insecure in production: yes` under `php artisan about`. It does not stop 
 
 Neither of these is optional in combination: an allowlisted/morph-mapped type with a permissive
 authorizer still lets any caller attach/view/delete documents against any instance of that type.
+
+### Scanner errors
+
+A scanner that returns `ScanResult::Error` (it could not reach a verdict, for example the ClamAV sidecar is
+down) no longer counts as clean. The upload is rejected and the object removed. If availability matters more
+than scanning, set `documentable.security.scan_error_policy` to `allow`: the file is stored and a warning is
+logged.
 
 ### Presigned finalize and the bucket
 

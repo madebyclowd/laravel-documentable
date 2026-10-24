@@ -3,9 +3,12 @@
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\MultipartUpload;
+use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Services\DocumentService;
+use Throwable;
 
 /**
  * Replaces the reference app's CleanOrphanedPendingDocumentsCommand, which
@@ -20,7 +23,8 @@ use MadeByClowd\Documentable\Services\DocumentService;
 class CleanOrphanedDocumentsCommand extends Command
 {
     protected $signature = 'documents:clean-orphaned
-        {--hours= : Override configured TTL — sweep anything older than N hours regardless of stored expires_at}';
+        {--hours= : Override configured TTL — sweep anything older than N hours regardless of stored expires_at}
+        {--storage-files : Also retry deleting stored files that no document references (a failed purge leaves one behind)}';
 
     protected $description = 'Purge expired pending documents and abort/remove stale multipart upload sessions.';
 
@@ -49,13 +53,52 @@ class CleanOrphanedDocumentsCommand extends Command
         }
 
         $aborted = 0;
+        $failed = 0;
         foreach ($staleSessions->get() as $session) {
-            $service->abortMultipartUploadSession($session);
-            $aborted++;
+            try {
+                $service->abortMultipartUploadSession($session);
+                $aborted++;
+            } catch (Throwable $e) {
+                // One unreachable or misbehaving session must not stop the rest of the sweep. Its row stays,
+                // so the next run retries it.
+                $failed++;
+                Log::error("documents:clean-orphaned could not abort multipart session [{$session->id}]: {$e->getMessage()}");
+            }
         }
 
         $this->info("Purged {$purged} expired pending document(s), aborted {$aborted} stale multipart session(s).");
 
-        return self::SUCCESS;
+        if ($failed > 0) {
+            $this->error("{$failed} multipart session(s) could not be aborted and stay for the next run.");
+        }
+
+        if ($this->option('storage-files')) {
+            $this->sweepStorageFiles($service, $hoursOverride);
+        }
+
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * Stored files with no document, trashed ones included, older than the grace period. The grace period keeps
+     * the sweep away from a file whose document is still being created in the same upload.
+     */
+    protected function sweepStorageFiles(DocumentService $service, mixed $hoursOverride): void
+    {
+        $grace = $hoursOverride !== null
+            ? (int) $hoursOverride
+            : (int) config('documentable.lifecycle.storage_file_grace_hours', 24);
+
+        $removed = 0;
+        $failed = 0;
+
+        StorageFile::query()
+            ->where('created_at', '<=', now()->subHours($grace))
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('documents')->whereColumn('documents.storage_file_id', 'storage_files.id'))
+            ->each(function (StorageFile $storageFile) use ($service, &$removed, &$failed) {
+                $service->removeStorageFileIfUnreferenced($storageFile) ? $removed++ : $failed++;
+            });
+
+        $this->info("Removed {$removed} unreferenced stored file(s), {$failed} could not be deleted and stay for the next sweep.");
     }
 }

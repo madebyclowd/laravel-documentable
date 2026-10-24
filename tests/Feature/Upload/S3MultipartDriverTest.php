@@ -5,7 +5,9 @@ namespace MadeByClowd\Documentable\Tests\Feature\Upload;
 use Aws\CommandInterface;
 use Aws\MockHandler;
 use Aws\Result;
+use Aws\S3\Exception\S3Exception;
 use MadeByClowd\Documentable\Drivers\S3MultipartDriver;
+use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Tests\TestCase;
 use Psr\Http\Message\RequestInterface;
 
@@ -238,6 +240,28 @@ class S3MultipartDriverTest extends TestCase
         $this->assertSame('test-bucket', $captured['Bucket']);
         $this->assertSame('uploads/a.bin', $captured['Key']);
         $this->assertSame('upload-123', $captured['UploadId']);
+    }
+
+    public function test_abort_of_an_upload_the_provider_no_longer_has_raises_the_not_found_exception(): void
+    {
+        $this->setUpDisk();
+        $handler = new MockHandler;
+        $handler->append(fn (CommandInterface $command) => new S3Exception('gone', $command, ['code' => 'NoSuchUpload']));
+
+        $this->expectException(MultipartUploadNotFoundException::class);
+
+        $this->makeDriver($handler)->abort('s3_driver_test', 'uploads/a.bin', 'upload-123');
+    }
+
+    public function test_abort_lets_other_provider_errors_through(): void
+    {
+        $this->setUpDisk();
+        $handler = new MockHandler;
+        $handler->append(fn (CommandInterface $command) => new S3Exception('denied', $command, ['code' => 'AccessDenied']));
+
+        $this->expectException(S3Exception::class);
+
+        $this->makeDriver($handler)->abort('s3_driver_test', 'uploads/a.bin', 'upload-123');
     }
 
     public function test_retrieve_checksum_decodes_base64_sha256_to_hex(): void

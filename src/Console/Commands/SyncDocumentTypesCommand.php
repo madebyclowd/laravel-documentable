@@ -29,11 +29,30 @@ class SyncDocumentTypesCommand extends Command
 
         $this->info(count($defined).' document type(s) synced.');
 
+        $this->warnAboutDisksThatHideFailedDeletes($defined);
+
         if ($this->option('prune')) {
             $deactivated = $repository->deactivateMissing(array_keys($defined));
             $this->info("{$deactivated} document type(s) deactivated (missing from config).");
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * A disk with `throw => false` (the Laravel default for s3) answers a failed delete with `false` instead
+     * of an exception. The package checks that result, but every other caller on the disk silently loses it.
+     *
+     * @param  array<string, array<string, mixed>>  $defined
+     */
+    protected function warnAboutDisksThatHideFailedDeletes(array $defined): void
+    {
+        $disks = collect($defined)->pluck('disk')->filter()->unique();
+
+        foreach ($disks as $disk) {
+            if (config("filesystems.disks.{$disk}.throw") === false) {
+                $this->warn("Disk [{$disk}] has 'throw' => false, so a failed delete or write is reported as false instead of an exception. Set 'throw' => true on it in config/filesystems.php.");
+            }
+        }
     }
 }

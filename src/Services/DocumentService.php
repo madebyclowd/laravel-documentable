@@ -11,12 +11,14 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
+use MadeByClowd\Documentable\Contracts\ScanResult;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Events\DocumentDeleted;
 use MadeByClowd\Documentable\Events\DocumentPurged;
@@ -26,6 +28,7 @@ use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Events\MultipartUploadAborted;
 use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
 use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
+use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
@@ -236,66 +239,144 @@ class DocumentService
     }
 
     /**
-     * Permanently delete a document and clean up its underlying storage file
-     * if it is no longer referenced by any other documents.
+     * Permanently delete a document, then its stored blob when no other document references it.
+     *
+     * The document row is gone once this returns, whatever the result. `false` means the document could not be
+     * deleted, or that it was but the blob could not: the `StorageFile` row is kept as the record of the
+     * orphaned object, an error is logged, and `documents:clean-orphaned --storage-files` retries it. Disks
+     * configured with `throw => false` report a failed delete as `false` rather than an exception, which is
+     * why the result is checked rather than assumed.
      */
     public function purge(Document $document): bool
     {
-        return DB::transaction(function () use ($document) {
-            $storageFile = $document->storageFile;
-            $storageFileId = $document->storage_file_id;
-            $documentId = $document->id;
+        $storageFile = $document->storageFile;
 
-            $deleted = $this->documentRepository->forceDelete($document);
-            $storageFileAlsoDeleted = false;
+        $deleted = $this->documentRepository->forceDelete($document);
 
-            if ($deleted && $storageFile) {
-                $otherExists = Document::withTrashed()
-                    ->where('storage_file_id', $storageFileId)
-                    ->where('id', '!=', $documentId)
-                    ->exists();
+        if (! $deleted) {
+            return false;
+        }
 
-                if (! $otherExists) {
-                    if (Storage::disk($storageFile->disk)->exists($storageFile->path)) {
-                        Storage::disk($storageFile->disk)->delete($storageFile->path);
-                    }
-                    $this->storageFileRepository->delete($storageFile);
-                    $storageFileAlsoDeleted = true;
-                }
-            }
+        $storageFileAlsoDeleted = false;
 
-            if ($deleted) {
-                Event::dispatch(new DocumentPurged($document, $storageFileAlsoDeleted));
-            }
+        if ($storageFile !== null) {
+            $storageFileAlsoDeleted = $this->removeStorageFileIfUnreferenced($storageFile);
+        }
 
-            return $deleted;
-        });
+        Event::dispatch(new DocumentPurged($document, $storageFileAlsoDeleted));
+
+        return $storageFile === null || $storageFileAlsoDeleted || $this->isStorageFileReferenced($storageFile);
     }
 
     /**
-     * Move a document to a different owner (e.g. a detached upload finally
-     * being attached to the real record it belongs to once that record
-     * exists). $document keeps its group/version chain — only ownership
-     * changes.
+     * Delete a stored blob and its `StorageFile` row if no document, trashed ones included, references it.
+     * The check repeats under a row lock because a deduplicated upload may have attached a document to the
+     * blob since the caller looked. Returns true when the blob and row are gone, false when the blob could
+     * not be deleted (the row is kept so the next sweep can retry) or when the file is still referenced.
+     */
+    public function removeStorageFileIfUnreferenced(StorageFile $storageFile): bool
+    {
+        return DB::transaction(function () use ($storageFile) {
+            $locked = StorageFile::whereKey($storageFile->id)->lockForUpdate()->first();
+
+            if ($locked === null) {
+                return true;
+            }
+
+            if ($this->isStorageFileReferenced($locked)) {
+                return false;
+            }
+
+            if (! $this->deleteBlob($locked->disk, $locked->path)) {
+                return false;
+            }
+
+            return $this->storageFileRepository->delete($locked);
+        });
+    }
+
+    protected function isStorageFileReferenced(StorageFile $storageFile): bool
+    {
+        return Document::withTrashed()->where('storage_file_id', $storageFile->id)->exists();
+    }
+
+    /**
+     * True when the object no longer exists on the disk afterwards, whether it was deleted now or was already
+     * gone. A failed delete is logged with the disk and path, because the row that remembers it is the only
+     * trace.
+     */
+    protected function deleteBlob(string $disk, string $path): bool
+    {
+        try {
+            $filesystem = Storage::disk($disk);
+
+            if (! $filesystem->exists($path)) {
+                return true;
+            }
+
+            if ($filesystem->delete($path) !== false) {
+                return true;
+            }
+
+            $reason = 'the disk reported the delete as failed';
+        } catch (\Throwable $e) {
+            $reason = $e->getMessage();
+        }
+
+        Log::error("Documentable could not delete [{$path}] from disk [{$disk}]: {$reason}. The storage file row is kept so documents:clean-orphaned --storage-files can retry.");
+
+        return false;
+    }
+
+    /**
+     * Move a document to a different owner, typically a detached upload that finally has its real owner.
+     *
+     * The move goes through the same slot and version resolution as an upload. For a single-slot type whose new
+     * owner already holds a latest document, the moved document joins that slot's chain: it takes the group, the
+     * previous latest is demoted (or soft-deleted when the type does not keep history) and the version is
+     * incremented, so the owner never ends up with two "latest" documents. A multi-slot type keeps the moved
+     * document in its own slot, and moving a document to the owner it already has changes nothing.
      */
     public function reassociateDocument(Document $document, Model $newOwner): Document
     {
-        $previousOwner = null;
+        return DB::transaction(function () use ($document, $newOwner) {
+            $previousOwner = null;
 
-        if ($document->documentable_type && $document->documentable_id) {
-            $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
+            if ($document->documentable_type && $document->documentable_id) {
+                $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
 
-            $previousOwner = $morphClass::find($document->documentable_id);
-        }
+                $previousOwner = $morphClass::find($document->documentable_id);
+            }
 
-        $document->update([
-            'documentable_type' => $newOwner->getMorphClass(),
-            'documentable_id' => $newOwner->getKey(),
-        ]);
+            $morphType = $newOwner->getMorphClass();
+            $ownerId = (string) $newOwner->getKey();
 
-        Event::dispatch(new DocumentReassociated($document, $previousOwner));
+            $attributes = ['documentable_type' => $morphType, 'documentable_id' => $ownerId];
+            $supersedes = null;
 
-        return $document;
+            $alreadyOwned = $document->documentable_type === $morphType && (string) $document->documentable_id === $ownerId;
+            $type = DocumentType::withTrashed()->find($document->document_type_id);
+
+            if (! $alreadyOwned && $document->is_latest && $type !== null && ! $type->allows_multiple) {
+                $supersedes = $this->documentRepository->findLatest($morphType, $ownerId, $type->id);
+
+                if ($supersedes !== null) {
+                    $attributes['document_group_id'] = $supersedes->document_group_id;
+                    $attributes['latest_marker'] = $supersedes->document_group_id;
+                    $attributes['version'] = $this->demoteAndResolveVersion($supersedes, $type);
+                }
+            }
+
+            $document->update($attributes);
+
+            if ($supersedes !== null) {
+                Event::dispatch(new DocumentVersionSuperseded($supersedes, $document));
+            }
+
+            Event::dispatch(new DocumentReassociated($document, $previousOwner));
+
+            return $document;
+        });
     }
 
     /**
@@ -379,7 +460,7 @@ class DocumentService
      */
     public function listPartsForSession(string $path, string $uploadId, string $userId, DocumentType $type): array
     {
-        $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
 
         return $this->resolveMultipartDriver($type->disk)->listParts($type->disk, $path, $uploadId);
     }
@@ -422,7 +503,7 @@ class DocumentService
      */
     public function generatePartUploadUrl(string $path, string $uploadId, string $userId, int $partNumber, DocumentType $type): string
     {
-        $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
 
         return $this->resolveMultipartDriver($type->disk)
             ->presignPartUpload($type->disk, $path, $uploadId, $partNumber);
@@ -450,7 +531,7 @@ class DocumentService
     ): Document {
         $this->assertTypeActive($type);
 
-        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
         $driver = $this->resolveMultipartDriver($type->disk);
 
         $parts = $this->resolvePartsForCompletion($driver, $type->disk, $path, $uploadId, $clientParts);
@@ -486,7 +567,7 @@ class DocumentService
      */
     public function abortMultipartUpload(string $path, string $uploadId, string $userId, DocumentType $type): void
     {
-        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId);
+        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
 
         $this->abortSession($session, $type->disk);
     }
@@ -503,7 +584,11 @@ class DocumentService
 
     protected function abortSession(MultipartUpload $session, string $disk): void
     {
-        $this->resolveMultipartDriver($disk)->abort($disk, $session->path, $session->upload_id);
+        try {
+            $this->resolveMultipartDriver($disk)->abort($disk, $session->path, $session->upload_id);
+        } catch (MultipartUploadNotFoundException) {
+            // Already gone on the provider: the abort has reached its goal, so only the row is left to remove.
+        }
 
         $this->multipartUploadRepository->delete($session);
 
@@ -688,13 +773,23 @@ class DocumentService
         return app($driverClass);
     }
 
-    protected function findOwnedSessionOrFail(string $path, string $uploadId, string $userId): MultipartUpload
+    /**
+     * The caller's own session, which must also belong to `$type`: a session is started for one type (disk,
+     * prefix, size limit, mime allow-list), and acting on it under another would sidestep those limits.
+     */
+    protected function findOwnedSessionOrFail(string $path, string $uploadId, string $userId, ?DocumentType $type = null): MultipartUpload
     {
         $session = $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
 
         if (! $session) {
             throw ValidationException::withMessages([
                 'upload_id' => 'Multipart upload session not found or not owned by this user.',
+            ]);
+        }
+
+        if ($type !== null && $session->document_type_id !== $type->id) {
+            throw ValidationException::withMessages([
+                'document_type_id' => 'This upload session was started for a different document type.',
             ]);
         }
 
@@ -836,14 +931,24 @@ class DocumentService
      */
     protected function scanOrDelete(string $disk, string $path): void
     {
-        if (! $this->fileScanner->scan($disk, $path)->isInfected()) {
+        $result = $this->fileScanner->scan($disk, $path);
+
+        if ($result === ScanResult::Clean) {
+            return;
+        }
+
+        if ($result === ScanResult::Error && config('documentable.security.scan_error_policy', 'reject') === 'allow') {
+            Log::warning("Documentable stored [{$path}] on disk [{$disk}] without a scan verdict, because the scanner reported an error and security.scan_error_policy is 'allow'.");
+
             return;
         }
 
         Storage::disk($disk)->delete($path);
 
         throw ValidationException::withMessages([
-            'file' => 'Uploaded file failed a security scan.',
+            'file' => $result->isInfected()
+                ? 'Uploaded file failed a security scan.'
+                : 'Uploaded file could not be scanned. Try again later.',
         ]);
     }
 
