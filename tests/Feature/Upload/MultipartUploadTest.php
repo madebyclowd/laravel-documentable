@@ -179,7 +179,7 @@ class MultipartUploadTest extends TestCase
         );
     }
 
-    public function test_direct_upload_finalize_rejects_oversized_and_disallowed_mime_same_as_multipart(): void
+    public function test_direct_upload_finalize_rejects_oversized_content_without_deleting_the_object(): void
     {
         $this->skipUnlessFakeDiskSupportsUploadUrls();
 
@@ -189,12 +189,27 @@ class MultipartUploadTest extends TestCase
         $presigned = $this->service->createPresignedUpload($type, 'x.bin');
         Storage::disk('test_disk')->put($presigned['path'], 'oversized-content');
 
-        $this->expectException(ValidationException::class);
-
         try {
             $this->service->finalizeDirectUpload($presigned['path'], $type, $owner, 'x.bin');
-        } finally {
-            $this->assertFalse(Storage::disk('test_disk')->exists($presigned['path']));
+            $this->fail('Oversized content must be rejected.');
+        } catch (ValidationException) {
+            // The path is only a client claim on this transport, so a rejected object is left for the
+            // bucket lifecycle rule instead of being deleted.
+            $this->assertTrue(Storage::disk('test_disk')->exists($presigned['path']));
+        }
+    }
+
+    public function test_direct_upload_finalize_rejects_a_disallowed_mime_without_deleting_the_object(): void
+    {
+        $type = $this->makeType(['allowed_mimes' => ['application/pdf']]);
+        $owner = TestModel::create(['name' => 'owner']);
+        Storage::disk('test_disk')->put('uploads/plain.txt', 'plain text, not a pdf');
+
+        try {
+            $this->service->finalizeDirectUpload('uploads/plain.txt', $type, $owner, 'plain.txt');
+            $this->fail('A disallowed mime type must be rejected.');
+        } catch (ValidationException) {
+            $this->assertTrue(Storage::disk('test_disk')->exists('uploads/plain.txt'));
         }
     }
 

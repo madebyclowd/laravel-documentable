@@ -531,6 +531,10 @@ class DocumentService
      * Finalize a direct presigned-PUT upload. Same shared validation +
      * hash-verification path as completeMultipartUpload() — mime is detected
      * from the actual downloaded bytes, never trusted from the client.
+     *
+     * The path is a client-supplied claim here, so this method never deletes the object it was pointed at
+     * when validation or the integrity check fails. A rejected upload stays in the bucket until the bucket
+     * lifecycle rule removes it.
      */
     public function finalizeDirectUpload(
         string $path,
@@ -551,7 +555,7 @@ class DocumentService
 
         $result = $this->hashAndDetectMime($type->disk, $path);
 
-        $this->validateOrDelete($type->disk, $path, $result['size'], $result['mime'], $type);
+        $this->validateSizeAndMime($result['size'], $result['mime'], $type);
         $this->assertIntegrity($result['hash'], $expectedHash);
 
         return DB::transaction(fn () => $this->createDocumentFromUploadedPath(
