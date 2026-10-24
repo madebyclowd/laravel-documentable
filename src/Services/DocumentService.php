@@ -531,6 +531,10 @@ class DocumentService
      * Finalize a direct presigned-PUT upload. Same shared validation +
      * hash-verification path as completeMultipartUpload() — mime is detected
      * from the actual downloaded bytes, never trusted from the client.
+     *
+     * The path is a client-supplied claim here, so this method never deletes the object it was pointed at
+     * when validation or the integrity check fails. A rejected upload stays in the bucket until the bucket
+     * lifecycle rule removes it.
      */
     public function finalizeDirectUpload(
         string $path,
@@ -543,6 +547,14 @@ class DocumentService
     ): Document {
         $this->assertTypeActive($type);
 
+        if ($this->storageFileRepository->existsAtPath($type->disk, $path)) {
+            throw ValidationException::withMessages([
+                'path' => 'This path already backs a stored file and cannot be finalized again.',
+            ]);
+        }
+
+        $this->assertPathIsWithinTypePrefix($type, $path);
+
         if (! Storage::disk($type->disk)->exists($path)) {
             throw ValidationException::withMessages([
                 'path' => 'No file found at the presigned upload path.',
@@ -551,8 +563,8 @@ class DocumentService
 
         $result = $this->hashAndDetectMime($type->disk, $path);
 
-        $this->validateOrDelete($type->disk, $path, $result['size'], $result['mime'], $type);
-        $this->verifyIntegrityOrDelete($type->disk, $path, $result['hash'], $expectedHash);
+        $this->validateSizeAndMime($result['size'], $result['mime'], $type);
+        $this->assertIntegrity($result['hash'], $expectedHash);
 
         return DB::transaction(fn () => $this->createDocumentFromUploadedPath(
             $path,
@@ -563,6 +575,23 @@ class DocumentService
             $metadata,
             $documentGroupId
         ));
+    }
+
+    /**
+     * Opt-in (`security.enforce_path_prefix`): a presigned finalize may only name a key inside the type's
+     * own prefix. Compared on a trailing slash so `invoices-archive/` is not mistaken for `invoices/`.
+     */
+    protected function assertPathIsWithinTypePrefix(DocumentType $type, string $path): void
+    {
+        if (! config('documentable.security.enforce_path_prefix', false)) {
+            return;
+        }
+
+        if (! str_starts_with($path, rtrim($type->path_prefix, '/').'/')) {
+            throw ValidationException::withMessages([
+                'path' => 'The path is outside the storage prefix of this document type.',
+            ]);
+        }
     }
 
     /**
@@ -811,11 +840,26 @@ class DocumentService
 
     protected function verifyIntegrityOrDelete(string $disk, string $path, string $actualHash, ?string $expectedHash): void
     {
+        try {
+            $this->assertIntegrity($actualHash, $expectedHash);
+        } catch (ValidationException $e) {
+            Storage::disk($disk)->delete($path);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Compare the server-computed hash with the one the client declared, without touching storage. Use
+     * this where the object was not written by this package in the current request (a presigned PUT),
+     * because there the path is only a client-supplied claim and deleting it would destroy data the
+     * caller may not own.
+     */
+    protected function assertIntegrity(string $actualHash, ?string $expectedHash): void
+    {
         if ($expectedHash === null || hash_equals($expectedHash, $actualHash)) {
             return;
         }
-
-        Storage::disk($disk)->delete($path);
 
         throw ValidationException::withMessages([
             'file' => "Integrity check failed. Server hash ({$actualHash}) does not match client hash ({$expectedHash}).",

@@ -7,6 +7,18 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * @property string $id
+ * @property string $code
+ * @property string $name
+ * @property int $max_size_mb
+ * @property array<int, string>|null $allowed_mimes
+ * @property string $disk
+ * @property string $path_prefix
+ * @property bool $requires_versioning
+ * @property bool $allows_multiple
+ * @property int|null $max_versions_to_keep
+ */
 class DocumentType extends Model
 {
     use HasUuids, SoftDeletes;
