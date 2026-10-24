@@ -9,6 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * @property string $status
+ * @property \Illuminate\Support\Carbon|null $expires_at
+ */
 class Document extends Model
 {
     use HasUuids, SoftDeletes;
