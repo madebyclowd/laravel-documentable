@@ -82,9 +82,11 @@ jobs:
         # per entry.
         #
         # Full PHP x Laravel matrix runs on sqlite (fast). The uniqueness/
-        # versioning logic (package-plan.md §5) is the part most likely to
-        # silently pass on one engine and fail on another, so the latest
-        # PHP/Laravel combo additionally runs against mysql and pgsql.
+        # versioning logic (package-plan.md §5) and column widths are the parts
+        # most likely to silently pass on sqlite and fail on another engine
+        # (sqlite ignores varchar length), so every supported Laravel major
+        # additionally runs against mysql and pgsql, on the oldest PHP that
+        # major supports. v3 runs every leg on every engine.
         include:
           - php: 8.2
             laravel: 11.*
@@ -120,6 +122,26 @@ jobs:
             laravel: 13.*
             testbench: 11.*
             db: sqlite
+            stability: prefer-stable
+          - php: 8.2
+            laravel: 11.*
+            testbench: 9.*
+            db: mysql
+            stability: prefer-stable
+          - php: 8.2
+            laravel: 11.*
+            testbench: 9.*
+            db: pgsql
+            stability: prefer-stable
+          - php: 8.3
+            laravel: 12.*
+            testbench: 10.*
+            db: mysql
+            stability: prefer-stable
+          - php: 8.3
+            laravel: 12.*
+            testbench: 10.*
+            db: pgsql
             stability: prefer-stable
           - php: 8.4
             laravel: 13.*

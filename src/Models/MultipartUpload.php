@@ -5,7 +5,16 @@ namespace MadeByClowd\Documentable\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
+/**
+ * @property string $id
+ * @property string $path
+ * @property string $upload_id
+ * @property string $user_id
+ * @property string $document_type_id
+ * @property Carbon|null $expires_at
+ */
 class MultipartUpload extends Model
 {
     use HasUuids;

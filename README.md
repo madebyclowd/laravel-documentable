@@ -377,6 +377,25 @@ is always safe (last-write-wins across S3/R2/MinIO/Spaces — see the `Multipart
 interface docblock for the exact provider-by-provider guarantee, including one R2 edge case), but
 diffing first avoids the wasted transfer.
 
+### Provider notes
+
+What differs between S3-compatible providers for multipart uploads. "Verified" means checked against a real
+bucket while preparing this release; the rest is the provider's documented behavior, so test it before
+relying on it.
+
+| | AWS S3 | Cloudflare R2 | MinIO / RustFS | Backblaze B2 | DO Spaces |
+|---|---|---|---|---|---|
+| Minimum part size (except the last) | 5 MiB | 5 MiB | 5 MiB | 5 MB | 5 MiB |
+| Maximum parts | 10,000 | 10,000 | 10,000 | 10,000 | 10,000 |
+| All parts except the last must be the same size | no | **yes (verified)**: use one fixed part size | no | no | no |
+| Upload id length | short | **343 characters (verified)** | short | unverified | unverified |
+| Browser needs `ExposeHeaders: ETag` in CORS (`etag_strategy = client`) | yes | **yes (verified works)** | yes | yes | yes |
+| Unfinished uploads expire on their own | only with a lifecycle rule | only with a lifecycle rule | only with a lifecycle rule | only with a lifecycle rule | unverified |
+
+Upload ids longer than 255 characters need the `2026_10_24_000006` and `000007` migrations from this
+release (`php artisan migrate`); they widen `multipart_uploads.path`, `multipart_uploads.upload_id` and
+`storage_files.path` to `text` and are safe to run on a table you already widened yourself.
+
 ### Same two flows without the shipped routes — direct service calls
 
 ```php
