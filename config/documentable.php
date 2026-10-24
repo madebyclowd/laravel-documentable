@@ -113,6 +113,10 @@ return [
     'lifecycle' => [
         'pending_ttl_hours' => 24,
         'reaper_frequency' => 'hourly',
+
+        // `documents:clean-orphaned --storage-files` only touches stored files older than this, so a file
+        // whose document is still being created in the same upload is never swept.
+        'storage_file_grace_hours' => 24,
     ],
 
     /*
