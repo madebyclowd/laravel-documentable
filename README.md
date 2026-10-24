@@ -456,6 +456,14 @@ the package can't enforce them from the browser:
 
 ## Advanced usage
 
+**Owners with integer, uuid or ulid keys.** `documents.documentable_id` is a string column, and
+`documents()` sends the owner key as a string everywhere it meets that column, so `$owner->documents`,
+`Owner::with('documents')`, `whereHas('documents', ...)` and `withCount('documents')` all work on
+PostgreSQL for an owner with an integer primary key. You no longer need an `idAsString` accessor or
+`$keyType = 'string'` on such a model, though keeping them is harmless. One cost: on PostgreSQL,
+`whereHas`/`withCount` cast the owner key for the comparison, which cannot use an index on
+`documentable_id` until a later major version types that column.
+
 **Multiple independently-versioned slots per owner** (`allows_multiple = true`,
 `requires_versioning = true` on the type):
 
