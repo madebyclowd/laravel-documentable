@@ -552,7 +552,7 @@ class DocumentService
         $result = $this->hashAndDetectMime($type->disk, $path);
 
         $this->validateOrDelete($type->disk, $path, $result['size'], $result['mime'], $type);
-        $this->verifyIntegrityOrDelete($type->disk, $path, $result['hash'], $expectedHash);
+        $this->assertIntegrity($result['hash'], $expectedHash);
 
         return DB::transaction(fn () => $this->createDocumentFromUploadedPath(
             $path,
@@ -811,11 +811,26 @@ class DocumentService
 
     protected function verifyIntegrityOrDelete(string $disk, string $path, string $actualHash, ?string $expectedHash): void
     {
+        try {
+            $this->assertIntegrity($actualHash, $expectedHash);
+        } catch (ValidationException $e) {
+            Storage::disk($disk)->delete($path);
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Compare the server-computed hash with the one the client declared, without touching storage. Use
+     * this where the object was not written by this package in the current request (a presigned PUT),
+     * because there the path is only a client-supplied claim and deleting it would destroy data the
+     * caller may not own.
+     */
+    protected function assertIntegrity(string $actualHash, ?string $expectedHash): void
+    {
         if ($expectedHash === null || hash_equals($expectedHash, $actualHash)) {
             return;
         }
-
-        Storage::disk($disk)->delete($path);
 
         throw ValidationException::withMessages([
             'file' => "Integrity check failed. Server hash ({$actualHash}) does not match client hash ({$expectedHash}).",
