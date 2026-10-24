@@ -571,14 +571,20 @@ set `$afterCommit` too, so the queue never picks up work before the row is visib
 
 ## AI agent context (Laravel Boost)
 
-The package ships `resources/boost/guidelines/core.blade.php` (upfront package overview) and
-`resources/boost/skills/laravel-documentable/SKILL.md` (detailed reference — upload transports,
-versioning semantics, security checklist, every artisan command). If you have
+The package ships `resources/boost/guidelines/laravel-documentable.blade.php` (a short upfront
+overview: conventions, operational commands, pitfalls) and
+`resources/boost/skills/laravel-documentable/SKILL.md` (the detailed reference: upload transports,
+versioning semantics, the security checklist, every artisan command, troubleshooting). If you have
 [Laravel Boost](https://github.com/laravel/boost) installed (`composer require laravel/boost --dev`
 + `php artisan boost:install`), both are **auto-discovered from `vendor/`** — nothing to run in
 this package. Boost decides the actual per-agent install location itself (its `ClaudeCode` agent
 class targets `.claude/skills/`, other supported agents have their own conventions) — this package
 doesn't hardcode a directory for that, and no longer tries to guess one.
+
+Boost copies these files into your project, so the copy goes stale when the package changes. **Run
+`php artisan boost:update` after every `composer update madebyclowd/laravel-documentable`.** Since
+2.1.3 the guideline file is named `laravel-documentable.blade.php` after the package, so a project
+that installed an older version shows the guideline under a new heading after the update.
 
 Without Boost, read the files directly from
 `vendor/madebyclowd/laravel-documentable/resources/boost/` and copy the skill into whatever your
