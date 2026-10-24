@@ -63,7 +63,7 @@ parameters:
 		-
 			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$disk\.$#'
 			identifier: property.notFound
-			count: 6
+			count: 4
 			path: src/Services/DocumentService.php
 
 		-
