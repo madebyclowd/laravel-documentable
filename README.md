@@ -377,6 +377,21 @@ is always safe (last-write-wins across S3/R2/MinIO/Spaces — see the `Multipart
 interface docblock for the exact provider-by-provider guarantee, including one R2 edge case), but
 diffing first avoids the wasted transfer.
 
+### Disk
+
+Set `'throw' => true` on the disk your document types use (`config/filesystems.php`). Laravel's default for
+`s3` is `false`, which reports a failed write or delete as `false` instead of an exception. The package checks
+those results where it can, but anything else touching the disk silently loses them.
+`documents:sync-types` warns when a type uses a disk without it.
+
+### Deploy
+
+Run `php artisan documents:sync-types` on every deploy, next to `migrate`. It is idempotent, reports what it
+created and updated, and lists types that exist only in the database. `php artisan about` shows whether config
+and the table agree. Apply `documents:configure-bucket-lifecycle` once per bucket as a backstop for abandoned
+uploads. The shipped routes use a rate limiter named by `documentable.throttle` and, if you define none, the
+package registers one that does not limit anything, so define `RateLimiter::for('documents', ...)` yourself.
+
 ### Provider notes
 
 What differs between S3-compatible providers for multipart uploads. "Verified" means checked against a real
@@ -532,6 +547,14 @@ Event::listen(function (\MadeByClowd\Documentable\Events\DocumentUploaded $event
 });
 ```
 
+The document events (`DocumentUploaded`, `DocumentDeleted`, `DocumentPurged`, `DocumentReassociated`,
+`DocumentVersionSuperseded`, and the multipart ones) implement `ShouldDispatchAfterCommit`. Outside a
+transaction they fire immediately. Inside one, including your own around a call to the service, they wait
+for the outermost commit and are dropped if it rolls back. A listener therefore always sees the committed
+row, but it can no longer abort the surrounding transaction by throwing. Queued listeners should implement
+`ShouldQueueAfterCommit` (or set `public $afterCommit = true`), and jobs you dispatch from a listener should
+set `$afterCommit` too, so the queue never picks up work before the row is visible.
+
 ## Artisan commands
 
 | Command | Purpose |
@@ -577,7 +600,7 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
     'etag_strategy' => 'server-authoritative', // or 'client'
     'part_upload_url_ttl' => '+1 hour',
     'session_ttl_hours' => 24,
-    'use_native_checksum' => false, // optional S3 additional-checksums fast path
+    'use_native_checksum' => false, // leave false: S3 multipart checksums are composite and never equal the file's SHA-256
     'drivers' => ['s3' => S3MultipartDriver::class],
 ],
 'lifecycle' => ['pending_ttl_hours' => 24, 'reaper_frequency' => 'hourly'],
