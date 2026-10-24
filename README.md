@@ -225,7 +225,18 @@ GET /documents/types
 Read-only catalog of active `DocumentType`s — `id`/`code`/`name`/`max_size_mb`/`allowed_mimes`/
 `allows_multiple`/`requires_versioning`, no pagination. Gives the frontend a way to fetch a
 `document_type_id` without direct DB access or `php artisan documents:list` (CLI-only). Soft-deleted
-(deactivated) types are excluded.
+(deactivated) types are excluded. Only types the authorizer's `canUpload($user, $type, null)` accepts
+are listed.
+
+### Temporary URLs
+
+```
+GET /documents/{document}/url?disposition=inline|attachment&expires_in_minutes=5
+```
+
+`disposition` must be `inline` (default) or `attachment`. `expires_in_minutes` is an integer from 1
+up to `documentable.url.max_ttl_minutes` (default 1440, default request 5); anything else is a 422.
+A `pending` document past its `expires_at` answers 404.
 
 ### Listing an owner's documents
 
@@ -287,8 +298,11 @@ so pagination (`config('documentable.listing.per_page')`, default 50) runs over 
 
 **1. Initiate.** Creates the multipart session on the bucket plus a DB row scoped to `user_id` —
 every later call for this session must supply the *same* `user_id` or it's rejected (this is the
-ownership check, not decorative). If you omit `user_id`, the controller falls back to
-`$request->user()->getAuthIdentifier()`.
+ownership check, not decorative). The owner is `$request->user()->getAuthIdentifier()`. A `user_id`
+in the request body is **ignored** unless you set `documentable.security.allow_guest_user_id` to `true`
+(discouraged: anyone who can reach the route can then name any owner, so only use it for a guest or
+device flow you protect another way). `part-url`, `parts`, `status` and `abort` call
+`AuthorizesDocumentAccess::canUpload()` for the session's type, like `initiate` does.
 
 ```
 POST /documents/multipart/initiate
@@ -579,6 +593,9 @@ permissive so the package works immediately, not because they're safe to ship as
    receives a `null` `$documentable` from `storeDetached()`/multipart `initiate()` (no owner attached
    yet) — the generated stub branches on this explicitly rather than falling through to an ownership
    check that can never pass for `null`.
+
+In production, booting with the routes mounted and the permissive authorizer logs one warning and
+shows `Insecure in production: yes` under `php artisan about`. It does not stop the app.
 
 Neither of these is optional in combination: an allowlisted/morph-mapped type with a permissive
 authorizer still lets any caller attach/view/delete documents against any instance of that type.

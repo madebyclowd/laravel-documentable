@@ -9,6 +9,7 @@ use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Http\Requests\ListDocumentsRequest;
 use MadeByClowd\Documentable\Http\Requests\UploadDetachedDocumentRequest;
 use MadeByClowd\Documentable\Http\Requests\UploadDocumentRequest;
+use MadeByClowd\Documentable\Http\Requests\UrlRequest;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Services\DocumentService;
 
@@ -102,16 +103,17 @@ class DocumentController extends Controller
         return response()->json($document->load('storageFile'), 201);
     }
 
-    public function url(Request $request, Document $document): JsonResponse
+    public function url(UrlRequest $request, Document $document): JsonResponse
     {
         if (! $this->authorizer->canView($request->user(), $document)) {
             abort(403);
         }
 
-        $disposition = $request->input('disposition', 'inline');
-        $expiresInMinutes = (int) $request->input('expires_in_minutes', 5);
+        if ($document->status === 'pending' && $document->expires_at?->isPast()) {
+            abort(404);
+        }
 
-        $url = $this->service->getUrl($document, now()->addMinutes($expiresInMinutes), $disposition);
+        $url = $this->service->getUrl($document, now()->addMinutes($request->expiresInMinutes()), $request->disposition());
 
         return response()->json(['url' => $url]);
     }

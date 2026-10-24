@@ -42,18 +42,22 @@ abstract class Controller extends BaseController
     }
 
     /**
-     * Ownership-scoped operations (multipart sessions) need a stable user
-     * identifier. Prefer the authenticated request user (whatever guard the
-     * consuming app configured — package doesn't hardcode one); fall back to
-     * an explicit user_id field for guest/device-scoped upload flows.
+     * Ownership-scoped operations (multipart sessions) need a stable user identifier. It comes from the
+     * authenticated request user, whatever guard the consuming app configured (the package does not hardcode
+     * one). A client-supplied `user_id` is only honoured when `security.allow_guest_user_id` is on, because
+     * anyone who can send the request can name any owner, including another user's session.
      */
     protected function resolveUserId(Request $request): string
     {
-        $userId = $request->user()?->getAuthIdentifier() ?? $request->input('user_id');
+        $userId = $request->user()?->getAuthIdentifier();
+
+        if ($userId === null && config('documentable.security.allow_guest_user_id', false)) {
+            $userId = $request->input('user_id');
+        }
 
         if ($userId === null) {
             throw ValidationException::withMessages([
-                'user_id' => 'An authenticated user or an explicit user_id is required.',
+                'user_id' => 'An authenticated user is required.',
             ]);
         }
 
