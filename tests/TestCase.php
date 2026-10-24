@@ -4,7 +4,6 @@ namespace MadeByClowd\Documentable\Tests;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Application;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\DocumentableServiceProvider;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
@@ -74,22 +73,16 @@ abstract class TestCase extends OrchestraTestCase
         });
 
         $app['config']->set('documentable.load_migrations', true);
+    }
 
-        // Stand-in "documentable" owner model used across feature tests — not part of
-        // the package, just a fixture to attach documents to. Created here (app-boot
-        // time), not in setUp(), because RefreshDatabase's per-test transaction has
-        // already begun by the time setUp() runs — DDL inside that transaction causes
-        // an implicit commit on MySQL, silently desyncing the savepoint stack for the
-        // rest of the test and surfacing as "SAVEPOINT trans2 does not exist" the next
-        // time a nested DB::transaction() needs to roll back (does not affect sqlite/
-        // pgsql, which support transactional DDL).
-        if (! Schema::hasTable('test_models')) {
-            Schema::create('test_models', function ($table) {
-                $table->id();
-                $table->string('name')->nullable();
-                $table->timestamps();
-            });
-        }
+    /**
+     * Registered before RefreshDatabase runs `migrate:fresh`, so the `test_models` fixture table is built
+     * with the package tables on every engine. Creating it at app boot instead let the first `migrate:fresh`
+     * of a process drop it, which made the pgsql suite fail depending on the random test order.
+     */
+    protected function defineDatabaseMigrations(): void
+    {
+        $this->loadMigrationsFrom(__DIR__.'/database/migrations');
     }
 
     /**
