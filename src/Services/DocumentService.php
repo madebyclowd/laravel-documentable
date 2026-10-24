@@ -28,6 +28,7 @@ use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Events\MultipartUploadAborted;
 use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
 use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
+use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
@@ -583,7 +584,11 @@ class DocumentService
 
     protected function abortSession(MultipartUpload $session, string $disk): void
     {
-        $this->resolveMultipartDriver($disk)->abort($disk, $session->path, $session->upload_id);
+        try {
+            $this->resolveMultipartDriver($disk)->abort($disk, $session->path, $session->upload_id);
+        } catch (MultipartUploadNotFoundException) {
+            // Already gone on the provider: the abort has reached its goal, so only the row is left to remove.
+        }
 
         $this->multipartUploadRepository->delete($session);
 

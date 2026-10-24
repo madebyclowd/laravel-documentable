@@ -2,9 +2,11 @@
 
 namespace MadeByClowd\Documentable\Drivers;
 
+use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
+use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 
 /**
  * Covers S3, R2, MinIO, DigitalOcean Spaces, and any other S3-API-compatible
@@ -104,11 +106,19 @@ class S3MultipartDriver implements MultipartUploadDriver
 
     public function abort(string $disk, string $path, string $uploadId): void
     {
-        $this->client($disk)->abortMultipartUpload([
-            'Bucket' => $this->bucket($disk),
-            'Key' => $path,
-            'UploadId' => $uploadId,
-        ]);
+        try {
+            $this->client($disk)->abortMultipartUpload([
+                'Bucket' => $this->bucket($disk),
+                'Key' => $path,
+                'UploadId' => $uploadId,
+            ]);
+        } catch (S3Exception $e) {
+            if ($e->getAwsErrorCode() === 'NoSuchUpload') {
+                throw MultipartUploadNotFoundException::forUpload($path, $uploadId, $e);
+            }
+
+            throw $e;
+        }
     }
 
     public function retrieveChecksum(string $disk, string $path): ?string

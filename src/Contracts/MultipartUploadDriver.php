@@ -2,6 +2,8 @@
 
 namespace MadeByClowd\Documentable\Contracts;
 
+use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
+
 /**
  * Isolates provider-specific multipart upload API calls out of DocumentService.
  * Resolved by the disk's Flysystem driver name (config('documentable.multipart.drivers')),
@@ -47,6 +49,12 @@ interface MultipartUploadDriver
      */
     public function complete(string $disk, string $path, string $uploadId, array $parts): void;
 
+    /**
+     * Abort the provider-side upload and free its stored parts.
+     *
+     * @throws MultipartUploadNotFoundException when the provider has no such
+     *                                          upload any more; the caller treats that as already aborted.
+     */
     public function abort(string $disk, string $path, string $uploadId): void;
 
     /**

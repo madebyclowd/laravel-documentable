@@ -72,8 +72,20 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
         unset(static::$sessions[$uploadId]);
     }
 
+    /**
+     * Upload ids whose abort() throws the given exception, to simulate a provider that no longer knows the
+     * upload or is unreachable.
+     *
+     * @var array<string, \Throwable>
+     */
+    public static array $abortErrors = [];
+
     public function abort(string $disk, string $path, string $uploadId): void
     {
+        if (isset(static::$abortErrors[$uploadId])) {
+            throw static::$abortErrors[$uploadId];
+        }
+
         unset(static::$sessions[$uploadId]);
     }
 
@@ -99,5 +111,6 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
         static::$sessions = [];
         static::$fakeChecksum = null;
         static::$longIds = false;
+        static::$abortErrors = [];
     }
 }

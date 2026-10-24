@@ -3,10 +3,12 @@
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Services\DocumentService;
+use Throwable;
 
 /**
  * Replaces the reference app's CleanOrphanedPendingDocumentsCommand, which
@@ -51,18 +53,30 @@ class CleanOrphanedDocumentsCommand extends Command
         }
 
         $aborted = 0;
+        $failed = 0;
         foreach ($staleSessions->get() as $session) {
-            $service->abortMultipartUploadSession($session);
-            $aborted++;
+            try {
+                $service->abortMultipartUploadSession($session);
+                $aborted++;
+            } catch (Throwable $e) {
+                // One unreachable or misbehaving session must not stop the rest of the sweep. Its row stays,
+                // so the next run retries it.
+                $failed++;
+                Log::error("documents:clean-orphaned could not abort multipart session [{$session->id}]: {$e->getMessage()}");
+            }
         }
 
         $this->info("Purged {$purged} expired pending document(s), aborted {$aborted} stale multipart session(s).");
+
+        if ($failed > 0) {
+            $this->error("{$failed} multipart session(s) could not be aborted and stay for the next run.");
+        }
 
         if ($this->option('storage-files')) {
             $this->sweepStorageFiles($service, $hoursOverride);
         }
 
-        return self::SUCCESS;
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
     }
 
     /**
