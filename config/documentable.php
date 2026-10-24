@@ -175,6 +175,25 @@ return [
         // tenant sharding) legitimately produces other layouts. Turn it on if you keep the default
         // "{path_prefix}/{uuid}" layout.
         'enforce_path_prefix' => false,
+
+        // Discouraged. When true and nobody is authenticated, the multipart endpoints accept `user_id`
+        // from the request body as the session owner. Anyone who can reach the route can then name any
+        // owner, so only enable it for a device/guest flow you protect another way (signed URLs, a
+        // device token checked by your own middleware). Authenticated requests always use the real user.
+        'allow_guest_user_id' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Temporary URLs
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound, in minutes, a client may ask for through
+    | GET /documents/{document}/url?expires_in_minutes=. The default request is 5 minutes.
+    |
+    */
+    'url' => [
+        'max_ttl_minutes' => 1440,
     ],
 
     /*

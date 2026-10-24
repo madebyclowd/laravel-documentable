@@ -27,6 +27,9 @@ class HttpControllersTest extends TestCase
         Storage::fake('test_disk');
         config()->set('documentable.multipart.drivers.local', FakeMultipartUploadDriver::class);
         FakeMultipartUploadDriver::reset();
+
+        // These tests drive the multipart endpoints as an unauthenticated guest, which is the opt-in path.
+        config()->set('documentable.security.allow_guest_user_id', true);
     }
 
     protected function makeType(array $overrides = []): DocumentType

@@ -408,6 +408,15 @@ class DocumentService
     }
 
     /**
+     * The caller's own multipart session, or null when there is none. Lets the controller layer authorize
+     * against the session's document type before it answers a status probe.
+     */
+    public function findMultipartSession(string $path, string $uploadId, string $userId): ?MultipartUpload
+    {
+        return $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
+    }
+
+    /**
      * Presign one part's upload URL. TTL comes from config, not a hardcoded
      * literal (reference code hardcoded '+1 hour' inline).
      */

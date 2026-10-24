@@ -4,6 +4,8 @@ namespace MadeByClowd\Documentable;
 
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Foundation\Console\AboutCommand;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use MadeByClowd\Documentable\Console\Commands\AttachModelCommand;
@@ -67,7 +69,11 @@ class DocumentableServiceProvider extends ServiceProvider
             $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
         }
 
+        $this->registerAboutSection();
+
         $this->app->booted(function () {
+            $this->warnAboutInsecureProductionSetup();
+
             $limiterName = config('documentable.throttle', 'documents');
 
             if (! RateLimiter::limiter($limiterName)) {
@@ -107,5 +113,42 @@ class DocumentableServiceProvider extends ServiceProvider
                 $schedule->command('documents:clean-orphaned')->{$frequency}();
             });
         }
+    }
+
+    /**
+     * Production with the package routes mounted and the allow-everything authorizer means any caller can
+     * upload, view and delete. A patch release must not fail boot over it, so it is a warning and an
+     * `about` row, and the secure default (deny-all, boot failure) is left to the next major.
+     */
+    protected function isInsecureProductionSetup(): bool
+    {
+        if (! $this->app->isProduction() || ! config('documentable.load_routes', true)) {
+            return false;
+        }
+
+        $resolver = config('documentable.authorization.resolver') ?? PermissiveDocumentAuthorizer::class;
+
+        return is_a($resolver, PermissiveDocumentAuthorizer::class, true);
+    }
+
+    protected function warnAboutInsecureProductionSetup(): void
+    {
+        if (! $this->isInsecureProductionSetup()) {
+            return;
+        }
+
+        Log::warning('Documentable is mounted with the permissive authorizer in production, so every caller can upload, view and delete documents. Set documentable.authorization.resolver to your own AuthorizesDocumentAccess implementation (php artisan make:document-authorizer).');
+    }
+
+    protected function registerAboutSection(): void
+    {
+        AboutCommand::add('Documentable', fn () => [
+            'Authorizer' => config('documentable.authorization.resolver') ?? PermissiveDocumentAuthorizer::class,
+            'Routes' => config('documentable.load_routes', true) ? 'mounted' : 'not mounted',
+            'Middleware' => implode(', ', (array) config('documentable.middleware', ['api'])),
+            'Throttle' => (string) config('documentable.throttle', 'documents'),
+            'Guest user_id' => config('documentable.security.allow_guest_user_id', false) ? 'allowed' : 'ignored',
+            'Insecure in production' => $this->isInsecureProductionSetup() ? 'yes' : 'no',
+        ]);
     }
 }
