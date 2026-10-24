@@ -24,9 +24,17 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
      */
     public static ?string $fakeChecksum = null;
 
+    /**
+     * When true, `create()` returns a 512 character upload id, the shape Cloudflare R2 produces (343
+     * characters) and then some, so tests can prove the session table stores ids a varchar(255) cannot.
+     */
+    public static bool $longIds = false;
+
     public function create(string $disk, string $path, string $filename): array
     {
-        $uploadId = (string) Str::uuid();
+        $uploadId = static::$longIds
+            ? substr(str_repeat(Str::uuid()->toString().'-', 16), 0, 512)
+            : (string) Str::uuid();
 
         static::$sessions[$uploadId] = [];
 
@@ -90,5 +98,6 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
     {
         static::$sessions = [];
         static::$fakeChecksum = null;
+        static::$longIds = false;
     }
 }
