@@ -56,23 +56,23 @@ final class DocumentsMorphMany extends MorphMany
         $grammar = $query->getQuery()->getGrammar();
 
         return $query->select($columns)
-            ->whereRaw($this->castToString($grammar->wrap($this->getQualifiedParentKeyName())).' = '.$grammar->wrap($this->getExistenceCompareKey()))
+            ->whereRaw($this->castToString($grammar->wrap($this->getQualifiedParentKeyName()), $query->getConnection()->getDriverName()).' = '.$grammar->wrap($this->getExistenceCompareKey()))
             ->where($query->qualifyColumn($this->getMorphType()), $this->morphClass);
     }
 
     /**
-     * Wraps a column expression so it compares with a string column on the current connection. A string-keyed
+     * Wraps a column expression so it compares with a string column on the connection that runs the query. A string-keyed
      * owner needs nothing. SQLite compares by affinity and MySQL coerces the integer itself; casting there would
      * only add a collation clash, because `CAST(... AS char)` takes the connection collation, not the column's
      * (`Illegal mix of collations`). Only PostgreSQL and SQL Server refuse the mixed comparison.
      */
-    private function castToString(string $wrappedColumn): string
+    private function castToString(string $wrappedColumn, string $driver): string
     {
         if ($this->parent->getKeyName() === $this->localKey && $this->parent->getKeyType() === 'string') {
             return $wrappedColumn;
         }
 
-        return match ($this->parent->getConnection()->getDriverName()) {
+        return match ($driver) {
             'pgsql' => "CAST({$wrappedColumn} AS varchar)",
             'sqlsrv' => "CAST({$wrappedColumn} AS nvarchar(255))",
             default => $wrappedColumn,
