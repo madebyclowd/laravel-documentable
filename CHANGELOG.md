@@ -7,6 +7,19 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.2] - 2026-10-26
+
+### Changed
+- `DocumentService` is now a facade over focused internal classes (`DirectUploadService`, `MultipartUploadService`, `ObjectVerifier`, `DocumentAttacher`, `UrlSigner`, `DocumentPurger`, `AccessLogger`). Its public methods keep their names and signatures. Its protected members and constructor are gone, so a subclass that overrode or called them must switch to the public methods, the package events, or the contracts. Resolve the service from the container instead of constructing it.
+- `documents:clean-orphaned` now expires upload sessions past their expiry instead of sweeping `pending` documents and `multipart_uploads`. Expiring a session aborts an open multipart upload on the provider, or deletes the object it holds, unless the session was attached in the meantime. `--hours` expires any open session older than that.
+- Every upload transport now runs on an upload session, and `DocumentService::attach($session, $owner, new AttachOptions(...))` is the only way a session becomes a document. Presigned finalize and multipart complete take a `session_id` instead of a `path` and an `upload_id`, so a client can no longer point them at another object in your bucket. Only the user a session was started under can drive it (403 otherwise), a `document_type_id` that disagrees with the session's type is a 422, and an expired session refuses to complete. A failed check now deletes the object and aborts the session. The owner fields are optional on `POST /documents`, `presigned/finalize` and `multipart/complete`; without them the response is the `uploaded` session, to attach later with the new `POST /documents/attach`. `document_group_id` must name a group the owner already holds. Service signatures changed: `initiatePresignedUpload` replaces `createPresignedUpload`, and `initiateMultipartUpload`, `generatePartUploadUrl`, `listPartsForSession`, `completeMultipartUpload` and `finalizeDirectUpload` take sessions.
+
+### Removed
+- Removes `DocumentService::uploadDetached()`, `reassociateDocument()` and `Document::commit()`, the `pending` document status and scope, the `lifecycle.pending_ttl_hours` and `security.enforce_path_prefix` options, `POST /documents/detached`, the `GET /documents/multipart/status` fields `path` and `upload_id`, the `DocumentReassociated` event, and the `MultipartUpload` model and `multipart_uploads` table. Replace them with `stageUpload()` (or `POST /documents` without owner fields) followed by `attach()`. Document statuses are now `committed`, `processing` and `rejected` (`DocumentStatus`). The migration that drops `multipart_uploads` refuses to run while an unexpired session is open; set `DOCUMENTABLE_FORCE_DRAIN=true` to abort those provider uploads and drop the table. Open `pending` documents are converted to `uploaded` sessions; expired ones are deleted.
+
+### Added
+- Adds the `upload_sessions` table, the `UploadSession` model, the `UploadSessionStatus` and `UploadKind` enums, `UploadSessionData` and `AttachOptions`. A session is the server-side record of one upload in progress: its ULID is the only handle a client holds, and the storage path and provider upload id stay on the server. Publish and run the new migrations with `php artisan migrate`.
+
 ## [3.0.0-alpha.1] - 2026-10-26
 
 ### Changed
@@ -126,3 +139,5 @@ Initial release.
 [2.1.3]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.2...v2.1.3
 
 [3.0.0-alpha.1]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.3...v3.0.0-alpha.1
+
+[3.0.0-alpha.2]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.1...v3.0.0-alpha.2
