@@ -8,9 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
-use MadeByClowd\Documentable\Models\Document;
-use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
 
 /**
@@ -26,7 +25,6 @@ final class StoredObjectRegistrar
         private readonly StorageFileRepository $storageFileRepository,
         private readonly ResolvesDedupScope $dedupScopeResolver,
         private readonly ObjectVerifier $verifier,
-        private readonly DocumentAttacher $attacher,
     ) {}
 
     /**
@@ -57,14 +55,17 @@ final class StoredObjectRegistrar
         callable $pathProvider,
         string $mimeType,
         int $sizeBytes,
-        array $metadata = []
+        array $metadata = [],
+        bool $scan = true
     ): StorageFile {
         $storageFile = $this->storageFileRepository->findByHash($hash);
 
         if (! $storageFile) {
             $path = $pathProvider();
 
-            $this->deleteOnFailure($disk, $path, fn () => $this->verifier->assertScanClean($disk, $path));
+            if ($scan) {
+                $this->deleteOnFailure($disk, $path, fn () => $this->verifier->assertScanClean($disk, $path));
+            }
 
             $storageFile = $this->storageFileRepository->create([
                 'file_hash' => $hash,
@@ -80,48 +81,31 @@ final class StoredObjectRegistrar
     }
 
     /**
-     * Register (or dedup-reuse) the StorageFile for a path that was already
-     * written by the provider before the hash was known (multipart assembly
-     * / a client PUT both land bytes before this point). On a dedup hit, the
-     * just-written $path is a redundant duplicate of already-stored content
-     * and is deleted — unlike upload()'s local-file path, this path can't
-     * avoid the write up front, so it must clean up after the fact instead.
+     * The stored file behind a verified session object, found or created under the dedup scope of `$owner`.
+     * The scope depends on the owner (a tenant, say), which is why this runs at attach and not at finalize.
      *
-     * @param  array{hash: string, mime: string, size: int}  $fileInfo
-     * @param  array<string, mixed>  $metadata
+     * On a dedup hit the session's own object is a redundant copy and is deleted, unless the existing stored
+     * file already points at that very path.
      */
-    public function registerUploadedPath(
-        string $path,
-        DocumentType $type,
-        Model $documentable,
-        string $originalFilename,
-        array $fileInfo,
-        array $metadata,
-        ?string $documentGroupId
-    ): Document {
-        $dedupKey = $this->dedupScopeResolver->scopeKey($fileInfo['hash'], $documentable);
-        $isDuplicate = $this->storageFileRepository->findByHash($dedupKey) !== null;
+    public function registerSessionObject(UploadSession $session, Model $owner): StorageFile
+    {
+        $dedupKey = $this->dedupScopeResolver->scopeKey((string) $session->object_hash, $owner);
+        $existing = $this->storageFileRepository->findByHash($dedupKey);
 
         $storageFile = $this->getOrCreateStorageFile(
             $dedupKey,
-            $type->disk,
-            fn () => $path,
-            $fileInfo['mime'],
-            $fileInfo['size'],
-            $metadata
+            $session->disk,
+            fn () => $session->path,
+            (string) $session->object_mime,
+            (int) $session->object_size,
+            [],
+            scan: false
         );
 
-        if ($isDuplicate) {
-            Storage::disk($type->disk)->delete($path);
+        if ($existing !== null && $existing->path !== $session->path) {
+            Storage::disk($session->disk)->delete($session->path);
         }
 
-        return $this->attacher->attachStorageFile(
-            $storageFile,
-            $type,
-            $documentable,
-            $originalFilename,
-            $metadata,
-            $documentGroupId
-        );
+        return $storageFile;
     }
 }

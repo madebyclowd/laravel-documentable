@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
@@ -7,7 +9,6 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Http\Requests\ListDocumentsRequest;
-use MadeByClowd\Documentable\Http\Requests\UploadDetachedDocumentRequest;
 use MadeByClowd\Documentable\Http\Requests\UploadDocumentRequest;
 use MadeByClowd\Documentable\Http\Requests\UrlRequest;
 use MadeByClowd\Documentable\Models\Document;
@@ -62,9 +63,22 @@ class DocumentController extends Controller
         ]);
     }
 
+    /**
+     * With owner fields the file is stored and attached, and the document is returned. Without them the upload
+     * is staged: the response is its `uploaded` session, to attach once the owner exists.
+     */
     public function store(UploadDocumentRequest $request): JsonResponse
     {
         $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
+
+        if (! $request->filled('documentable_type')) {
+            if (! $this->authorizer->canUpload($request->user(), $type, null)) {
+                abort(403);
+            }
+
+            return response()->json($this->service->stageUpload($request->file('file'), $type, $this->sessionUserKey($request)), 201);
+        }
+
         $documentable = $this->resolveDocumentable(
             $request->string('documentable_type')->toString(),
             $request->string('documentable_id')->toString()
@@ -85,33 +99,10 @@ class DocumentController extends Controller
         return response()->json($document->load('storageFile'), 201);
     }
 
-    public function storeDetached(UploadDetachedDocumentRequest $request): JsonResponse
-    {
-        $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
-
-        if (! $this->authorizer->canUpload($request->user(), $type, null)) {
-            abort(403);
-        }
-
-        $document = $this->service->uploadDetached(
-            $request->file('file'),
-            $type,
-            $request->input('metadata', []),
-            $request->boolean('pending'),
-            $request->integer('ttl_hours') ?: null
-        );
-
-        return response()->json($document->load('storageFile'), 201);
-    }
-
     public function url(UrlRequest $request, Document $document): JsonResponse
     {
         if (! $this->authorizer->canView($request->user(), $document)) {
             abort(403);
-        }
-
-        if ($document->status === 'pending' && $document->expires_at?->isPast()) {
-            abort(404);
         }
 
         $url = $this->service->getUrl($document, now()->addMinutes($request->expiresInMinutes()), $request->disposition());

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Illuminate\Support\Facades\Route;
 use MadeByClowd\Documentable\Http\Controllers\DirectUploadController;
 use MadeByClowd\Documentable\Http\Controllers\DocumentController;
@@ -28,13 +30,13 @@ Route::prefix('documents')
     ->group(function () {
         Route::get('/', [DocumentController::class, 'index']);
         Route::post('/', [DocumentController::class, 'store']);
-        Route::post('/detached', [DocumentController::class, 'storeDetached']);
         Route::get('/types', [DocumentTypeController::class, 'index']);
         Route::get('/{document}/url', [DocumentController::class, 'url']);
         Route::delete('/{document}', [DocumentController::class, 'destroy']);
 
         Route::post('/presigned', [DirectUploadController::class, 'presign']);
         Route::post('/presigned/finalize', [DirectUploadController::class, 'finalize']);
+        Route::post('/attach', [DirectUploadController::class, 'attach']);
 
         Route::post('/multipart/initiate', [MultipartUploadController::class, 'initiate']);
         Route::post('/multipart/part-url', [MultipartUploadController::class, 'partUrl']);

@@ -7,8 +7,9 @@ namespace MadeByClowd\Documentable\Tests\Feature\Upload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Models\DocumentType;
-use MadeByClowd\Documentable\Models\MultipartUpload;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
@@ -62,42 +63,29 @@ class LongUploadIdTest extends TestCase
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
 
-        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
+        $session = $this->service->initiateMultipartUpload($type, 'f.bin', 'user-1');
 
-        $this->assertSame(512, strlen($session['upload_id']));
-        $this->assertGreaterThan(1000, strlen($session['path']));
-        $this->assertSame(1, MultipartUpload::count());
+        $fresh = UploadSession::findOrFail($session->id);
+        $this->assertSame(512, strlen($fresh->upload_id));
+        $this->assertGreaterThan(1000, strlen($fresh->path));
 
-        FakeMultipartUploadDriver::uploadPart($session['upload_id'], 1, 'hello world');
+        FakeMultipartUploadDriver::uploadPart($fresh->upload_id, 1, 'hello world');
 
-        $parts = $this->service->listPartsForSession($session['path'], $session['upload_id'], 'user-1', $type);
+        $parts = $this->service->listPartsForSession($fresh);
         $this->assertSame([1], array_column($parts, 'PartNumber'));
 
-        $document = $this->service->completeMultipartUpload(
-            $session['path'], $session['upload_id'], 'user-1', $type, $owner, 'f.bin', null, hash('sha256', 'hello world')
-        );
+        $uploaded = $this->service->completeMultipartUpload($fresh, null, hash('sha256', 'hello world'));
+        $document = $this->service->attach($uploaded, $owner);
 
-        $this->assertSame($session['path'], $document->storageFile->path);
-        $this->assertSame(0, MultipartUpload::count());
+        $this->assertSame($fresh->path, $document->storageFile->path);
     }
 
     public function test_a_long_session_can_be_aborted(): void
     {
-        $type = $this->makeType();
-        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
+        $session = $this->service->initiateMultipartUpload($this->makeType(), 'f.bin', 'user-1');
 
-        $this->service->abortMultipartUpload($session['path'], $session['upload_id'], 'user-1', $type);
+        $this->service->abortUploadSession($session);
 
-        $this->assertSame(0, MultipartUpload::count());
-    }
-
-    public function test_session_lookup_is_case_sensitive(): void
-    {
-        $type = $this->makeType();
-        FakeMultipartUploadDriver::$longIds = false;
-        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
-
-        $this->assertNull($this->service->findMultipartSession($session['path'], strtoupper($session['upload_id']), 'user-1'));
-        $this->assertNotNull($this->service->findMultipartSession($session['path'], $session['upload_id'], 'user-1'));
+        $this->assertSame(UploadSessionStatus::Aborted, $session->fresh()->status);
     }
 }

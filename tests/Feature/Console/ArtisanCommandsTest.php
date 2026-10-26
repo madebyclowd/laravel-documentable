@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -15,6 +17,25 @@ use MadeByClowd\Documentable\Tests\TestCase;
 class ArtisanCommandsTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        $this->removePublishedMigrations();
+
+        parent::tearDown();
+    }
+
+    /**
+     * `documents:install` publishes the package migrations into Testbench's shared skeleton. A leftover copy
+     * shadows the package's own migration of the same name, so a later schema change would silently not apply
+     * to the test database.
+     */
+    private function removePublishedMigrations(): void
+    {
+        foreach (glob(dirname(__DIR__, 3).'/database/migrations/*.php') ?: [] as $migration) {
+            @unlink(base_path('database/migrations/'.basename($migration)));
+        }
+    }
 
     public function test_sync_types_creates_document_types_from_config(): void
     {

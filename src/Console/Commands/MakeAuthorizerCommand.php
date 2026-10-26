@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
@@ -59,7 +61,7 @@ class MakeAuthorizerCommand extends Command
             public function canUpload(?Authenticatable \$user, DocumentType \$type, ?Model \$documentable): bool
             {
                 if (\$documentable === null) {
-                    // Called from storeDetached()/multipart initiate() — no owner is
+                    // Called when an upload starts (presign, multipart initiate, staged upload) — no owner is
                     // attached yet. Replace with a role/permission check that doesn't
                     // depend on a specific model, e.g.:
                     // return \$user !== null;

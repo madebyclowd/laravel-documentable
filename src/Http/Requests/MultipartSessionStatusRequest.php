@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -11,11 +13,13 @@ class MultipartSessionStatusRequest extends FormRequest
         return true;
     }
 
+    /**
+     * @return array<string, array<int, mixed>>
+     */
     public function rules(): array
     {
         return [
-            'path' => ['required', 'string'],
-            'upload_id' => ['required', 'string'],
+            'session_id' => ['required', 'string', 'size:26'],
             'user_id' => ['nullable', 'string'],
         ];
     }

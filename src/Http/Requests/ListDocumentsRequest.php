@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
@@ -17,6 +19,9 @@ class ListDocumentsRequest extends FormRequest
      * are required together. document_type_id narrows to one type when given,
      * scoped to non-soft-deleted rows same as every other document_type_id rule
      * in this package.
+     */
+    /**
+     * @return array<string, array<int, mixed>>
      */
     public function rules(): array
     {

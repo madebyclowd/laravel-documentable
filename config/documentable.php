@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use MadeByClowd\Documentable\Drivers\S3MultipartDriver;
 
 return [
@@ -13,7 +15,7 @@ return [
     | disk with a registered Storage::buildTemporaryUrlsUsing() callback) —
     | GET /documents/{id}/url calls temporaryUrl() for every document
     | regardless of size, not just multipart-uploaded ones. Uploading via
-    | store()/uploadDetached() works on any disk (e.g. local); *viewing* a
+    | upload() and the staged upload work on any disk (e.g. local); *viewing* a
     | document after upload does not, unless the disk supports temporary URLs.
     |
     */
@@ -105,16 +107,14 @@ return [
     | Lifecycle / Orphan Cleanup
     |--------------------------------------------------------------------------
     |
-    | pending_ttl_hours: default TTL for documents created in 'pending' status
-    | (see MadeByClowd\Documentable\Models\Document::commit()). reaper_frequency
-    | is a Schedule fluent-method name ('hourly', 'daily', 'everyFiveMinutes',
-    | ...) applied to the documents:clean-orphaned command. Multipart session
-    | TTL uses multipart.session_ttl_hours — single source of truth,
-    | not duplicated here.
+    | reaper_frequency is a Schedule fluent-method name ('hourly', 'daily',
+    | 'everyFiveMinutes', ...) applied to the documents:clean-orphaned command,
+    | which expires upload sessions past their expiry and releases what they
+    | hold. How long a session lives is multipart.session_ttl_hours, for every
+    | kind of upload — single source of truth, not duplicated here.
     |
     */
     'lifecycle' => [
-        'pending_ttl_hours' => 24,
         'reaper_frequency' => 'hourly',
 
         // `documents:clean-orphaned --storage-files` only touches stored files older than this, so a file
@@ -176,12 +176,6 @@ return [
     'security' => [
         'scanner' => null,
         'allowed_documentable_types' => null,
-
-        // When true, a presigned finalize only accepts a path that starts with the document type's
-        // `path_prefix`. Off by default because a custom storage path generator (for example date or
-        // tenant sharding) legitimately produces other layouts. Turn it on if you keep the default
-        // "{path_prefix}/{uuid}" layout.
-        'enforce_path_prefix' => false,
 
         // Discouraged. When true and nobody is authenticated, the multipart endpoints accept `user_id`
         // from the request body as the session owner. Anyone who can reach the route can then name any

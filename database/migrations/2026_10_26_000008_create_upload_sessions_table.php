@@ -30,12 +30,19 @@ return new class extends Migration
             $table->foreignUuid('document_type_id')->constrained('document_types');
             $table->string('disk');
             $table->string('kind');
+            // The name the client gave the file, kept so the document can carry it once attached.
+            $table->text('client_filename');
             $table->text('path');
             $table->text('upload_id')->nullable();
 
             $table->unsignedBigInteger('declared_size')->nullable();
             $table->string('declared_mime')->nullable();
             $table->string('declared_hash', 64)->nullable();
+
+            // What verification measured on the stored object, kept so attaching later does not re-read it.
+            $table->unsignedBigInteger('object_size')->nullable();
+            $table->string('object_mime')->nullable();
+            $table->string('object_hash', 64)->nullable();
 
             $table->string('status');
 

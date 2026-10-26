@@ -136,14 +136,16 @@ class DocumentServiceTest extends TestCase
         $this->assertTrue($latest->is_latest);
     }
 
-    public function test_finalize_direct_upload_rejects_a_path_with_no_file_on_disk(): void
+    public function test_finalize_direct_upload_rejects_a_session_with_no_file_on_disk(): void
     {
+        $this->skipUnlessFakeDiskSupportsUploadUrls('s3');
+
         $type = $this->makeType();
-        $owner = TestModel::create(['name' => 'a']);
+        $session = $this->service->initiatePresignedUpload($type, 'gone.bin', '42')['session'];
 
         $this->expectException(ValidationException::class);
 
-        $this->service->finalizeDirectUpload('nowhere/gone.bin', $type, $owner, 'gone.bin');
+        $this->service->finalizeDirectUpload($session);
     }
 
     public function test_create_presigned_upload_applies_configured_aes256_server_side_encryption(): void
@@ -154,7 +156,7 @@ class DocumentServiceTest extends TestCase
 
         $type = $this->makeType();
 
-        $presigned = $this->service->createPresignedUpload($type, 'a.txt');
+        $presigned = $this->service->initiatePresignedUpload($type, 'a.txt');
 
         $this->assertNotEmpty($presigned['url']);
     }
@@ -168,7 +170,7 @@ class DocumentServiceTest extends TestCase
 
         $type = $this->makeType();
 
-        $presigned = $this->service->createPresignedUpload($type, 'a.txt');
+        $presigned = $this->service->initiatePresignedUpload($type, 'a.txt');
 
         $this->assertNotEmpty($presigned['url']);
     }

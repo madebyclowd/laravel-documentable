@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Contracts;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -60,7 +62,7 @@ class PluggableContractsTest extends TestCase
         $service->upload(UploadedFile::fake()->createWithContent('a.txt', 'x'), $type, $owner);
     }
 
-    public function test_soft_deleted_document_type_is_rejected_by_upload_detached(): void
+    public function test_soft_deleted_document_type_is_rejected_when_staging_an_upload(): void
     {
         $type = $this->makeType();
         $type->delete();
@@ -68,7 +70,7 @@ class PluggableContractsTest extends TestCase
         $service = $this->app->make(DocumentService::class);
 
         $this->expectException(ValidationException::class);
-        $service->uploadDetached(UploadedFile::fake()->createWithContent('a.txt', 'x'), $type);
+        $service->stageUpload(UploadedFile::fake()->createWithContent('a.txt', 'x'), $type);
     }
 
     public function test_default_authorizer_allows_everything(): void

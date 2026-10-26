@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Repositories;
 
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -11,11 +13,9 @@ class StorageFileRepository
         return StorageFile::where('file_hash', $hash)->first();
     }
 
-    public function existsAtPath(string $disk, string $path): bool
-    {
-        return StorageFile::where('disk', $disk)->where('path', $path)->exists();
-    }
-
+    /**
+     * @param  array<string, mixed>  $data
+     */
     public function create(array $data): StorageFile
     {
         return StorageFile::create($data);

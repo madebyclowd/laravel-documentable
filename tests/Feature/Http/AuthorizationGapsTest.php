@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
-use MadeByClowd\Documentable\Models\MultipartUpload;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -49,7 +49,7 @@ class AuthorizationGapsTest extends TestCase
     }
 
     /**
-     * @return array{path: string, upload_id: string}
+     * @return array{id: string}
      */
     protected function initiateSession(DocumentType $type, string $userId = 'user-1'): array
     {
@@ -104,9 +104,7 @@ class AuthorizationGapsTest extends TestCase
         $this->bindAuthorizer(canUpload: false);
 
         $payload = [
-            'path' => $session['path'],
-            'upload_id' => $session['upload_id'],
-            'document_type_id' => $type->id,
+            'session_id' => $session['id'],
             'part_number' => 1,
             'user_id' => 'user-1',
         ];
@@ -126,8 +124,7 @@ class AuthorizationGapsTest extends TestCase
         $this->bindAuthorizer(canUpload: true, canTypeBeUploaded: fn (DocumentType $type) => $type->id === $allowed->id);
 
         $this->getJson('/documents/multipart/status?'.http_build_query([
-            'path' => $session['path'],
-            'upload_id' => $session['upload_id'],
+            'session_id' => $session['id'],
             'user_id' => 'user-1',
         ]))->assertForbidden();
     }
@@ -137,8 +134,7 @@ class AuthorizationGapsTest extends TestCase
         $this->makeType();
 
         $this->getJson('/documents/multipart/status?'.http_build_query([
-            'path' => 'nowhere/gone.bin',
-            'upload_id' => 'not-a-real-upload-id',
+            'session_id' => '01ARZ3NDEKTSV4RRFFQ69G5FAV',
             'user_id' => 'user-1',
         ]))->assertOk()->assertJson(['exists' => false]);
     }
@@ -154,7 +150,7 @@ class AuthorizationGapsTest extends TestCase
             'user_id' => 'victim',
         ])->assertStatus(422)->assertJsonValidationErrors(['user_id']);
 
-        $this->assertSame(0, MultipartUpload::where('user_id', 'victim')->count());
+        $this->assertSame(0, UploadSession::where('user_id', 'victim')->count());
     }
 
     public function test_initiate_accepts_a_guest_user_id_when_explicitly_allowed(): void
@@ -168,7 +164,7 @@ class AuthorizationGapsTest extends TestCase
             'user_id' => 'device-9',
         ])->assertCreated();
 
-        $this->assertSame(1, MultipartUpload::where('user_id', 'device-9')->count());
+        $this->assertSame(1, UploadSession::where('user_id', 'device-9')->count());
     }
 
     public function test_authenticated_user_wins_over_a_client_supplied_user_id(): void
@@ -188,8 +184,8 @@ class AuthorizationGapsTest extends TestCase
             'user_id' => 'victim',
         ])->assertCreated();
 
-        $this->assertSame(1, MultipartUpload::where('user_id', 'real-user')->count());
-        $this->assertSame(0, MultipartUpload::where('user_id', 'victim')->count());
+        $this->assertSame(1, UploadSession::where('user_id', 'real-user')->count());
+        $this->assertSame(0, UploadSession::where('user_id', 'victim')->count());
     }
 
     public function test_type_listing_only_returns_types_the_authorizer_allows(): void

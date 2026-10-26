@@ -16,6 +16,7 @@ use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
@@ -65,6 +66,7 @@ class EventsAfterCommitTest extends TestCase
     {
         Schema::dropIfExists('jobs');
         Document::withTrashed()->forceDelete();
+        UploadSession::query()->delete();
         StorageFile::query()->delete();
         TestModel::query()->delete();
         DocumentType::withTrashed()->forceDelete();

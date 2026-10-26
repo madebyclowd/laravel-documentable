@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Contracts;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -18,10 +20,10 @@ use MadeByClowd\Documentable\Models\DocumentType;
 interface AuthorizesDocumentAccess
 {
     /**
-     * $documentable is null when called from storeDetached() (HTTP:
-     * POST /documents/detached) or initiateMultipartUpload() (HTTP:
-     * POST /documents/multipart/initiate) — the owner isn't attached to the
-     * upload yet at that point. A correct implementation must handle this
+     * $documentable is null when an upload starts or a session is driven before
+     * it is attached (HTTP: POST /documents/presigned, POST /documents/multipart/initiate
+     * and their follow-up calls, POST /documents without owner fields) — the owner
+     * isn't attached to the upload yet at that point. A correct implementation must handle this
      * case explicitly (e.g. a role/permission check independent of any
      * specific model) rather than falling through to an ownership check that
      * can never pass for a null $documentable, which would silently deny

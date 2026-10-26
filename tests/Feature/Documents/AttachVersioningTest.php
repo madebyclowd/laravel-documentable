@@ -17,12 +17,12 @@ use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
 
 /**
- * A detached document that is reassociated to an owner already holding a document of the same single-slot type
- * used to become a second `is_latest` row: the previous one was never demoted, so the owner had two "current"
- * documents and every "latest" lookup picked one arbitrarily. Reassociating must go through the same slot and
- * version resolution as an upload.
+ * Attaching an uploaded session to an owner that already holds a document of the same single-slot type must
+ * go through the same slot and version resolution as an upload. Before sessions, a detached document moved to
+ * such an owner became a second `is_latest` row: the previous one was never demoted, so the owner had two
+ * "current" documents and every "latest" lookup picked one arbitrarily.
  */
-class ReassociateVersioningTest extends TestCase
+class AttachVersioningTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -67,24 +67,23 @@ class ReassociateVersioningTest extends TestCase
             ->count();
     }
 
-    public function test_reassociating_into_an_occupied_single_slot_keeps_exactly_one_latest_and_bumps_the_version(): void
+    public function test_attaching_into_an_occupied_single_slot_keeps_exactly_one_latest_and_bumps_the_version(): void
     {
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
         $existing = $this->service->upload($this->file('first.txt'), $type, $owner);
-        $detached = $this->service->uploadDetached($this->file('second.txt'), $type, [], pending: true);
+        $staged = $this->service->stageUpload($this->file('second.txt'), $type, '42');
 
         Event::fake([DocumentVersionSuperseded::class]);
 
-        $moved = $this->service->reassociateDocument($detached, $owner);
-        $moved->commit();
+        $moved = $this->service->attach($staged, $owner);
 
         $this->assertSame(1, $this->latestCount($owner, $type));
         $this->assertSame(2, $moved->fresh()->version);
         $this->assertTrue($moved->fresh()->is_latest);
         $this->assertSame($existing->document_group_id, $moved->fresh()->document_group_id);
         $this->assertFalse($existing->fresh()->is_latest);
-        $this->assertSame('committed', $moved->fresh()->status);
+        $this->assertSame('committed', $moved->fresh()->status->value);
         Event::assertDispatched(DocumentVersionSuperseded::class, fn ($event) => $event->previous->is($existing) && $event->new->is($moved));
     }
 
@@ -93,73 +92,61 @@ class ReassociateVersioningTest extends TestCase
         $type = $this->makeType(['requires_versioning' => false]);
         $owner = TestModel::create(['name' => 'owner']);
         $existing = $this->service->upload($this->file('first.txt'), $type, $owner);
-        $detached = $this->service->uploadDetached($this->file('second.txt'), $type);
+        $staged = $this->service->stageUpload($this->file('second.txt'), $type, '42');
 
-        $moved = $this->service->reassociateDocument($detached, $owner);
+        $moved = $this->service->attach($staged, $owner);
 
         $this->assertSoftDeleted($existing);
         $this->assertSame(1, $this->latestCount($owner, $type));
         $this->assertSame(1, $moved->fresh()->version);
     }
 
-    public function test_reassociating_into_an_empty_slot_keeps_the_document_as_is(): void
+    public function test_attaching_into_an_empty_slot_starts_a_new_group_at_version_one(): void
     {
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
-        $detached = $this->service->uploadDetached($this->file('only.txt'), $type);
-        $group = $detached->document_group_id;
 
-        $moved = $this->service->reassociateDocument($detached, $owner);
+        $document = $this->service->attach($this->service->stageUpload($this->file('only.txt'), $type, '42'), $owner);
 
         $this->assertSame(1, $this->latestCount($owner, $type));
-        $this->assertSame(1, $moved->fresh()->version);
-        $this->assertSame($group, $moved->fresh()->document_group_id);
+        $this->assertSame(1, $document->fresh()->version);
+        $this->assertNotNull($document->fresh()->document_group_id);
     }
 
-    public function test_a_multi_slot_type_keeps_the_moved_document_in_its_own_slot(): void
+    public function test_a_multi_slot_type_keeps_the_attached_document_in_its_own_slot(): void
     {
         $type = $this->makeType(['allows_multiple' => true]);
         $owner = TestModel::create(['name' => 'owner']);
         $existing = $this->service->upload($this->file('first.txt'), $type, $owner);
-        $detached = $this->service->uploadDetached($this->file('second.txt'), $type);
 
-        $moved = $this->service->reassociateDocument($detached, $owner);
+        $moved = $this->service->attach($this->service->stageUpload($this->file('second.txt'), $type, '42'), $owner);
 
         $this->assertSame(2, $this->latestCount($owner, $type));
         $this->assertTrue($existing->fresh()->is_latest);
         $this->assertNotSame($existing->document_group_id, $moved->fresh()->document_group_id);
     }
 
-    public function test_reassociating_to_the_current_owner_changes_nothing(): void
+    public function test_exactly_one_latest_per_owner_and_type_when_the_transports_are_mixed(): void
     {
-        $type = $this->makeType();
-        $owner = TestModel::create(['name' => 'owner']);
-        $document = $this->service->upload($this->file('first.txt'), $type, $owner);
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
 
-        $this->service->reassociateDocument($document, $owner);
-
-        $this->assertSame(1, $this->latestCount($owner, $type));
-        $this->assertSame(1, $document->fresh()->version);
-    }
-
-    public function test_exactly_one_latest_per_owner_and_type_whatever_the_transport(): void
-    {
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
 
         $this->service->upload($this->file('direct.txt'), $type, $owner);
         $this->assertSame(1, $this->latestCount($owner, $type));
 
-        Storage::disk('test_disk')->put('uploads/presigned.bin', 'presigned bytes');
-        $this->service->finalizeDirectUpload('uploads/presigned.bin', $type, $owner, 'presigned.bin');
+        $presigned = $this->service->initiatePresignedUpload($type, 'presigned.bin', '42')['session'];
+        Storage::disk('test_disk')->put($presigned->path, 'presigned bytes');
+        $this->service->attach($this->service->finalizeDirectUpload($presigned), $owner);
         $this->assertSame(1, $this->latestCount($owner, $type));
 
-        $session = $this->service->initiateMultipartUpload('multi.bin', $type, 'user-1');
-        FakeMultipartUploadDriver::uploadPart($session['upload_id'], 1, 'multipart bytes');
-        $this->service->completeMultipartUpload($session['path'], $session['upload_id'], 'user-1', $type, $owner, 'multi.bin');
+        $multipart = $this->service->initiateMultipartUpload($type, 'multi.bin', 'user-1');
+        FakeMultipartUploadDriver::uploadPart($multipart->upload_id, 1, 'multipart bytes');
+        $this->service->attach($this->service->completeMultipartUpload($multipart), $owner);
         $this->assertSame(1, $this->latestCount($owner, $type));
 
-        $this->service->reassociateDocument($this->service->uploadDetached($this->file('moved.txt'), $type), $owner);
+        $this->service->attach($this->service->stageUpload($this->file('moved.txt'), $type, '42'), $owner);
         $this->assertSame(1, $this->latestCount($owner, $type));
 
         $this->assertSame(4, Document::where('document_type_id', $type->id)->max('version'));

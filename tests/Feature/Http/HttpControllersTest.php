@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
 use Illuminate\Contracts\Auth\Authenticatable;
@@ -10,6 +12,7 @@ use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
@@ -155,17 +158,17 @@ class HttpControllersTest extends TestCase
         $presign = $this->postJson('/documents/presigned', [
             'document_type_id' => $type->id,
             'filename' => 'small.txt',
+            'user_id' => 'user-1',
         ])->assertOk()->json();
 
-        Storage::disk('test_disk')->put($presign['path'], 'small content');
+        Storage::disk('test_disk')->put(UploadSession::findOrFail($presign['session_id'])->path, 'small content');
 
         $finalize = $this->postJson('/documents/presigned/finalize', [
-            'path' => $presign['path'],
-            'document_type_id' => $type->id,
+            'session_id' => $presign['session_id'],
             'documentable_type' => $owner->getMorphClass(),
             'documentable_id' => (string) $owner->getKey(),
-            'filename' => 'small.txt',
             'expected_hash' => hash('sha256', 'small content'),
+            'user_id' => 'user-1',
         ]);
 
         $finalize->assertCreated();
@@ -184,15 +187,12 @@ class HttpControllersTest extends TestCase
             'user_id' => 'user-1',
         ])->assertCreated()->json();
 
-        $etag = FakeMultipartUploadDriver::uploadPart($initiate['upload_id'], 1, 'hello world');
+        FakeMultipartUploadDriver::uploadPart(UploadSession::findOrFail($initiate['id'])->upload_id, 1, 'hello world');
 
         $complete = $this->postJson('/documents/multipart/complete', [
-            'path' => $initiate['path'],
-            'upload_id' => $initiate['upload_id'],
-            'document_type_id' => $type->id,
+            'session_id' => $initiate['id'],
             'documentable_type' => $owner->getMorphClass(),
             'documentable_id' => (string) $owner->getKey(),
-            'filename' => 'f.bin',
             'user_id' => 'user-1',
             'expected_hash' => hash('sha256', 'hello world'),
         ]);
@@ -207,14 +207,10 @@ class HttpControllersTest extends TestCase
             'user_id' => 'user-2',
         ])->assertCreated()->json();
 
-        $abort = $this->postJson('/documents/multipart/abort', [
-            'path' => $initiate2['path'],
-            'upload_id' => $initiate2['upload_id'],
-            'document_type_id' => $type->id,
+        $this->postJson('/documents/multipart/abort', [
+            'session_id' => $initiate2['id'],
             'user_id' => 'user-2',
-        ]);
-
-        $abort->assertNoContent();
+        ])->assertNoContent();
     }
 
     public function test_multipart_list_parts_and_status_via_http(): void
@@ -227,12 +223,10 @@ class HttpControllersTest extends TestCase
             'user_id' => 'user-1',
         ])->assertCreated()->json();
 
-        FakeMultipartUploadDriver::uploadPart($initiate['upload_id'], 1, 'hello world');
+        FakeMultipartUploadDriver::uploadPart(UploadSession::findOrFail($initiate['id'])->upload_id, 1, 'hello world');
 
         $parts = $this->getJson('/documents/multipart/parts?'.http_build_query([
-            'path' => $initiate['path'],
-            'upload_id' => $initiate['upload_id'],
-            'document_type_id' => $type->id,
+            'session_id' => $initiate['id'],
             'user_id' => 'user-1',
         ]));
 
@@ -240,8 +234,7 @@ class HttpControllersTest extends TestCase
         $this->assertSame([1], collect($parts->json('parts'))->pluck('PartNumber')->all());
 
         $status = $this->getJson('/documents/multipart/status?'.http_build_query([
-            'path' => $initiate['path'],
-            'upload_id' => $initiate['upload_id'],
+            'session_id' => $initiate['id'],
             'user_id' => 'user-1',
         ]));
 
@@ -249,8 +242,7 @@ class HttpControllersTest extends TestCase
         $this->assertTrue($status->json('exists'));
 
         $goneStatus = $this->getJson('/documents/multipart/status?'.http_build_query([
-            'path' => 'nowhere/gone.bin',
-            'upload_id' => 'not-a-real-upload-id',
+            'session_id' => '01ARZ3NDEKTSV4RRFFQ69G5FAV',
             'user_id' => 'user-1',
         ]));
 
@@ -258,21 +250,21 @@ class HttpControllersTest extends TestCase
         $this->assertFalse($goneStatus->json('exists'));
     }
 
-    public function test_store_detached_uploads_a_document_without_an_owner_via_http(): void
+    public function test_store_without_an_owner_stages_the_upload_as_a_session_via_http(): void
     {
         $type = $this->makeType();
 
-        $response = $this->postJson('/documents/detached', [
+        $response = $this->postJson('/documents', [
             'file' => UploadedFile::fake()->create('a.txt', 1),
             'document_type_id' => $type->id,
         ]);
 
-        $response->assertCreated();
-        $this->assertSame(1, Document::count());
-        $this->assertNull(Document::first()->documentable_id);
+        $response->assertCreated()->assertJsonPath('status', 'uploaded');
+        $this->assertSame(0, Document::count());
+        $this->assertSame(1, UploadSession::count());
     }
 
-    public function test_store_detached_denied_when_authorizer_rejects_upload(): void
+    public function test_store_without_an_owner_is_denied_when_the_authorizer_rejects_upload(): void
     {
         $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
         {
@@ -294,12 +286,12 @@ class HttpControllersTest extends TestCase
 
         $type = $this->makeType();
 
-        $response = $this->postJson('/documents/detached', [
+        $this->postJson('/documents', [
             'file' => UploadedFile::fake()->create('a.txt', 1),
             'document_type_id' => $type->id,
-        ]);
+        ])->assertStatus(403);
 
-        $response->assertStatus(403);
+        $this->assertSame(0, UploadSession::count());
     }
 
     public function test_url_denied_when_authorizer_rejects_view(): void
@@ -372,15 +364,13 @@ class HttpControllersTest extends TestCase
         ])->assertCreated()->json();
 
         $response = $this->postJson('/documents/multipart/part-url', [
-            'path' => $initiate['path'],
-            'upload_id' => $initiate['upload_id'],
+            'session_id' => $initiate['id'],
             'part_number' => 1,
-            'document_type_id' => $type->id,
             'user_id' => 'user-1',
         ]);
 
         $response->assertOk();
-        $this->assertStringContainsString((string) $initiate['upload_id'], $response->json('url'));
+        $this->assertStringContainsString(UploadSession::findOrFail($initiate['id'])->upload_id, $response->json('url'));
     }
 
     public function test_multipart_initiate_denied_when_authorizer_rejects_upload(): void
@@ -425,7 +415,7 @@ class HttpControllersTest extends TestCase
             'user_id' => 'user-1',
         ])->assertCreated()->json();
 
-        FakeMultipartUploadDriver::uploadPart($initiate['upload_id'], 1, 'hello world');
+        FakeMultipartUploadDriver::uploadPart(UploadSession::findOrFail($initiate['id'])->upload_id, 1, 'hello world');
 
         $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
         {
@@ -445,20 +435,15 @@ class HttpControllersTest extends TestCase
             }
         });
 
-        $response = $this->postJson('/documents/multipart/complete', [
-            'path' => $initiate['path'],
-            'upload_id' => $initiate['upload_id'],
-            'document_type_id' => $type->id,
+        $this->postJson('/documents/multipart/complete', [
+            'session_id' => $initiate['id'],
             'documentable_type' => $owner->getMorphClass(),
             'documentable_id' => (string) $owner->getKey(),
-            'filename' => 'f.bin',
             'user_id' => 'user-1',
-        ]);
-
-        $response->assertStatus(403);
+        ])->assertStatus(403);
     }
 
-    public function test_part_url_rejects_missing_user_id_when_unauthenticated(): void
+    public function test_part_url_is_forbidden_without_the_sessions_user_when_unauthenticated(): void
     {
         $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
 
@@ -468,15 +453,10 @@ class HttpControllersTest extends TestCase
             'user_id' => 'user-1',
         ])->assertCreated()->json();
 
-        $response = $this->postJson('/documents/multipart/part-url', [
-            'path' => $initiate['path'],
-            'upload_id' => $initiate['upload_id'],
+        $this->postJson('/documents/multipart/part-url', [
+            'session_id' => $initiate['id'],
             'part_number' => 1,
-            'document_type_id' => $type->id,
-        ]);
-
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['user_id']);
+        ])->assertForbidden();
     }
 
     public function test_presign_denied_when_authorizer_rejects_upload(): void
@@ -519,9 +499,10 @@ class HttpControllersTest extends TestCase
         $presign = $this->postJson('/documents/presigned', [
             'document_type_id' => $type->id,
             'filename' => 'small.txt',
+            'user_id' => 'user-1',
         ])->assertOk()->json();
 
-        Storage::disk('test_disk')->put($presign['path'], 'small content');
+        Storage::disk('test_disk')->put(UploadSession::findOrFail($presign['session_id'])->path, 'small content');
 
         $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
         {
@@ -541,15 +522,12 @@ class HttpControllersTest extends TestCase
             }
         });
 
-        $response = $this->postJson('/documents/presigned/finalize', [
-            'path' => $presign['path'],
-            'document_type_id' => $type->id,
+        $this->postJson('/documents/presigned/finalize', [
+            'session_id' => $presign['session_id'],
             'documentable_type' => $owner->getMorphClass(),
             'documentable_id' => (string) $owner->getKey(),
-            'filename' => 'small.txt',
-        ]);
-
-        $response->assertStatus(403);
+            'user_id' => 'user-1',
+        ])->assertStatus(403);
     }
 
     public function test_index_rejects_documentable_that_does_not_exist(): void

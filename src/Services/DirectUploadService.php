@@ -7,59 +7,60 @@ namespace MadeByClowd\Documentable\Services;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
-use MadeByClowd\Documentable\Events\DocumentUploaded;
+use MadeByClowd\Documentable\Enums\UploadKind;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
-use MadeByClowd\Documentable\Repositories\DocumentRepository;
-use MadeByClowd\Documentable\Repositories\StorageFileRepository;
+use MadeByClowd\Documentable\Models\UploadSession;
+use MadeByClowd\Documentable\Repositories\UploadSessionRepository;
+use MadeByClowd\Documentable\ValueObjects\AttachOptions;
+use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
 use RuntimeException;
 
 /**
- * Uploads that do not use a multipart session: the server-proxied `upload`, and the presigned single PUT with
- * its finalize step.
+ * Uploads that do not use a multipart session: the server-proxied upload (with or without an owner) and the
+ * presigned single PUT with its finalize step. Each one produces an upload session; only `attach()` turns a
+ * session into a document.
  *
  * @internal
  */
 final class DirectUploadService
 {
     public function __construct(
-        private readonly StorageFileRepository $storageFileRepository,
-        private readonly DocumentRepository $documentRepository,
         private readonly ResolvesDedupScope $dedupScopeResolver,
         private readonly GeneratesStoragePath $pathGenerator,
         private readonly ObjectVerifier $verifier,
         private readonly StoredObjectRegistrar $registrar,
         private readonly DocumentAttacher $attacher,
+        private readonly UploadFinalizer $finalizer,
+        private readonly UploadSessionRepository $sessions,
         private readonly ActorResolver $actor,
         private readonly Config $config,
     ) {}
 
     /**
-     * Upload a file and create a document record. Handles deduplication via file
-     * hash and group-aware versioning.
+     * Upload a file for an owner and attach it in one call. Handles deduplication via file hash and
+     * group-aware versioning. The file is written once, and not at all when identical bytes are already stored.
      *
-     * $documentGroupId: pass the group id of an existing document to upload a new
-     * version *of that specific slot* (only meaningful when the type
-     * `allows_multiple`). Omit it to version/replace the type's single slot
-     * (allows_multiple = false) or to start a brand new independent slot
-     * (allows_multiple = true).
+     * $documentGroupId: pass the group id of an existing document to upload a new version of that specific slot
+     * (only meaningful when the type `allows_multiple`). Omit it to version the type's single slot or to start a
+     * new independent slot.
      *
      * @param  array<string, mixed>|null  $metadata
      */
-    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null): Document
+    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null, ?string $userId = null): Document
     {
         UploadGuard::assertTypeActive($type);
         $this->verifier->assertSizeAndMime($file->getSize(), $file->getMimeType(), $type);
 
-        return DB::transaction(function () use ($file, $type, $documentable, $metadata, $documentGroupId) {
-            $hash = hash_file('sha256', $file->getRealPath()) ?: throw new RuntimeException('Could not hash the uploaded file.');
+        return DB::transaction(function () use ($file, $type, $documentable, $metadata, $documentGroupId, $userId) {
+            $hash = $this->hashOf($file);
             $dedupKey = $this->dedupScopeResolver->scopeKey($hash, $documentable);
 
             $storageFile = $this->registrar->getOrCreateStorageFile(
@@ -71,170 +72,104 @@ final class DirectUploadService
                 $metadata ?? []
             );
 
-            return $this->attacher->attachStorageFile(
-                $storageFile,
-                $type,
-                $documentable,
-                $file->getClientOriginalName(),
-                $metadata ?? [],
-                $documentGroupId
-            );
+            $session = $this->sessions->create([
+                'user_id' => $userId ?? $this->actor->id(),
+                'document_type_id' => $type->id,
+                'disk' => $storageFile->disk,
+                'kind' => UploadKind::Single,
+                'client_filename' => $file->getClientOriginalName(),
+                'path' => $storageFile->path,
+                'status' => UploadSessionStatus::Uploaded,
+                'storage_file_id' => $storageFile->id,
+                'object_size' => $storageFile->size_bytes,
+                'object_mime' => $storageFile->mime_type,
+                'object_hash' => $hash,
+                'expires_at' => $this->expiry(),
+            ]);
+
+            return $this->attacher->attach($session, $documentable, new AttachOptions($metadata ?? [], $documentGroupId));
         });
     }
 
     /**
-     * Upload a file without associating it to any owner. The owner is assigned
-     * later via the model's Documentable relation.
-     *
-     * $pending: false (default) — permanent, valid state (not garbage), same as
-     * before pending documents existed. true — temporary, expires after $ttlHours (or
-     * $this->config->get('documentable.lifecycle.pending_ttl_hours') if omitted) unless the
-     * consumer calls $document->commit() before it lapses (e.g. once the real
-     * owner is finally created and this document is reassociated to it).
-     *
-     * @param  array<string, mixed>|null  $metadata
+     * Store an upload that has no owner yet and return its session, `uploaded`, to attach later. The object is
+     * checked and scanned now; the stored file is registered at attach, when the dedup scope is known.
      */
-    public function uploadDetached(UploadedFile $file, DocumentType $type, ?array $metadata = [], bool $pending = false, ?int $ttlHours = null): Document
+    public function stageUpload(UploadedFile $file, DocumentType $type, ?string $userId = null): UploadSession
     {
         UploadGuard::assertTypeActive($type);
         $this->verifier->assertSizeAndMime($file->getSize(), $file->getMimeType(), $type);
 
-        return DB::transaction(function () use ($file, $type, $metadata, $pending, $ttlHours) {
-            $hash = hash_file('sha256', $file->getRealPath()) ?: throw new RuntimeException('Could not hash the uploaded file.');
-            $dedupKey = $this->dedupScopeResolver->scopeKey($hash, null);
+        $path = $this->storeUploadedFile($file, $type);
 
-            $storageFile = $this->registrar->getOrCreateStorageFile(
-                $dedupKey,
-                $type->disk,
-                fn () => $this->storeUploadedFile($file, $type),
-                (string) $file->getMimeType(),
-                $file->getSize(),
-                $metadata ?? []
-            );
+        $this->registrar->deleteOnFailure($type->disk, $path, fn () => $this->verifier->assertScanClean($type->disk, $path));
 
-            $groupId = (string) Str::uuid();
-
-            $expiresAt = null;
-
-            if ($pending) {
-                $expiresAt = now()->addHours($ttlHours ?? (int) $this->config->get('documentable.lifecycle.pending_ttl_hours', 24));
-            }
-
-            $document = $this->documentRepository->create([
-                'storage_file_id' => $storageFile->id,
-                'document_type_id' => $type->id,
-                'document_group_id' => $groupId,
-                'documentable_type' => null,
-                'documentable_id' => null,
-                'client_filename' => $file->getClientOriginalName(),
-                'metadata' => $metadata ?? [],
-                'version' => 1,
-                'is_latest' => true,
-                'latest_marker' => $groupId,
-                'status' => $pending ? 'pending' : 'committed',
-                'expires_at' => $expiresAt,
-                'created_by' => $this->actor->idForAudit(),
-            ]);
-
-            Event::dispatch(new DocumentUploaded($document));
-
-            return $document;
-        });
+        return $this->sessions->create([
+            'user_id' => $userId,
+            'document_type_id' => $type->id,
+            'disk' => $type->disk,
+            'kind' => UploadKind::Single,
+            'client_filename' => $file->getClientOriginalName(),
+            'path' => $path,
+            'status' => UploadSessionStatus::Uploaded,
+            'object_size' => $file->getSize(),
+            'object_mime' => (string) $file->getMimeType(),
+            'object_hash' => $this->hashOf($file),
+            'expires_at' => $this->expiry(),
+        ]);
     }
 
     /**
-     * Presign a single PUT URL for a file under multipart.threshold_bytes —
-     * avoids proxying small-file bytes through the app server, and avoids
-     * multipart's per-part round-trip overhead for tiny files
-     * (never force multipart below the threshold).
+     * Start a presigned single PUT. The path is generated here, never taken from the client, and the client
+     * keeps only the session id.
      *
-     * @return array{url: string, headers: array<string, mixed>, path: string, disk: string}
+     * @return array{session: UploadSession, url: string, headers: array<string, mixed>}
      */
-    public function createPresignedUpload(DocumentType $type, string $originalFilename): array
+    public function initiatePresignedUpload(DocumentType $type, string $filename, ?string $userId = null, ?UploadSessionData $declared = null): array
     {
         UploadGuard::assertTypeActive($type);
 
-        $path = $this->pathGenerator->generate($type, $originalFilename);
+        $path = $this->pathGenerator->generate($type, $filename);
 
         $ttl = now()->modify((string) $this->config->get('documentable.multipart.part_upload_url_ttl', '+1 hour'));
 
         $signed = Storage::disk($type->disk)->temporaryUploadUrl($path, $ttl, ServerSideEncryption::options($type->disk));
 
+        $session = $this->sessions->create([
+            'user_id' => $userId,
+            'document_type_id' => $type->id,
+            'disk' => $type->disk,
+            'kind' => UploadKind::Single,
+            'client_filename' => $filename,
+            'path' => $path,
+            'expires_at' => $this->expiry(),
+        ] + ($declared ?? new UploadSessionData)->toColumns());
+
         return [
+            'session' => $session,
             'url' => $signed['url'],
             'headers' => $signed['headers'] ?? [],
-            'path' => $path,
-            'disk' => $type->disk,
         ];
     }
 
     /**
-     * Finalize a direct presigned-PUT upload. Same shared validation +
-     * hash-verification path as completeMultipartUpload() — mime is detected
-     * from the actual downloaded bytes, never trusted from the client.
+     * Check the object a client PUT to the session's path and mark the session `uploaded`.
      *
-     * The path is a client-supplied claim here, so this method never deletes the object it was pointed at
-     * when validation or the integrity check fails. A rejected upload stays in the bucket until the bucket
-     * lifecycle rule removes it.
-     *
-     * @param  array<string, mixed>  $metadata
+     * @throws ValidationException
      */
-    public function finalizeDirectUpload(
-        string $path,
-        DocumentType $type,
-        Model $documentable,
-        string $originalFilename,
-        ?string $expectedHash = null,
-        array $metadata = [],
-        ?string $documentGroupId = null
-    ): Document {
-        UploadGuard::assertTypeActive($type);
-
-        if ($this->storageFileRepository->existsAtPath($type->disk, $path)) {
-            throw ValidationException::withMessages([
-                'path' => 'This path already backs a stored file and cannot be finalized again.',
-            ]);
-        }
-
-        $this->assertPathIsWithinTypePrefix($type, $path);
-
-        if (! Storage::disk($type->disk)->exists($path)) {
-            throw ValidationException::withMessages([
-                'path' => 'No file found at the presigned upload path.',
-            ]);
-        }
-
-        $result = $this->verifier->hashAndDetectMime($type->disk, $path);
-
-        $this->verifier->assertSizeAndMime($result['size'], $result['mime'], $type);
-        $this->verifier->assertIntegrity($result['hash'], $expectedHash);
-
-        return DB::transaction(fn () => $this->registrar->registerUploadedPath(
-            $path,
-            $type,
-            $documentable,
-            $originalFilename,
-            $result,
-            $metadata,
-            $documentGroupId
-        ));
+    public function finalizeDirectUpload(UploadSession $session, ?string $expectedHash = null): UploadSession
+    {
+        return $this->finalizer->finalize($session, null, $expectedHash);
     }
 
-    /**
-     * Opt-in (`security.enforce_path_prefix`): a presigned finalize may only name a key inside the type's
-     * own prefix. Compared on a trailing slash so `invoices-archive/` is not mistaken for `invoices/`.
-     */
-    private function assertPathIsWithinTypePrefix(DocumentType $type, string $path): void
+    private function expiry(): Carbon
     {
-        if (! $this->config->get('documentable.security.enforce_path_prefix', false)) {
-            return;
-        }
+        return now()->addHours((int) $this->config->get('documentable.multipart.session_ttl_hours', 24));
+    }
 
-        if (! str_starts_with($path, rtrim($type->path_prefix, '/').'/')) {
-            throw ValidationException::withMessages([
-                'path' => 'The path is outside the storage prefix of this document type.',
-            ]);
-        }
+    private function hashOf(UploadedFile $file): string
+    {
+        return hash_file('sha256', (string) $file->getRealPath()) ?: throw new RuntimeException('Could not hash the uploaded file.');
     }
 
     private function storeUploadedFile(UploadedFile $file, DocumentType $type): string
