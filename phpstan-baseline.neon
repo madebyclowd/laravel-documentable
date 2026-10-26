@@ -337,18 +337,6 @@ parameters:
 			path: src/Services/DocumentService.php
 
 		-
-			message: '#^Cannot access property \$disk on MadeByClowd\\Documentable\\Models\\StorageFile\|null\.$#'
-			identifier: property.nonObject
-			count: 2
-			path: src/Services/DocumentService.php
-
-		-
-			message: '#^Cannot access property \$path on MadeByClowd\\Documentable\\Models\\StorageFile\|null\.$#'
-			identifier: property.nonObject
-			count: 1
-			path: src/Services/DocumentService.php
-
-		-
 			message: '#^Method MadeByClowd\\Documentable\\Services\\DocumentService\:\:completeMultipartUpload\(\) has parameter \$clientParts with no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
 			count: 1
@@ -399,12 +387,6 @@ parameters:
 		-
 			message: '#^Method MadeByClowd\\Documentable\\Services\\DocumentService\:\:resolvePartsForCompletion\(\) return type has no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
-			count: 1
-			path: src/Services/DocumentService.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Services\\DocumentService\:\:sanitizeHeaderFilename\(\) should return string but returns string\|null\.$#'
-			identifier: return.type
 			count: 1
 			path: src/Services/DocumentService.php
 

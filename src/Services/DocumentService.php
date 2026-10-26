@@ -28,7 +28,6 @@ use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Events\MultipartUploadAborted;
 use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
-use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
@@ -38,7 +37,6 @@ use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
 use MadeByClowd\Documentable\Repositories\MultipartUploadRepository;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
-use RuntimeException;
 
 class DocumentService
 {
@@ -50,7 +48,7 @@ class DocumentService
         protected ResolvesDedupScope $dedupScopeResolver,
         protected GeneratesStoragePath $pathGenerator,
         protected ActorResolver $actor,
-        protected AccessLogger $accessLogger
+        protected UrlSigner $urlSigner
     ) {}
 
     /**
@@ -155,25 +153,7 @@ class DocumentService
      */
     public function getUrl(Document $document, DateTimeInterface $expiration, string $disposition = 'inline'): string
     {
-        $storageFile = $document->storageFile;
-
-        $filename = static::sanitizeHeaderFilename($document->client_filename);
-
-        try {
-            $url = Storage::disk($storageFile->disk)->temporaryUrl(
-                $storageFile->path,
-                $expiration,
-                [
-                    'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
-                ]
-            );
-        } catch (RuntimeException $e) {
-            throw DiskDoesNotSupportTemporaryUrlsException::forDisk($storageFile->disk, $e);
-        }
-
-        $this->accessLogger->log($document, $disposition === 'attachment' ? 'download' : 'view');
-
-        return $url;
+        return $this->urlSigner->sign($document, $expiration, $disposition);
     }
 
     /**
@@ -361,15 +341,11 @@ class DocumentService
     }
 
     /**
-     * Strip every ASCII control character (not just the '"'/CR/LF originally
-     * flagged) — a raw client-supplied filename interpolated into a
-     * Content-Disposition header value is a header-injection primitive
-     * Public/static because it's a pure function useful to any
-     * consumer building their own download endpoint against the same data.
+     * @see UrlSigner::sanitizeHeaderFilename()
      */
     public static function sanitizeHeaderFilename(string $filename): string
     {
-        return preg_replace('/[\x00-\x1F\x7F"]/', '', $filename);
+        return UrlSigner::sanitizeHeaderFilename($filename);
     }
 
     protected function validateFile(UploadedFile $file, DocumentType $type): void
