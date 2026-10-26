@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Services;
 
 use DateTimeInterface;
@@ -8,7 +10,6 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
@@ -31,7 +32,6 @@ use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
-use MadeByClowd\Documentable\Models\DocumentAccessLog;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -48,7 +48,9 @@ class DocumentService
         protected MultipartUploadRepository $multipartUploadRepository,
         protected ScansUploadedFile $fileScanner,
         protected ResolvesDedupScope $dedupScopeResolver,
-        protected GeneratesStoragePath $pathGenerator
+        protected GeneratesStoragePath $pathGenerator,
+        protected ActorResolver $actor,
+        protected AccessLogger $accessLogger
     ) {}
 
     /**
@@ -139,7 +141,7 @@ class DocumentService
                 'latest_marker' => $groupId,
                 'status' => $pending ? 'pending' : 'committed',
                 'expires_at' => $expiresAt,
-                'created_by' => $this->currentActorId(),
+                'created_by' => $this->actor->idForAudit(),
             ]);
 
             Event::dispatch(new DocumentUploaded($document));
@@ -169,7 +171,7 @@ class DocumentService
             throw DiskDoesNotSupportTemporaryUrlsException::forDisk($storageFile->disk, $e);
         }
 
-        $this->logAccess($document, $disposition === 'attachment' ? 'download' : 'view');
+        $this->accessLogger->log($document, $disposition === 'attachment' ? 'download' : 'view');
 
         return $url;
     }
@@ -193,26 +195,6 @@ class DocumentService
     }
 
     /**
-     * Best-effort access log, config-gated (config('documentable.audit.access_log')) and off
-     * by default — the package can't observe requests to a presigned URL directly, so
-     * URL-generation time is the closest available proxy for "access".
-     */
-    protected function logAccess(Document $document, string $action): void
-    {
-        if (! config('documentable.audit.access_log', false)) {
-            return;
-        }
-
-        DocumentAccessLog::create([
-            'document_id' => $document->id,
-            'actor_id' => $this->resolveActorId(),
-            'action' => $action,
-            'ip_address' => app()->bound('request') ? request()->ip() : null,
-            'created_at' => now(),
-        ]);
-    }
-
-    /**
      * Soft-delete a document. If it's currently the latest of its group, the
      * latest_marker unique-column must be cleared in the same operation —
      * otherwise a soft-deleted row would keep "occupying" the unique slot and
@@ -224,7 +206,7 @@ class DocumentService
             $document->update([
                 'latest_marker' => null,
                 'is_latest' => false,
-                'deleted_by' => $this->currentActorId(),
+                'deleted_by' => $this->actor->idForAudit(),
             ]);
 
             $deleted = $this->documentRepository->delete($document);
@@ -726,27 +708,6 @@ class DocumentService
         return $options;
     }
 
-    /**
-     * Actor tracking is opt-in (config('documentable.audit.enabled')) and best-effort:
-     * null when disabled, or when there's no authenticated actor in the current
-     * context (CLI, queued jobs). Never a hard requirement to upload/delete.
-     */
-    protected function currentActorId(): ?string
-    {
-        if (! config('documentable.audit.enabled', false)) {
-            return null;
-        }
-
-        return $this->resolveActorId();
-    }
-
-    protected function resolveActorId(): ?string
-    {
-        $id = Auth::id();
-
-        return $id !== null ? (string) $id : null;
-    }
-
     protected function storeUploadedFile(UploadedFile $file, DocumentType $type): string
     {
         $path = $this->pathGenerator->generate($type, $file->getClientOriginalName());
@@ -1124,7 +1085,7 @@ class DocumentService
             'version' => $version,
             'is_latest' => true,
             'latest_marker' => $groupId,
-            'created_by' => $this->currentActorId(),
+            'created_by' => $this->actor->idForAudit(),
         ]);
 
         if ($previousLatest) {
