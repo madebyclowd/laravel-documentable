@@ -1,177 +1,42 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Services;
 
 use DateTimeInterface;
-use finfo;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
-use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
-use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
-use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
-use MadeByClowd\Documentable\Contracts\ScanResult;
-use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
-use MadeByClowd\Documentable\Events\DocumentDeleted;
-use MadeByClowd\Documentable\Events\DocumentPurged;
-use MadeByClowd\Documentable\Events\DocumentReassociated;
-use MadeByClowd\Documentable\Events\DocumentUploaded;
-use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
-use MadeByClowd\Documentable\Events\MultipartUploadAborted;
-use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
-use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
-use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
-use MadeByClowd\Documentable\Exceptions\UnsupportedMultipartDriverException;
 use MadeByClowd\Documentable\Models\Document;
-use MadeByClowd\Documentable\Models\DocumentAccessLog;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
-use MadeByClowd\Documentable\Repositories\MultipartUploadRepository;
-use MadeByClowd\Documentable\Repositories\StorageFileRepository;
-use RuntimeException;
 
+/**
+ * The public entry point for storing, reading and removing documents. Each method delegates to a focused
+ * internal collaborator; only the public methods here follow semver. Protected members are not supported API.
+ *
+ * @api
+ */
 class DocumentService
 {
     public function __construct(
-        protected StorageFileRepository $storageFileRepository,
         protected DocumentRepository $documentRepository,
-        protected MultipartUploadRepository $multipartUploadRepository,
-        protected ScansUploadedFile $fileScanner,
-        protected ResolvesDedupScope $dedupScopeResolver,
-        protected GeneratesStoragePath $pathGenerator
+        protected DirectUploadService $directUploads,
+        protected MultipartUploadService $multipartUploads,
+        protected UrlSigner $urlSigner,
+        protected DocumentPurger $purger,
+        protected DocumentAttacher $attacher
     ) {}
-
-    /**
-     * Upload a file and create a document record. Handles deduplication via file
-     * hash and group-aware versioning.
-     *
-     * $documentGroupId: pass the group id of an existing document to upload a new
-     * version *of that specific slot* (only meaningful when the type
-     * `allows_multiple`). Omit it to version/replace the type's single slot
-     * (allows_multiple = false) or to start a brand new independent slot
-     * (allows_multiple = true).
-     */
-    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null): Document
-    {
-        $this->assertTypeActive($type);
-        $this->validateFile($file, $type);
-
-        return DB::transaction(function () use ($file, $type, $documentable, $metadata, $documentGroupId) {
-            $hash = hash_file('sha256', $file->getRealPath());
-            $dedupKey = $this->dedupScopeResolver->scopeKey($hash, $documentable);
-
-            $storageFile = $this->getOrCreateStorageFile(
-                $dedupKey,
-                $type->disk,
-                fn () => $this->storeUploadedFile($file, $type),
-                (string) $file->getMimeType(),
-                $file->getSize(),
-                $metadata ?? []
-            );
-
-            return $this->createDocumentFromStorageFile(
-                $storageFile,
-                $type,
-                $documentable,
-                $file->getClientOriginalName(),
-                $metadata ?? [],
-                $documentGroupId
-            );
-        });
-    }
-
-    /**
-     * Upload a file without associating it to any owner. The owner is assigned
-     * later via the model's Documentable relation.
-     *
-     * $pending: false (default) — permanent, valid state (not garbage), same as
-     * before pending documents existed. true — temporary, expires after $ttlHours (or
-     * config('documentable.lifecycle.pending_ttl_hours') if omitted) unless the
-     * consumer calls $document->commit() before it lapses (e.g. once the real
-     * owner is finally created and this document is reassociated to it).
-     */
-    public function uploadDetached(UploadedFile $file, DocumentType $type, ?array $metadata = [], bool $pending = false, ?int $ttlHours = null): Document
-    {
-        $this->assertTypeActive($type);
-        $this->validateFile($file, $type);
-
-        return DB::transaction(function () use ($file, $type, $metadata, $pending, $ttlHours) {
-            $hash = hash_file('sha256', $file->getRealPath());
-            $dedupKey = $this->dedupScopeResolver->scopeKey($hash, null);
-
-            $storageFile = $this->getOrCreateStorageFile(
-                $dedupKey,
-                $type->disk,
-                fn () => $this->storeUploadedFile($file, $type),
-                (string) $file->getMimeType(),
-                $file->getSize(),
-                $metadata ?? []
-            );
-
-            $groupId = (string) Str::uuid();
-
-            $expiresAt = null;
-
-            if ($pending) {
-                $expiresAt = now()->addHours($ttlHours ?? (int) config('documentable.lifecycle.pending_ttl_hours', 24));
-            }
-
-            $document = $this->documentRepository->create([
-                'storage_file_id' => $storageFile->id,
-                'document_type_id' => $type->id,
-                'document_group_id' => $groupId,
-                'documentable_type' => null,
-                'documentable_id' => null,
-                'client_filename' => $file->getClientOriginalName(),
-                'metadata' => $metadata ?? [],
-                'version' => 1,
-                'is_latest' => true,
-                'latest_marker' => $groupId,
-                'status' => $pending ? 'pending' : 'committed',
-                'expires_at' => $expiresAt,
-                'created_by' => $this->currentActorId(),
-            ]);
-
-            Event::dispatch(new DocumentUploaded($document));
-
-            return $document;
-        });
-    }
 
     /**
      * Generate a presigned URL for the document.
      */
     public function getUrl(Document $document, DateTimeInterface $expiration, string $disposition = 'inline'): string
     {
-        $storageFile = $document->storageFile;
-
-        $filename = static::sanitizeHeaderFilename($document->client_filename);
-
-        try {
-            $url = Storage::disk($storageFile->disk)->temporaryUrl(
-                $storageFile->path,
-                $expiration,
-                [
-                    'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
-                ]
-            );
-        } catch (RuntimeException $e) {
-            throw DiskDoesNotSupportTemporaryUrlsException::forDisk($storageFile->disk, $e);
-        }
-
-        $this->logAccess($document, $disposition === 'attachment' ? 'download' : 'view');
-
-        return $url;
+        return $this->urlSigner->sign($document, $expiration, $disposition);
     }
 
     /**
@@ -193,327 +58,157 @@ class DocumentService
     }
 
     /**
-     * Best-effort access log, config-gated (config('documentable.audit.access_log')) and off
-     * by default — the package can't observe requests to a presigned URL directly, so
-     * URL-generation time is the closest available proxy for "access".
-     */
-    protected function logAccess(Document $document, string $action): void
-    {
-        if (! config('documentable.audit.access_log', false)) {
-            return;
-        }
-
-        DocumentAccessLog::create([
-            'document_id' => $document->id,
-            'actor_id' => $this->resolveActorId(),
-            'action' => $action,
-            'ip_address' => app()->bound('request') ? request()->ip() : null,
-            'created_at' => now(),
-        ]);
-    }
-
-    /**
-     * Soft-delete a document. If it's currently the latest of its group, the
-     * latest_marker unique-column must be cleared in the same operation —
-     * otherwise a soft-deleted row would keep "occupying" the unique slot and
-     * block a future upload from becoming latest for that group.
+     * @see DocumentPurger::delete()
      */
     public function delete(Document $document): bool
     {
-        return DB::transaction(function () use ($document) {
-            $document->update([
-                'latest_marker' => null,
-                'is_latest' => false,
-                'deleted_by' => $this->currentActorId(),
-            ]);
-
-            $deleted = $this->documentRepository->delete($document);
-
-            if ($deleted) {
-                Event::dispatch(new DocumentDeleted($document));
-            }
-
-            return $deleted;
-        });
+        return $this->purger->delete($document);
     }
 
     /**
-     * Permanently delete a document, then its stored blob when no other document references it.
-     *
-     * The document row is gone once this returns, whatever the result. `false` means the document could not be
-     * deleted, or that it was but the blob could not: the `StorageFile` row is kept as the record of the
-     * orphaned object, an error is logged, and `documents:clean-orphaned --storage-files` retries it. Disks
-     * configured with `throw => false` report a failed delete as `false` rather than an exception, which is
-     * why the result is checked rather than assumed.
+     * @see DocumentPurger::purge()
      */
     public function purge(Document $document): bool
     {
-        $storageFile = $document->storageFile;
-
-        $deleted = $this->documentRepository->forceDelete($document);
-
-        if (! $deleted) {
-            return false;
-        }
-
-        $storageFileAlsoDeleted = false;
-
-        if ($storageFile !== null) {
-            $storageFileAlsoDeleted = $this->removeStorageFileIfUnreferenced($storageFile);
-        }
-
-        Event::dispatch(new DocumentPurged($document, $storageFileAlsoDeleted));
-
-        return $storageFile === null || $storageFileAlsoDeleted || $this->isStorageFileReferenced($storageFile);
+        return $this->purger->purge($document);
     }
 
     /**
-     * Delete a stored blob and its `StorageFile` row if no document, trashed ones included, references it.
-     * The check repeats under a row lock because a deduplicated upload may have attached a document to the
-     * blob since the caller looked. Returns true when the blob and row are gone, false when the blob could
-     * not be deleted (the row is kept so the next sweep can retry) or when the file is still referenced.
+     * @see DocumentPurger::removeStorageFileIfUnreferenced()
      */
     public function removeStorageFileIfUnreferenced(StorageFile $storageFile): bool
     {
-        return DB::transaction(function () use ($storageFile) {
-            $locked = StorageFile::whereKey($storageFile->id)->lockForUpdate()->first();
-
-            if ($locked === null) {
-                return true;
-            }
-
-            if ($this->isStorageFileReferenced($locked)) {
-                return false;
-            }
-
-            if (! $this->deleteBlob($locked->disk, $locked->path)) {
-                return false;
-            }
-
-            return $this->storageFileRepository->delete($locked);
-        });
-    }
-
-    protected function isStorageFileReferenced(StorageFile $storageFile): bool
-    {
-        return Document::withTrashed()->where('storage_file_id', $storageFile->id)->exists();
+        return $this->purger->removeStorageFileIfUnreferenced($storageFile);
     }
 
     /**
-     * True when the object no longer exists on the disk afterwards, whether it was deleted now or was already
-     * gone. A failed delete is logged with the disk and path, because the row that remembers it is the only
-     * trace.
-     */
-    protected function deleteBlob(string $disk, string $path): bool
-    {
-        try {
-            $filesystem = Storage::disk($disk);
-
-            if (! $filesystem->exists($path)) {
-                return true;
-            }
-
-            if ($filesystem->delete($path) !== false) {
-                return true;
-            }
-
-            $reason = 'the disk reported the delete as failed';
-        } catch (\Throwable $e) {
-            $reason = $e->getMessage();
-        }
-
-        Log::error("Documentable could not delete [{$path}] from disk [{$disk}]: {$reason}. The storage file row is kept so documents:clean-orphaned --storage-files can retry.");
-
-        return false;
-    }
-
-    /**
-     * Move a document to a different owner, typically a detached upload that finally has its real owner.
-     *
-     * The move goes through the same slot and version resolution as an upload. For a single-slot type whose new
-     * owner already holds a latest document, the moved document joins that slot's chain: it takes the group, the
-     * previous latest is demoted (or soft-deleted when the type does not keep history) and the version is
-     * incremented, so the owner never ends up with two "latest" documents. A multi-slot type keeps the moved
-     * document in its own slot, and moving a document to the owner it already has changes nothing.
+     * @see DocumentAttacher::reassociate()
      */
     public function reassociateDocument(Document $document, Model $newOwner): Document
     {
-        return DB::transaction(function () use ($document, $newOwner) {
-            $previousOwner = null;
-
-            if ($document->documentable_type && $document->documentable_id) {
-                $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
-
-                $previousOwner = $morphClass::find($document->documentable_id);
-            }
-
-            $morphType = $newOwner->getMorphClass();
-            $ownerId = (string) $newOwner->getKey();
-
-            $attributes = ['documentable_type' => $morphType, 'documentable_id' => $ownerId];
-            $supersedes = null;
-
-            $alreadyOwned = $document->documentable_type === $morphType && (string) $document->documentable_id === $ownerId;
-            $type = DocumentType::withTrashed()->find($document->document_type_id);
-
-            if (! $alreadyOwned && $document->is_latest && $type !== null && ! $type->allows_multiple) {
-                $supersedes = $this->documentRepository->findLatest($morphType, $ownerId, $type->id);
-
-                if ($supersedes !== null) {
-                    $attributes['document_group_id'] = $supersedes->document_group_id;
-                    $attributes['latest_marker'] = $supersedes->document_group_id;
-                    $attributes['version'] = $this->demoteAndResolveVersion($supersedes, $type);
-                }
-            }
-
-            $document->update($attributes);
-
-            if ($supersedes !== null) {
-                Event::dispatch(new DocumentVersionSuperseded($supersedes, $document));
-            }
-
-            Event::dispatch(new DocumentReassociated($document, $previousOwner));
-
-            return $document;
-        });
+        return $this->attacher->reassociate($document, $newOwner);
     }
 
     /**
-     * Strip every ASCII control character (not just the '"'/CR/LF originally
-     * flagged) — a raw client-supplied filename interpolated into a
-     * Content-Disposition header value is a header-injection primitive
-     * Public/static because it's a pure function useful to any
-     * consumer building their own download endpoint against the same data.
+     * @see UrlSigner::sanitizeHeaderFilename()
      */
     public static function sanitizeHeaderFilename(string $filename): string
     {
-        return preg_replace('/[\x00-\x1F\x7F"]/', '', $filename);
-    }
-
-    protected function validateFile(UploadedFile $file, DocumentType $type): void
-    {
-        $this->validateSizeAndMime($file->getSize(), $file->getMimeType(), $type);
+        return UrlSigner::sanitizeHeaderFilename($filename);
     }
 
     /**
-     * The one entry point every transport funnels through — local UploadedFile
-     * (upload()/uploadDetached()), multipart finalize, and direct-PUT finalize
-     * all resolve size/mime first, then call this, so no transport can skip
-     * validation or trust a client-asserted mime type.
+     * @see DocumentAttacher::attachStorageFile()
      */
-    protected function validateSizeAndMime(int $sizeBytes, ?string $mimeType, DocumentType $type): void
-    {
-        $maxBytes = $type->max_size_mb * 1024 * 1024;
-
-        if ($sizeBytes > $maxBytes) {
-            throw ValidationException::withMessages([
-                'file' => "File size exceeds limit of {$type->max_size_mb}MB.",
-            ]);
-        }
-
-        if ($type->allowed_mimes && (! $mimeType || ! in_array($mimeType, $type->allowed_mimes, true))) {
-            throw ValidationException::withMessages([
-                'file' => "File type '{$mimeType}' is not allowed.",
-            ]);
-        }
+    protected function createDocumentFromStorageFile(
+        StorageFile $storageFile,
+        DocumentType $type,
+        Model $documentable,
+        string $clientFilename,
+        array $metadata = [],
+        ?string $documentGroupId = null
+    ): Document {
+        return $this->attacher->attachStorageFile($storageFile, $type, $documentable, $clientFilename, $metadata, $documentGroupId);
     }
 
     /**
-     * Begin a multipart upload session, scoped to $userId — only that user may
-     * later request part URLs, complete, or abort it (ownership check pattern
-     * kept from the reference implementation, it was already correct).
+     * @see DirectUploadService::upload()
+     *
+     * @param  array<string, mixed>|null  $metadata
+     */
+    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null): Document
+    {
+        return $this->directUploads->upload($file, $type, $documentable, $metadata, $documentGroupId);
+    }
+
+    /**
+     * @see DirectUploadService::uploadDetached()
+     *
+     * @param  array<string, mixed>|null  $metadata
+     */
+    public function uploadDetached(UploadedFile $file, DocumentType $type, ?array $metadata = [], bool $pending = false, ?int $ttlHours = null): Document
+    {
+        return $this->directUploads->uploadDetached($file, $type, $metadata, $pending, $ttlHours);
+    }
+
+    /**
+     * @see DirectUploadService::createPresignedUpload()
+     *
+     * @return array{url: string, headers: array<string, mixed>, path: string, disk: string}
+     */
+    public function createPresignedUpload(DocumentType $type, string $originalFilename): array
+    {
+        return $this->directUploads->createPresignedUpload($type, $originalFilename);
+    }
+
+    /**
+     * @see DirectUploadService::finalizeDirectUpload()
+     *
+     * @param  array<string, mixed>  $metadata
+     */
+    public function finalizeDirectUpload(
+        string $path,
+        DocumentType $type,
+        Model $documentable,
+        string $originalFilename,
+        ?string $expectedHash = null,
+        array $metadata = [],
+        ?string $documentGroupId = null
+    ): Document {
+        return $this->directUploads->finalizeDirectUpload($path, $type, $documentable, $originalFilename, $expectedHash, $metadata, $documentGroupId);
+    }
+
+    /**
+     * @see MultipartUploadService::initiateMultipartUpload()
      *
      * @return array{upload_id: string, path: string, disk: string}
      */
     public function initiateMultipartUpload(string $originalFilename, DocumentType $type, string $userId): array
     {
-        $this->assertTypeActive($type);
-
-        $path = $this->pathGenerator->generate($type, $originalFilename);
-
-        $result = $this->resolveMultipartDriver($type->disk)->create($type->disk, $path, $originalFilename);
-
-        $session = $this->multipartUploadRepository->create([
-            'path' => $path,
-            'upload_id' => $result['upload_id'],
-            'user_id' => $userId,
-            'document_type_id' => $type->id,
-            'expires_at' => now()->addHours((int) config('documentable.multipart.session_ttl_hours', 24)),
-        ]);
-
-        Event::dispatch(new MultipartUploadInitiated($session));
-
-        return [
-            'upload_id' => $session->upload_id,
-            'path' => $session->path,
-            'disk' => $type->disk,
-        ];
+        return $this->multipartUploads->initiateMultipartUpload($originalFilename, $type, $userId);
     }
 
     /**
-     * Authoritative "which parts actually landed on the bucket" for a resuming client —
-     * diff this against local bookkeeping before re-uploading anything (feedback #7).
+     * @see MultipartUploadService::listPartsForSession()
      *
      * @return array<int, array{PartNumber: int, ETag: string}>
      */
     public function listPartsForSession(string $path, string $uploadId, string $userId, DocumentType $type): array
     {
-        $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
-
-        return $this->resolveMultipartDriver($type->disk)->listParts($type->disk, $path, $uploadId);
+        return $this->multipartUploads->listPartsForSession($path, $uploadId, $userId, $type);
     }
 
     /**
-     * Status check, not an ownership-gated lookup that throws on absence (feedback #8) —
-     * session absence is an expected outcome here (reaped by documents:clean-orphaned, or
-     * aborted), not an error condition. A resuming client branches on `exists` instead of
-     * handling an exception for what is, for this one call, a normal case.
+     * @see MultipartUploadService::multipartSessionStatus()
      *
      * @return array{exists: bool, expires_at: ?string, disk: ?string}
      */
     public function multipartSessionStatus(string $path, string $uploadId, string $userId): array
     {
-        $session = $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
-
-        if (! $session) {
-            return ['exists' => false, 'expires_at' => null, 'disk' => null];
-        }
-
-        return [
-            'exists' => true,
-            'expires_at' => $session->expires_at?->toIso8601String(),
-            'disk' => $session->documentType->disk,
-        ];
+        return $this->multipartUploads->multipartSessionStatus($path, $uploadId, $userId);
     }
 
     /**
-     * The caller's own multipart session, or null when there is none. Lets the controller layer authorize
-     * against the session's document type before it answers a status probe.
+     * @see MultipartUploadService::findMultipartSession()
      */
     public function findMultipartSession(string $path, string $uploadId, string $userId): ?MultipartUpload
     {
-        return $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
+        return $this->multipartUploads->findMultipartSession($path, $uploadId, $userId);
     }
 
     /**
-     * Presign one part's upload URL. TTL comes from config, not a hardcoded
-     * literal (reference code hardcoded '+1 hour' inline).
+     * @see MultipartUploadService::generatePartUploadUrl()
      */
     public function generatePartUploadUrl(string $path, string $uploadId, string $userId, int $partNumber, DocumentType $type): string
     {
-        $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
-
-        return $this->resolveMultipartDriver($type->disk)
-            ->presignPartUpload($type->disk, $path, $uploadId, $partNumber);
+        return $this->multipartUploads->generatePartUploadUrl($path, $uploadId, $userId, $partNumber, $type);
     }
 
     /**
-     * Complete a multipart upload: resolve/reconcile parts per etag_strategy,
-     * assemble on the provider, verify integrity independently of any ETag
-     * (an ETag is never a real content checksum), then create the Document.
+     * @see MultipartUploadService::completeMultipartUpload()
      *
-     * $clientParts is only consulted when etag_strategy = 'client'; ignored
-     * (server always calls listParts()) when 'server-authoritative'.
+     * @param  array<int, array{PartNumber: int, ETag: string}>|null  $clientParts
+     * @param  array<string, mixed>  $metadata
      */
     public function completeMultipartUpload(
         string $path,
@@ -527,640 +222,22 @@ class DocumentService
         array $metadata = [],
         ?string $documentGroupId = null
     ): Document {
-        $this->assertTypeActive($type);
-
-        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
-        $driver = $this->resolveMultipartDriver($type->disk);
-
-        $parts = $this->resolvePartsForCompletion($driver, $type->disk, $path, $uploadId, $clientParts);
-
-        $driver->complete($type->disk, $path, $uploadId, $parts);
-
-        $result = $this->resolveAssembledFileInfo($driver, $type->disk, $path);
-
-        $this->validateOrDelete($type->disk, $path, $result['size'], $result['mime'], $type);
-        $this->verifyIntegrityOrDelete($type->disk, $path, $result['hash'], $expectedHash);
-
-        return DB::transaction(function () use ($path, $type, $documentable, $originalFilename, $metadata, $result, $documentGroupId, $session) {
-            $document = $this->createDocumentFromUploadedPath(
-                $path,
-                $type,
-                $documentable,
-                $originalFilename,
-                $result,
-                array_merge($metadata, ['multipart' => true]),
-                $documentGroupId
-            );
-
-            $this->multipartUploadRepository->delete($session);
-
-            return $document;
-        });
+        return $this->multipartUploads->completeMultipartUpload($path, $uploadId, $userId, $type, $documentable, $originalFilename, $clientParts, $expectedHash, $metadata, $documentGroupId);
     }
 
     /**
-     * Ownership-gated abort, for the user-facing API — a caller must prove
-     * they own the session. Deletes the session row after the driver
-     * confirms the provider-side upload is aborted.
+     * @see MultipartUploadService::abortMultipartUpload()
      */
     public function abortMultipartUpload(string $path, string $uploadId, string $userId, DocumentType $type): void
     {
-        $session = $this->findOwnedSessionOrFail($path, $uploadId, $userId, $type);
-
-        $this->abortSession($session, $type->disk);
+        $this->multipartUploads->abortMultipartUpload($path, $uploadId, $userId, $type);
     }
 
     /**
-     * Non-ownership-gated abort, for system-initiated cleanup (the
-     * reaper) that already has the loaded MultipartUpload row in hand and has
-     * no "user it's acting as" to re-verify against.
+     * @see MultipartUploadService::abortMultipartUploadSession()
      */
     public function abortMultipartUploadSession(MultipartUpload $session): void
     {
-        $this->abortSession($session, $session->documentType->disk);
-    }
-
-    protected function abortSession(MultipartUpload $session, string $disk): void
-    {
-        try {
-            $this->resolveMultipartDriver($disk)->abort($disk, $session->path, $session->upload_id);
-        } catch (MultipartUploadNotFoundException) {
-            // Already gone on the provider: the abort has reached its goal, so only the row is left to remove.
-        }
-
-        $this->multipartUploadRepository->delete($session);
-
-        Event::dispatch(new MultipartUploadAborted($session));
-    }
-
-    /**
-     * Presign a single PUT URL for a file under multipart.threshold_bytes —
-     * avoids proxying small-file bytes through the app server, and avoids
-     * multipart's per-part round-trip overhead for tiny files
-     * (never force multipart below the threshold).
-     *
-     * @return array{url: string, headers: array, path: string, disk: string}
-     */
-    public function createPresignedUpload(DocumentType $type, string $originalFilename): array
-    {
-        $this->assertTypeActive($type);
-
-        $path = $this->pathGenerator->generate($type, $originalFilename);
-
-        $ttl = now()->modify((string) config('documentable.multipart.part_upload_url_ttl', '+1 hour'));
-
-        $signed = Storage::disk($type->disk)->temporaryUploadUrl($path, $ttl, $this->sseOptions($type->disk));
-
-        return [
-            'url' => $signed['url'],
-            'headers' => $signed['headers'] ?? [],
-            'path' => $path,
-            'disk' => $type->disk,
-        ];
-    }
-
-    /**
-     * Finalize a direct presigned-PUT upload. Same shared validation +
-     * hash-verification path as completeMultipartUpload() — mime is detected
-     * from the actual downloaded bytes, never trusted from the client.
-     *
-     * The path is a client-supplied claim here, so this method never deletes the object it was pointed at
-     * when validation or the integrity check fails. A rejected upload stays in the bucket until the bucket
-     * lifecycle rule removes it.
-     */
-    public function finalizeDirectUpload(
-        string $path,
-        DocumentType $type,
-        Model $documentable,
-        string $originalFilename,
-        ?string $expectedHash = null,
-        array $metadata = [],
-        ?string $documentGroupId = null
-    ): Document {
-        $this->assertTypeActive($type);
-
-        if ($this->storageFileRepository->existsAtPath($type->disk, $path)) {
-            throw ValidationException::withMessages([
-                'path' => 'This path already backs a stored file and cannot be finalized again.',
-            ]);
-        }
-
-        $this->assertPathIsWithinTypePrefix($type, $path);
-
-        if (! Storage::disk($type->disk)->exists($path)) {
-            throw ValidationException::withMessages([
-                'path' => 'No file found at the presigned upload path.',
-            ]);
-        }
-
-        $result = $this->hashAndDetectMime($type->disk, $path);
-
-        $this->validateSizeAndMime($result['size'], $result['mime'], $type);
-        $this->assertIntegrity($result['hash'], $expectedHash);
-
-        return DB::transaction(fn () => $this->createDocumentFromUploadedPath(
-            $path,
-            $type,
-            $documentable,
-            $originalFilename,
-            $result,
-            $metadata,
-            $documentGroupId
-        ));
-    }
-
-    /**
-     * Opt-in (`security.enforce_path_prefix`): a presigned finalize may only name a key inside the type's
-     * own prefix. Compared on a trailing slash so `invoices-archive/` is not mistaken for `invoices/`.
-     */
-    protected function assertPathIsWithinTypePrefix(DocumentType $type, string $path): void
-    {
-        if (! config('documentable.security.enforce_path_prefix', false)) {
-            return;
-        }
-
-        if (! str_starts_with($path, rtrim($type->path_prefix, '/').'/')) {
-            throw ValidationException::withMessages([
-                'path' => 'The path is outside the storage prefix of this document type.',
-            ]);
-        }
-    }
-
-    /**
-     * Soft-deleted DocumentTypes must not accept new uploads.
-     * A FormRequest-level `Rule::exists(...)->whereNull('deleted_at')` check
-     * is still recommended at the controller layer, but this is the
-     * business rule living where it belongs regardless of caller — service
-     * methods called directly (tests, jobs, artisan commands) get the same
-     * protection a validated HTTP request would.
-     */
-    protected function assertTypeActive(DocumentType $type): void
-    {
-        if ($type->trashed()) {
-            throw ValidationException::withMessages([
-                'document_type_id' => 'This document type is no longer active.',
-            ]);
-        }
-    }
-
-    /**
-     * Explicit SSE, passed through rather than relying on the bucket's
-     * default encryption setting (security-risks.md #2).
-     *
-     * @return array{ServerSideEncryption?: string, SSEKMSKeyId?: string}
-     */
-    protected function sseOptions(string $disk): array
-    {
-        $sse = config("documentable.disks.{$disk}.server_side_encryption");
-
-        if (! $sse) {
-            return [];
-        }
-
-        $options = ['ServerSideEncryption' => $sse];
-
-        if ($sse === 'aws:kms' && $kmsKeyId = config("documentable.disks.{$disk}.kms_key_id")) {
-            $options['SSEKMSKeyId'] = $kmsKeyId;
-        }
-
-        return $options;
-    }
-
-    /**
-     * Actor tracking is opt-in (config('documentable.audit.enabled')) and best-effort:
-     * null when disabled, or when there's no authenticated actor in the current
-     * context (CLI, queued jobs). Never a hard requirement to upload/delete.
-     */
-    protected function currentActorId(): ?string
-    {
-        if (! config('documentable.audit.enabled', false)) {
-            return null;
-        }
-
-        return $this->resolveActorId();
-    }
-
-    protected function resolveActorId(): ?string
-    {
-        $id = Auth::id();
-
-        return $id !== null ? (string) $id : null;
-    }
-
-    protected function storeUploadedFile(UploadedFile $file, DocumentType $type): string
-    {
-        $path = $this->pathGenerator->generate($type, $file->getClientOriginalName());
-
-        return Storage::disk($type->disk)->putFileAs(
-            dirname($path),
-            $file,
-            basename($path),
-            $this->sseOptions($type->disk)
-        );
-    }
-
-    protected function resolveMultipartDriver(string $disk): MultipartUploadDriver
-    {
-        $flysystemDriver = (string) config("filesystems.disks.{$disk}.driver");
-        $driverClass = config("documentable.multipart.drivers.{$flysystemDriver}");
-
-        if (! $driverClass) {
-            throw UnsupportedMultipartDriverException::forDisk($disk, $flysystemDriver);
-        }
-
-        return app($driverClass);
-    }
-
-    /**
-     * The caller's own session, which must also belong to `$type`: a session is started for one type (disk,
-     * prefix, size limit, mime allow-list), and acting on it under another would sidestep those limits.
-     */
-    protected function findOwnedSessionOrFail(string $path, string $uploadId, string $userId, ?DocumentType $type = null): MultipartUpload
-    {
-        $session = $this->multipartUploadRepository->findOwned($path, $uploadId, $userId);
-
-        if (! $session) {
-            throw ValidationException::withMessages([
-                'upload_id' => 'Multipart upload session not found or not owned by this user.',
-            ]);
-        }
-
-        if ($type !== null && $session->document_type_id !== $type->id) {
-            throw ValidationException::withMessages([
-                'document_type_id' => 'This upload session was started for a different document type.',
-            ]);
-        }
-
-        return $session;
-    }
-
-    /**
-     * client strategy: reconcile the client-reported part list against the
-     * provider's authoritative listParts() before completing — fail fast on
-     * a truncated/partial list instead of discovering it after a full
-     * download+hash. server-authoritative strategy: always use
-     * listParts(), client input is never consulted.
-     */
-    protected function resolvePartsForCompletion(MultipartUploadDriver $driver, string $disk, string $path, string $uploadId, ?array $clientParts): array
-    {
-        $strategy = config('documentable.multipart.etag_strategy', 'server-authoritative');
-
-        if ($strategy === 'client' && ! empty($clientParts)) {
-            $authoritative = $driver->listParts($disk, $path, $uploadId);
-
-            $authoritativeNumbers = collect($authoritative)->pluck('PartNumber')->sort()->values()->all();
-            $clientNumbers = collect($clientParts)->pluck('PartNumber')->sort()->values()->all();
-
-            if ($authoritativeNumbers !== $clientNumbers) {
-                throw ValidationException::withMessages([
-                    'parts' => 'Reported parts do not match the parts actually uploaded to storage.',
-                ]);
-            }
-
-            $parts = $clientParts;
-        } else {
-            $parts = $driver->listParts($disk, $path, $uploadId);
-        }
-
-        usort($parts, fn ($a, $b) => $a['PartNumber'] <=> $b['PartNumber']);
-
-        return $parts;
-    }
-
-    /**
-     * Optional fast path: when
-     * use_native_checksum is enabled and the driver can report a provider-computed
-     * full-object checksum, skip the full re-download-and-hash — only the first
-     * chunk is read (for mime sniffing) and size comes from a HeadObject-equivalent
-     * call. Falls back to the full-stream hash whenever the driver returns null
-     * (unsupported backend, or feature disabled) — this is never the only
-     * integrity path.
-     *
-     * @return array{hash: string, mime: string, size: int}
-     */
-    protected function resolveAssembledFileInfo(MultipartUploadDriver $driver, string $disk, string $path): array
-    {
-        if (config('documentable.multipart.use_native_checksum', false)) {
-            $checksum = $driver->retrieveChecksum($disk, $path);
-
-            if ($checksum !== null) {
-                return [
-                    'hash' => $checksum,
-                    'mime' => $this->detectMimeFromHead($disk, $path),
-                    'size' => Storage::disk($disk)->size($path),
-                ];
-            }
-        }
-
-        return $this->hashAndDetectMime($disk, $path);
-    }
-
-    /**
-     * Sniff mime from only the first chunk of the object — cheap regardless of
-     * object size, since Storage::readStream() is lazy and this never drains it.
-     */
-    protected function detectMimeFromHead(string $disk, string $path): string
-    {
-        $stream = Storage::disk($disk)->readStream($path);
-        $chunk = fread($stream, 8192);
-        fclose($stream);
-
-        return (new finfo(FILEINFO_MIME_TYPE))->buffer($chunk ?: '') ?: 'application/octet-stream';
-    }
-
-    /**
-     * Stream the object once: sha256 over the whole body (integrity, always
-     * independent of any provider ETag) and mime sniffed from the first chunk
-     * via fileinfo (never a client-asserted mime_type field).
-     *
-     * @return array{hash: string, mime: string, size: int}
-     */
-    protected function hashAndDetectMime(string $disk, string $path): array
-    {
-        $stream = Storage::disk($disk)->readStream($path);
-
-        $ctx = hash_init('sha256');
-        $sizeBytes = 0;
-        $firstChunk = null;
-
-        while (! feof($stream)) {
-            $chunk = fread($stream, 8192);
-
-            if ($firstChunk === null) {
-                $firstChunk = $chunk;
-            }
-
-            hash_update($ctx, $chunk);
-            $sizeBytes += strlen($chunk);
-        }
-
-        fclose($stream);
-
-        $mimeType = (new finfo(FILEINFO_MIME_TYPE))->buffer($firstChunk ?? '') ?: 'application/octet-stream';
-
-        return [
-            'hash' => hash_final($ctx),
-            'mime' => $mimeType,
-            'size' => $sizeBytes,
-        ];
-    }
-
-    /**
-     * A failed size/mime check after the bytes are already assembled/written
-     * (both multipart and direct-PUT land bytes before validation is
-     * possible) must not leave an orphaned blob with no StorageFile/Document
-     * pointing at it.
-     */
-    protected function validateOrDelete(string $disk, string $path, int $sizeBytes, ?string $mimeType, DocumentType $type): void
-    {
-        try {
-            $this->validateSizeAndMime($sizeBytes, $mimeType, $type);
-        } catch (ValidationException $e) {
-            Storage::disk($disk)->delete($path);
-
-            throw $e;
-        }
-    }
-
-    /**
-     * ScansUploadedFile hook (security-risks.md #1) — default is a no-op
-     * returning Clean, but always runs so wiring a real scanner in later
-     * doesn't require touching call sites.
-     */
-    protected function scanOrDelete(string $disk, string $path): void
-    {
-        $result = $this->fileScanner->scan($disk, $path);
-
-        if ($result === ScanResult::Clean) {
-            return;
-        }
-
-        if ($result === ScanResult::Error && config('documentable.security.scan_error_policy', 'reject') === 'allow') {
-            Log::warning("Documentable stored [{$path}] on disk [{$disk}] without a scan verdict, because the scanner reported an error and security.scan_error_policy is 'allow'.");
-
-            return;
-        }
-
-        Storage::disk($disk)->delete($path);
-
-        throw ValidationException::withMessages([
-            'file' => $result->isInfected()
-                ? 'Uploaded file failed a security scan.'
-                : 'Uploaded file could not be scanned. Try again later.',
-        ]);
-    }
-
-    protected function verifyIntegrityOrDelete(string $disk, string $path, string $actualHash, ?string $expectedHash): void
-    {
-        try {
-            $this->assertIntegrity($actualHash, $expectedHash);
-        } catch (ValidationException $e) {
-            Storage::disk($disk)->delete($path);
-
-            throw $e;
-        }
-    }
-
-    /**
-     * Compare the server-computed hash with the one the client declared, without touching storage. Use
-     * this where the object was not written by this package in the current request (a presigned PUT),
-     * because there the path is only a client-supplied claim and deleting it would destroy data the
-     * caller may not own.
-     */
-    protected function assertIntegrity(string $actualHash, ?string $expectedHash): void
-    {
-        if ($expectedHash === null || hash_equals($expectedHash, $actualHash)) {
-            return;
-        }
-
-        throw ValidationException::withMessages([
-            'file' => "Integrity check failed. Server hash ({$actualHash}) does not match client hash ({$expectedHash}).",
-        ]);
-    }
-
-    /**
-     * Register (or dedup-reuse) the StorageFile for a path that was already
-     * written by the provider before the hash was known (multipart assembly
-     * / a client PUT both land bytes before this point). On a dedup hit, the
-     * just-written $path is a redundant duplicate of already-stored content
-     * and is deleted — unlike upload()'s local-file path, this path can't
-     * avoid the write up front, so it must clean up after the fact instead.
-     *
-     * @param  array{hash: string, mime: string, size: int}  $fileInfo
-     */
-    protected function createDocumentFromUploadedPath(
-        string $path,
-        DocumentType $type,
-        Model $documentable,
-        string $originalFilename,
-        array $fileInfo,
-        array $metadata,
-        ?string $documentGroupId
-    ): Document {
-        $dedupKey = $this->dedupScopeResolver->scopeKey($fileInfo['hash'], $documentable);
-        $isDuplicate = $this->storageFileRepository->findByHash($dedupKey) !== null;
-
-        $storageFile = $this->getOrCreateStorageFile(
-            $dedupKey,
-            $type->disk,
-            fn () => $path,
-            $fileInfo['mime'],
-            $fileInfo['size'],
-            $metadata
-        );
-
-        if ($isDuplicate) {
-            Storage::disk($type->disk)->delete($path);
-        }
-
-        return $this->createDocumentFromStorageFile(
-            $storageFile,
-            $type,
-            $documentable,
-            $originalFilename,
-            $metadata,
-            $documentGroupId
-        );
-    }
-
-    /**
-     * Get existing StorageFile by hash or create a new one. $pathProvider is
-     * executed ONLY if the file needs to be stored/registered.
-     */
-    protected function getOrCreateStorageFile(
-        string $hash,
-        string $disk,
-        callable $pathProvider,
-        string $mimeType,
-        int $sizeBytes,
-        array $metadata = []
-    ): StorageFile {
-        $storageFile = $this->storageFileRepository->findByHash($hash);
-
-        if (! $storageFile) {
-            $path = $pathProvider();
-
-            $this->scanOrDelete($disk, $path);
-
-            $storageFile = $this->storageFileRepository->create([
-                'file_hash' => $hash,
-                'disk' => $disk,
-                'path' => $path,
-                'mime_type' => $mimeType,
-                'size_bytes' => $sizeBytes,
-                'metadata' => $metadata,
-            ]);
-        }
-
-        return $storageFile;
-    }
-
-    /**
-     * Create a Document from an existing StorageFile, resolving which group/slot
-     * it belongs to and whether it starts a new version chain or a fresh one:
-     *
-     * - $documentGroupId given: new version of that specific, already-existing
-     *   group/slot (only meaningful when the type allows_multiple).
-     * - $documentGroupId null + allows_multiple: start a brand new independent
-     *   group/slot.
-     * - $documentGroupId null + !allows_multiple: resolve the type's single slot
-     *   (there can only ever be one group for this owner+type).
-     *
-     * Every created row is is_latest = true for its own group — allows_multiple
-     * no longer forces is_latest = false, which is what made versioning silently
-     * break for multi-document types before document_group_id existed.
-     */
-    protected function createDocumentFromStorageFile(
-        StorageFile $storageFile,
-        DocumentType $type,
-        Model $documentable,
-        string $clientFilename,
-        array $metadata = [],
-        ?string $documentGroupId = null
-    ): Document {
-        $metadata = array_merge([
-            'size' => $storageFile->size_bytes,
-            'mime_type' => $storageFile->mime_type,
-        ], $metadata);
-
-        $version = 1;
-        $groupId = $documentGroupId;
-        $previousLatest = null;
-
-        if ($groupId !== null) {
-            $previousLatest = $this->documentRepository->findLatest(
-                $documentable->getMorphClass(),
-                (string) $documentable->getKey(),
-                $type->id,
-                $groupId
-            );
-
-            $version = $this->demoteAndResolveVersion($previousLatest, $type);
-        } elseif ($type->allows_multiple) {
-            $groupId = (string) Str::uuid();
-        } else {
-            $previousLatest = $this->documentRepository->findLatest(
-                $documentable->getMorphClass(),
-                (string) $documentable->getKey(),
-                $type->id
-            );
-
-            if ($previousLatest) {
-                $groupId = $previousLatest->document_group_id;
-                $version = $this->demoteAndResolveVersion($previousLatest, $type);
-            } else {
-                $groupId = (string) Str::uuid();
-            }
-        }
-
-        $document = $this->documentRepository->create([
-            'storage_file_id' => $storageFile->id,
-            'document_type_id' => $type->id,
-            'document_group_id' => $groupId,
-            'documentable_type' => $documentable->getMorphClass(),
-            'documentable_id' => $documentable->getKey(),
-            'client_filename' => $clientFilename,
-            'metadata' => $metadata,
-            'version' => $version,
-            'is_latest' => true,
-            'latest_marker' => $groupId,
-            'created_by' => $this->currentActorId(),
-        ]);
-
-        if ($previousLatest) {
-            Event::dispatch(new DocumentVersionSuperseded($previousLatest, $document));
-        }
-
-        Event::dispatch(new DocumentUploaded($document));
-
-        return $document;
-    }
-
-    /**
-     * Lock and demote the group's current latest document. Returns the version
-     * number the new document should take: incremented if the type keeps
-     * history, 1 if it hard-replaces (old row soft-deleted, no history kept).
-     */
-    protected function demoteAndResolveVersion(?Document $previousLatest, DocumentType $type): int
-    {
-        if (! $previousLatest) {
-            return 1;
-        }
-
-        $locked = Document::whereKey($previousLatest->id)->lockForUpdate()->first();
-
-        if (! $locked) {
-            return 1;
-        }
-
-        $locked->update(['is_latest' => false, 'latest_marker' => null]);
-
-        if ($type->requires_versioning) {
-            return $locked->version + 1;
-        }
-
-        $this->documentRepository->delete($locked);
-
-        return 1;
+        $this->multipartUploads->abortMultipartUploadSession($session);
     }
 }

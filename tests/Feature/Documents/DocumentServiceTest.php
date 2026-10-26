@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Documents;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -11,6 +13,7 @@ use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Services\DocumentAttacher;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
@@ -203,9 +206,9 @@ class DocumentServiceTest extends TestCase
         // method being handed the reference and its own lockForUpdate() lookup.
         $previousLatest->delete();
 
-        $method = new \ReflectionMethod($this->service, 'demoteAndResolveVersion');
-        $method->setAccessible(true);
-        $version = $method->invoke($this->service, $previousLatest, $type);
+        $attacher = $this->app->make(DocumentAttacher::class);
+        $method = new \ReflectionMethod($attacher, 'demoteAndResolveVersion');
+        $version = $method->invoke($attacher, $previousLatest, $type);
 
         $this->assertSame(1, $version);
     }
