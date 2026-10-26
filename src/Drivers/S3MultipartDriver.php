@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Drivers;
 
 use Aws\S3\Exception\S3Exception;
@@ -100,7 +102,7 @@ class S3MultipartDriver implements MultipartUploadDriver
             'Bucket' => $this->bucket($disk),
             'Key' => $path,
             'UploadId' => $uploadId,
-            'MultipartUpload' => ['Parts' => $parts],
+            'MultipartUpload' => ['Parts' => array_values($parts)],
         ]);
     }
 

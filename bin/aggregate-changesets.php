@@ -7,6 +7,11 @@
  * bump level among them, deletes the consumed fragments, and prints the
  * new version number to stdout.
  *
+ * Set PRERELEASE_CHANNEL (for example `alpha`) on a release branch such as 3.x to produce prerelease
+ * versions: the first one targets the bumped version (3.0.0-alpha.1), each later one increments the
+ * counter (3.0.0-alpha.2) until a run without the variable, or with the value `stable`, cuts the stable
+ * version.
+ *
  * Exits with status 1 (and nothing on stdout) if there are no pending
  * changesets — that's the signal to the calling workflow that there's
  * nothing to release.
@@ -33,9 +38,13 @@ foreach ($fragments as $fragment) {
     }
 }
 
-$latestTag = trim((string) shell_exec('git describe --tags --abbrev=0 2>/dev/null'));
+$latestTag = trim((string) shell_exec("git describe --tags --abbrev=0 --match 'v*' 2>/dev/null"));
 $latestTag = $latestTag !== '' ? $latestTag : 'v0.0.0';
-$newVersion = bumpVersion($latestTag, $bumpLevel);
+$channel = trim((string) getenv('PRERELEASE_CHANNEL'));
+$channel = $channel === 'stable' ? '' : $channel;
+$newVersion = $channel !== ''
+    ? nextPrereleaseVersion($latestTag, $bumpLevel, $channel)
+    : bumpVersion($latestTag, $bumpLevel);
 
 $entry = buildChangelogEntry($newVersion, $fragments);
 
@@ -92,6 +101,23 @@ function collectFragments(string $changesDir): array
     }
 
     return $fragments;
+}
+
+function nextPrereleaseVersion(string $latestTag, string $bumpLevel, string $channel): string
+{
+    $quoted = preg_quote($channel, '/');
+
+    // Already on this channel: keep the target version and bump the counter.
+    if (preg_match('/^v?(\d+\.\d+\.\d+)-'.$quoted.'\.(\d+)$/', $latestTag, $m)) {
+        return $m[1].'-'.$channel.'.'.((int) $m[2] + 1);
+    }
+
+    // Moving between channels (alpha to rc): keep the target version, restart the counter.
+    if (preg_match('/^v?(\d+\.\d+\.\d+)-[0-9A-Za-z]+\.\d+$/', $latestTag, $m)) {
+        return $m[1].'-'.$channel.'.1';
+    }
+
+    return bumpVersion($latestTag, $bumpLevel).'-'.$channel.'.1';
 }
 
 function bumpVersion(string $latestTag, string $bumpLevel): string

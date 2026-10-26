@@ -170,6 +170,8 @@ Terms used throughout the rest of this README, explained in plain language befor
 
 ## Installation
 
+Requires PHP 8.3 or newer, `ext-fileinfo`, and Laravel 12 or 13. Tested on SQLite, MySQL and PostgreSQL.
+
 ```bash
 composer require madebyclowd/laravel-documentable
 php artisan documents:install
