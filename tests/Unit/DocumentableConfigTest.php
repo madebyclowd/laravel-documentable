@@ -51,6 +51,14 @@ class DocumentableConfigTest extends TestCase
         $this->assertSame(24, $config->sessionTtlHours);
     }
 
+    public function test_an_unknown_top_level_key_is_ignored(): void
+    {
+        $this->assertEquals(
+            DocumentableConfig::fromArray([], self::DISKS),
+            DocumentableConfig::fromArray(['not_a_documentable_key' => ['x' => 1]], self::DISKS),
+        );
+    }
+
     public function test_an_empty_middleware_list_is_kept_not_replaced_by_the_default(): void
     {
         $this->assertSame([], DocumentableConfig::fromArray(['middleware' => []], self::DISKS)->middleware);
@@ -108,6 +116,7 @@ class DocumentableConfigTest extends TestCase
             'dedup resolver not implementing the contract' => [['dedup' => ['scope_resolver' => stdClass::class]], 'dedup.scope_resolver', 'ResolvesDedupScope'],
             'path generator not implementing the contract' => [['storage_path' => ['generator' => stdClass::class]], 'storage_path.generator', 'GeneratesStoragePath'],
             'multipart driver not implementing the contract' => [['multipart' => ['drivers' => ['s3' => stdClass::class]]], 'multipart.drivers.s3', 'MultipartUploadDriver'],
+            'multipart driver entry null' => [['multipart' => ['drivers' => ['s3' => null]]], 'multipart.drivers.s3', 'MultipartUploadDriver'],
             'etag strategy unknown' => [['multipart' => ['etag_strategy' => 'magic']], 'multipart.etag_strategy', 'server-authoritative'],
             'threshold zero' => [['multipart' => ['threshold_bytes' => 0]], 'multipart.threshold_bytes', 'positive'],
             'threshold not an int' => [['multipart' => ['threshold_bytes' => '10MB']], 'multipart.threshold_bytes', 'positive'],
