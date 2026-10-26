@@ -120,7 +120,9 @@ jobs:
 
           # A tag pushed with GITHUB_TOKEN doesn't trigger release.yml's
           # `push: tags:` event (GitHub suppresses it to avoid recursive
-          # workflow runs) — dispatch it explicitly instead.
-          gh workflow run release.yml -f "tag=$TAG"
+          # workflow runs) — dispatch it explicitly instead. `--ref` matters: without it the workflow file
+          # comes from the default branch, so a release cut from 3.x would run main's release.yml and
+          # publish a prerelease tag as the "Latest" release.
+          gh workflow run release.yml --ref "$GITHUB_REF_NAME" -f "tag=$TAG"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
