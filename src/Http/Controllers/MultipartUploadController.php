@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
@@ -12,8 +14,10 @@ use MadeByClowd\Documentable\Http\Requests\InitiateMultipartUploadRequest;
 use MadeByClowd\Documentable\Http\Requests\ListPartsRequest;
 use MadeByClowd\Documentable\Http\Requests\MultipartSessionStatusRequest;
 use MadeByClowd\Documentable\Http\Requests\PartUploadUrlRequest;
-use MadeByClowd\Documentable\Models\DocumentType;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
+use MadeByClowd\Documentable\ValueObjects\AttachOptions;
+use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
 
 class MultipartUploadController extends Controller
 {
@@ -32,119 +36,112 @@ class MultipartUploadController extends Controller
 
         $userId = $this->resolveUserId($request);
 
-        $session = $this->service->initiateMultipartUpload($request->string('filename')->toString(), $type, $userId);
+        $session = $this->service->initiateMultipartUpload(
+            $type,
+            $request->string('filename')->toString(),
+            $userId,
+            new UploadSessionData(
+                $request->filled('declared_size') ? $request->integer('declared_size') : null,
+                $request->input('declared_mime'),
+                $request->input('declared_hash'),
+            )
+        );
 
         return response()->json($session, 201);
     }
 
     public function partUrl(PartUploadUrlRequest $request): JsonResponse
     {
-        $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
-        $this->authorizeSessionAccess($request, $type);
-        $userId = $this->resolveUserId($request);
+        $session = $this->ownedSession($request);
 
-        $url = $this->service->generatePartUploadUrl(
-            $request->string('path')->toString(),
-            $request->string('upload_id')->toString(),
-            $userId,
-            $request->integer('part_number'),
-            $type
-        );
+        $url = $this->service->generatePartUploadUrl($session, $request->integer('part_number'));
 
         return response()->json(['url' => $url]);
     }
 
+    public function listParts(ListPartsRequest $request): JsonResponse
+    {
+        $session = $this->ownedSession($request);
+
+        return response()->json(['parts' => $this->service->listPartsForSession($session)]);
+    }
+
+    /**
+     * Status check, not a lookup that throws on absence: a session that is gone, reaped or not yours is an
+     * expected outcome for a resuming client, so it answers `exists: false` instead of an error.
+     */
+    public function status(MultipartSessionStatusRequest $request): JsonResponse
+    {
+        $session = UploadSession::find($request->string('session_id')->toString());
+
+        if ($session === null || $session->user_id !== $this->sessionUserKey($request)) {
+            return response()->json(['exists' => false, 'status' => null, 'expires_at' => null, 'disk' => null]);
+        }
+
+        $this->authorizeSession($request, $session);
+
+        return response()->json([
+            'exists' => true,
+            'status' => $session->status->value,
+            'expires_at' => $session->expires_at->toIso8601String(),
+            'disk' => $session->disk,
+        ]);
+    }
+
+    /**
+     * Without owner fields the session ends `uploaded` and is returned. With them it is attached in the same
+     * call and the document is returned.
+     */
     public function complete(CompleteMultipartUploadRequest $request): JsonResponse
     {
-        $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
-        $documentable = $this->resolveDocumentable(
+        $session = $this->ownedSession($request);
+
+        $session = $this->service->completeMultipartUpload($session, $request->input('parts'), $request->input('expected_hash'));
+
+        if (! $request->filled('documentable_type')) {
+            return response()->json($session);
+        }
+
+        $owner = $this->resolveDocumentable(
             $request->string('documentable_type')->toString(),
             $request->string('documentable_id')->toString()
         );
-        $userId = $this->resolveUserId($request);
 
-        if (! $this->authorizer->canUpload($request->user(), $type, $documentable)) {
+        if (! $this->authorizer->canUpload($request->user(), $session->documentTypeOrFail(), $owner)) {
             abort(403);
         }
 
-        $document = $this->service->completeMultipartUpload(
-            $request->string('path')->toString(),
-            $request->string('upload_id')->toString(),
-            $userId,
-            $type,
-            $documentable,
-            $request->string('filename')->toString(),
-            $request->input('parts'),
-            $request->input('expected_hash'),
-            $request->input('metadata', []),
+        $document = $this->service->attach($session, $owner, new AttachOptions(
+            (array) $request->input('metadata', []),
             $request->input('document_group_id')
-        );
+        ));
 
         return response()->json($document->load('storageFile'), 201);
     }
 
-    public function listParts(ListPartsRequest $request): JsonResponse
-    {
-        $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
-        $this->authorizeSessionAccess($request, $type);
-        $userId = $this->resolveUserId($request);
-
-        $parts = $this->service->listPartsForSession(
-            $request->string('path')->toString(),
-            $request->string('upload_id')->toString(),
-            $userId,
-            $type
-        );
-
-        return response()->json(['parts' => $parts]);
-    }
-
-    public function status(MultipartSessionStatusRequest $request): JsonResponse
-    {
-        $userId = $this->resolveUserId($request);
-
-        $session = $this->service->findMultipartSession(
-            $request->string('path')->toString(),
-            $request->string('upload_id')->toString(),
-            $userId
-        );
-
-        if ($session !== null) {
-            $this->authorizeSessionAccess($request, $session->documentType);
-        }
-
-        $status = $this->service->multipartSessionStatus(
-            $request->string('path')->toString(),
-            $request->string('upload_id')->toString(),
-            $userId
-        );
-
-        return response()->json($status);
-    }
-
     public function abort(AbortMultipartUploadRequest $request): Response
     {
-        $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
-        $this->authorizeSessionAccess($request, $type);
-        $userId = $this->resolveUserId($request);
-
-        $this->service->abortMultipartUpload(
-            $request->string('path')->toString(),
-            $request->string('upload_id')->toString(),
-            $userId,
-            $type
-        );
+        $this->service->abortUploadSession($this->ownedSession($request));
 
         return response()->noContent();
     }
 
+    private function ownedSession(Request $request): UploadSession
+    {
+        $session = $this->resolveSession($request, $request->string('session_id')->toString());
+
+        $this->authorizeSession($request, $session);
+
+        return $session;
+    }
+
     /**
      * Follow-up calls on a session act with the same authority as `initiate`, so they ask the same question.
-     * The owner is not attached yet at this point, hence the null documentable.
+     * The owner is not attached yet, hence the null documentable.
      */
-    protected function authorizeSessionAccess(Request $request, DocumentType $type): void
+    private function authorizeSession(Request $request, UploadSession $session): void
     {
-        if (! $this->authorizer->canUpload($request->user(), $type, null)) {
+        if (! $this->authorizer->canUpload($request->user(), $session->documentTypeOrFail(), null)) {
             abort(403);
         }
     }

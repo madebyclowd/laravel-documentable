@@ -1,9 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class PartUploadUrlRequest extends FormRequest
 {
@@ -12,13 +13,14 @@ class PartUploadUrlRequest extends FormRequest
         return true;
     }
 
+    /**
+     * @return array<string, array<int, mixed>>
+     */
     public function rules(): array
     {
         return [
-            'path' => ['required', 'string'],
-            'upload_id' => ['required', 'string'],
-            'part_number' => ['required', 'integer', 'min:1'],
-            'document_type_id' => ['required', 'string', Rule::exists('document_types', 'id')->whereNull('deleted_at')],
+            'session_id' => ['required', 'string', 'size:26'],
+            'part_number' => ['required', 'integer', 'min:1', 'max:10000'],
             'user_id' => ['nullable', 'string'],
         ];
     }

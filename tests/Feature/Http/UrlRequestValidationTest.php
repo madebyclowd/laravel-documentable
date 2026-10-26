@@ -89,18 +89,4 @@ class UrlRequestValidationTest extends TestCase
 
         $this->getJson("/documents/{$document->id}/url")->assertOk()->assertJsonStructure(['url']);
     }
-
-    public function test_expired_pending_document_is_not_found(): void
-    {
-        $document = $this->makeDocument(['status' => 'pending', 'expires_at' => now()->subMinute()]);
-
-        $this->getJson("/documents/{$document->id}/url")->assertNotFound();
-    }
-
-    public function test_unexpired_pending_document_still_resolves(): void
-    {
-        $document = $this->makeDocument(['status' => 'pending', 'expires_at' => now()->addHour()]);
-
-        $this->getJson("/documents/{$document->id}/url")->assertOk();
-    }
 }

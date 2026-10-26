@@ -55,10 +55,28 @@ final class UploadSessionRepository
      */
     public function expiredBefore(Carbon $at): Collection
     {
-        return UploadSession::whereIn('status', array_map(
+        return UploadSession::whereIn('status', $this->openStatuses())->where('expires_at', '<', $at)->get();
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function openStatuses(): array
+    {
+        return array_values(array_map(
             fn (UploadSessionStatus $status) => $status->value,
             array_filter(UploadSessionStatus::cases(), fn (UploadSessionStatus $status) => $status->isOpen())
-        ))->where('expires_at', '<', $at)->get();
+        ));
+    }
+
+    /**
+     * Open sessions created before `$at`, whatever their stored expiry: the reaper's `--hours` override.
+     *
+     * @return Collection<int, UploadSession>
+     */
+    public function openCreatedBefore(Carbon $at): Collection
+    {
+        return UploadSession::whereIn('status', $this->openStatuses())->where('created_at', '<', $at)->get();
     }
 
     /**
@@ -72,14 +90,31 @@ final class UploadSessionRepository
     }
 
     /**
+     * Record what verification measured on the stored object, and move the session to `uploaded`.
+     *
+     * @param  array{hash: string, mime: string, size: int}  $facts
+     *
      * @throws IllegalUploadSessionTransition
      */
-    public function markAttached(UploadSession $session, Model $owner): UploadSession
+    public function markVerified(UploadSession $session, array $facts): UploadSession
     {
-        return $this->transition($session, UploadSessionStatus::Attached, [
+        return $this->transition($session, UploadSessionStatus::Uploaded, [
+            'object_hash' => $facts['hash'],
+            'object_mime' => $facts['mime'],
+            'object_size' => $facts['size'],
+        ]);
+    }
+
+    /**
+     * @throws IllegalUploadSessionTransition
+     */
+    public function markAttached(UploadSession $session, Model $owner, ?StorageFile $storageFile = null): UploadSession
+    {
+        return $this->transition($session, UploadSessionStatus::Attached, array_filter([
             'owner_type' => $owner->getMorphClass(),
             'owner_id' => (string) $owner->getKey(),
-        ]);
+            'storage_file_id' => $storageFile?->id,
+        ], fn ($value) => $value !== null));
     }
 
     /**

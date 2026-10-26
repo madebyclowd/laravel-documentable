@@ -7,9 +7,10 @@ namespace MadeByClowd\Documentable\Tests\Feature\Lifecycle;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Models\DocumentType;
-use MadeByClowd\Documentable\Models\MultipartUpload;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\TestCase;
@@ -41,49 +42,48 @@ class ReaperResilienceTest extends TestCase
         $this->type = DocumentType::create(['code' => 'BIG', 'name' => 'Big', 'max_size_mb' => 10, 'disk' => 'test_disk', 'path_prefix' => 'big']);
     }
 
-    /**
-     * @return array{path: string, upload_id: string}
-     */
-    protected function expiredSession(string $user): array
+    protected function expiredSession(string $user): UploadSession
     {
-        $session = $this->service->initiateMultipartUpload('f.bin', $this->type, $user);
-        MultipartUpload::where('upload_id', $session['upload_id'])->update(['expires_at' => now()->subDay()]);
+        $session = $this->service->initiateMultipartUpload($this->type, 'f.bin', $user);
+        $session->update(['expires_at' => now()->subDay()]);
 
-        return $session;
+        return $session->fresh();
     }
 
-    public function test_a_session_the_provider_no_longer_knows_is_removed_and_the_sweep_continues(): void
+    public function test_a_session_the_provider_no_longer_knows_is_expired_and_the_sweep_continues(): void
     {
         $gone = $this->expiredSession('user-1');
         $other = $this->expiredSession('user-2');
-        FakeMultipartUploadDriver::$abortErrors[$gone['upload_id']] = new MultipartUploadNotFoundException('NoSuchUpload');
+        FakeMultipartUploadDriver::$abortErrors[$gone->upload_id] = new MultipartUploadNotFoundException('NoSuchUpload');
 
         $this->artisan('documents:clean-orphaned')->assertExitCode(0);
 
-        $this->assertSame(0, MultipartUpload::count());
-        $this->assertArrayNotHasKey($other['upload_id'], FakeMultipartUploadDriver::$sessions);
+        $this->assertSame(UploadSessionStatus::Expired, $gone->fresh()->status);
+        $this->assertSame(UploadSessionStatus::Expired, $other->fresh()->status);
+        $this->assertArrayNotHasKey($other->upload_id, FakeMultipartUploadDriver::$sessions);
     }
 
-    public function test_an_unexpected_failure_is_logged_keeps_that_session_and_does_not_stop_the_sweep(): void
+    public function test_an_unexpected_failure_is_logged_keeps_that_session_open_and_does_not_stop_the_sweep(): void
     {
         $broken = $this->expiredSession('user-1');
         $other = $this->expiredSession('user-2');
-        FakeMultipartUploadDriver::$abortErrors[$broken['upload_id']] = new RuntimeException('provider unreachable');
+        FakeMultipartUploadDriver::$abortErrors[$broken->upload_id] = new RuntimeException('provider unreachable');
         Log::shouldReceive('error')->once();
 
         $this->artisan('documents:clean-orphaned')->assertExitCode(1);
 
-        $this->assertSame([$broken['upload_id']], MultipartUpload::pluck('upload_id')->all());
-        $this->assertArrayNotHasKey($other['upload_id'], FakeMultipartUploadDriver::$sessions);
+        $this->assertSame(UploadSessionStatus::Initiated, $broken->fresh()->status);
+        $this->assertSame(UploadSessionStatus::Expired, $other->fresh()->status);
+        $this->assertArrayNotHasKey($other->upload_id, FakeMultipartUploadDriver::$sessions);
     }
 
-    public function test_a_user_abort_of_an_already_gone_upload_still_removes_the_session(): void
+    public function test_a_user_abort_of_an_already_gone_upload_still_ends_the_session(): void
     {
-        $session = $this->service->initiateMultipartUpload('f.bin', $this->type, 'user-1');
-        FakeMultipartUploadDriver::$abortErrors[$session['upload_id']] = new MultipartUploadNotFoundException('NoSuchUpload');
+        $session = $this->service->initiateMultipartUpload($this->type, 'f.bin', 'user-1');
+        FakeMultipartUploadDriver::$abortErrors[$session->upload_id] = new MultipartUploadNotFoundException('NoSuchUpload');
 
-        $this->service->abortMultipartUpload($session['path'], $session['upload_id'], 'user-1', $this->type);
+        $this->service->abortUploadSession($session);
 
-        $this->assertSame(0, MultipartUpload::count());
+        $this->assertSame(UploadSessionStatus::Aborted, $session->fresh()->status);
     }
 }

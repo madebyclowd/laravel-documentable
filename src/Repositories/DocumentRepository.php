@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Repositories;
 
 use Illuminate\Database\Eloquent\Collection;
@@ -29,6 +31,20 @@ class DocumentRepository
         }
 
         return $query->first();
+    }
+
+    /**
+     * Whether this owner already has the group for this type, soft-deleted versions included. A client-supplied
+     * group id is only meaningful if it names a slot the owner really holds.
+     */
+    public function groupExistsForOwner(string $documentableType, string $documentableId, string $documentTypeId, string $documentGroupId): bool
+    {
+        return Document::withTrashed()
+            ->where('documentable_type', $documentableType)
+            ->where('documentable_id', $documentableId)
+            ->where('document_type_id', $documentTypeId)
+            ->where('document_group_id', $documentGroupId)
+            ->exists();
     }
 
     /**

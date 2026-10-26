@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
 use Illuminate\Support\Facades\File;
@@ -55,7 +57,7 @@ class MakeAuthorizerCommandTest extends TestCase
         $contents = file_get_contents($this->fakeAppPath.'/Documentable/AppDocumentAuthorizer.php');
 
         $this->assertStringContainsString('if ($documentable === null) {', $contents);
-        $this->assertStringContainsString('multipart initiate() — no owner is', $contents);
+        $this->assertStringContainsString('multipart initiate, staged upload) — no owner is', $contents);
     }
 
     public function test_generates_authorizer_stub_with_custom_name(): void

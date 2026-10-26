@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Observability;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -10,7 +12,6 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Events\DocumentDeleted;
 use MadeByClowd\Documentable\Events\DocumentPurged;
-use MadeByClowd\Documentable\Events\DocumentReassociated;
 use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Events\MultipartUploadAborted;
@@ -109,49 +110,16 @@ class EventsAndObservabilityTest extends TestCase
         Event::assertDispatched(DocumentPurged::class, fn ($e) => $e->storageFileAlsoDeleted === true);
     }
 
-    public function test_document_reassociated_fires_with_previous_owner(): void
-    {
-        Event::fake([DocumentReassociated::class]);
-
-        $type = $this->makeType();
-        $original = TestModel::create(['name' => 'original']);
-        $newOwner = TestModel::create(['name' => 'new']);
-
-        $document = $this->service->upload(UploadedFile::fake()->create('a.txt', 1), $type, $original);
-
-        $this->service->reassociateDocument($document, $newOwner);
-
-        Event::assertDispatched(DocumentReassociated::class, function ($e) use ($original, $newOwner) {
-            return $e->previousOwner instanceof TestModel
-                && $e->previousOwner->is($original)
-                && (string) $e->document->documentable_id === (string) $newOwner->getKey();
-        });
-    }
-
-    public function test_document_reassociated_fires_with_null_previous_owner_for_detached_upload(): void
-    {
-        Event::fake([DocumentReassociated::class]);
-
-        $type = $this->makeType();
-        $newOwner = TestModel::create(['name' => 'new']);
-
-        $document = $this->service->uploadDetached(UploadedFile::fake()->create('a.txt', 1), $type);
-
-        $this->service->reassociateDocument($document, $newOwner);
-
-        Event::assertDispatched(DocumentReassociated::class, fn ($e) => $e->previousOwner === null);
-    }
-
     public function test_multipart_upload_initiated_and_aborted_events_fire(): void
     {
         Event::fake([MultipartUploadInitiated::class, MultipartUploadAborted::class]);
 
         $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
 
-        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
+        $session = $this->service->initiateMultipartUpload($type, 'f.bin', 'user-1');
         Event::assertDispatchedTimes(MultipartUploadInitiated::class, 1);
 
-        $this->service->abortMultipartUpload($session['path'], $session['upload_id'], 'user-1', $type);
+        $this->service->abortUploadSession($session);
         Event::assertDispatchedTimes(MultipartUploadAborted::class, 1);
     }
 
@@ -238,10 +206,9 @@ class EventsAndObservabilityTest extends TestCase
         config()->set('documentable.multipart.use_native_checksum', true);
 
         $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
-        $owner = TestModel::create(['name' => 'owner']);
 
-        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
-        FakeMultipartUploadDriver::uploadPart($session['upload_id'], 1, 'hello world');
+        $session = $this->service->initiateMultipartUpload($type, 'f.bin', 'user-1');
+        FakeMultipartUploadDriver::uploadPart($session->upload_id, 1, 'hello world');
 
         // Deliberately wrong checksum: proves the driver's checksum is actually what
         // gets compared against expectedHash — if the code silently fell back to a
@@ -251,12 +218,7 @@ class EventsAndObservabilityTest extends TestCase
         $this->expectException(ValidationException::class);
 
         $this->service->completeMultipartUpload(
-            $session['path'],
-            $session['upload_id'],
-            'user-1',
-            $type,
-            $owner,
-            'f.bin',
+            $session,
             null,
             hash('sha256', 'hello world') // real content hash != the fake checksum above
         );
@@ -268,22 +230,16 @@ class EventsAndObservabilityTest extends TestCase
         FakeMultipartUploadDriver::$fakeChecksum = null; // simulates unsupported provider
 
         $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
-        $owner = TestModel::create(['name' => 'owner']);
 
-        $session = $this->service->initiateMultipartUpload('f.bin', $type, 'user-1');
-        FakeMultipartUploadDriver::uploadPart($session['upload_id'], 1, 'hello world');
+        $session = $this->service->initiateMultipartUpload($type, 'f.bin', 'user-1');
+        FakeMultipartUploadDriver::uploadPart($session->upload_id, 1, 'hello world');
 
-        $document = $this->service->completeMultipartUpload(
-            $session['path'],
-            $session['upload_id'],
-            'user-1',
-            $type,
-            $owner,
-            'f.bin',
+        $uploaded = $this->service->completeMultipartUpload(
+            $session,
             null,
             hash('sha256', 'hello world')
         );
 
-        $this->assertInstanceOf(Document::class, $document);
+        $this->assertSame(hash('sha256', 'hello world'), $uploaded->object_hash);
     }
 }

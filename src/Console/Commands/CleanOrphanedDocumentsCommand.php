@@ -1,75 +1,56 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
-use MadeByClowd\Documentable\Models\Document;
-use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Repositories\UploadSessionRepository;
 use MadeByClowd\Documentable\Services\DocumentService;
 use Throwable;
 
 /**
- * Replaces the reference app's CleanOrphanedPendingDocumentsCommand, which
- * only ever swept one app's hardcoded metadata flag and never touched
- * multipart_uploads at all. This sweeps both: pending Document
- * rows past expiry (via DocumentService::purge() — dedup-safe, won't delete
- * a physical file another Document still references) and stale
- * MultipartUpload sessions past expiry (via abortMultipartUploadSession() —
- * aborts on the provider first, not just a DB delete, so an incomplete S3
- * upload doesn't keep existing/billing).
+ * Sweeps what abandoned uploads leave behind: upload sessions past their expiry, and with `--storage-files`
+ * the stored files no document references. Expiring a session releases what it holds (it aborts a multipart
+ * upload on the provider, so an incomplete S3 upload stops accruing cost, and deletes an unattached object),
+ * through the same code path as an owner's abort.
  */
 class CleanOrphanedDocumentsCommand extends Command
 {
     protected $signature = 'documents:clean-orphaned
-        {--hours= : Override configured TTL — sweep anything older than N hours regardless of stored expires_at}
+        {--hours= : Override configured TTL — sweep any open session older than N hours regardless of stored expires_at}
         {--storage-files : Also retry deleting stored files that no document references (a failed purge leaves one behind)}';
 
-    protected $description = 'Purge expired pending documents and abort/remove stale multipart upload sessions.';
+    protected $description = 'Expire stale upload sessions and release the objects and provider uploads they hold.';
 
-    public function handle(DocumentService $service): int
+    public function handle(DocumentService $service, UploadSessionRepository $sessions): int
     {
         $hoursOverride = $this->option('hours');
 
-        $pendingDocuments = Document::query()->pending();
-        if ($hoursOverride !== null) {
-            $pendingDocuments->where('created_at', '<', now()->subHours((int) $hoursOverride));
-        } else {
-            $pendingDocuments->where('expires_at', '<', now());
-        }
+        $stale = $hoursOverride !== null
+            ? $sessions->openCreatedBefore(now()->subHours((int) $hoursOverride))
+            : $sessions->expiredBefore(now());
 
-        $purged = 0;
-        foreach ($pendingDocuments->get() as $document) {
-            $service->purge($document);
-            $purged++;
-        }
-
-        $staleSessions = MultipartUpload::query();
-        if ($hoursOverride !== null) {
-            $staleSessions->where('created_at', '<', now()->subHours((int) $hoursOverride));
-        } else {
-            $staleSessions->where('expires_at', '<', now());
-        }
-
-        $aborted = 0;
+        $expired = 0;
         $failed = 0;
-        foreach ($staleSessions->get() as $session) {
+        foreach ($stale as $session) {
             try {
-                $service->abortMultipartUploadSession($session);
-                $aborted++;
+                $service->expireUploadSession($session);
+                $expired++;
             } catch (Throwable $e) {
-                // One unreachable or misbehaving session must not stop the rest of the sweep. Its row stays,
-                // so the next run retries it.
+                // One unreachable or misbehaving session must not stop the rest of the sweep. Its row stays
+                // open, so the next run retries it.
                 $failed++;
-                Log::error("documents:clean-orphaned could not abort multipart session [{$session->id}]: {$e->getMessage()}");
+                Log::error("documents:clean-orphaned could not expire upload session [{$session->id}]: {$e->getMessage()}");
             }
         }
 
-        $this->info("Purged {$purged} expired pending document(s), aborted {$aborted} stale multipart session(s).");
+        $this->info("Expired {$expired} stale upload session(s).");
 
         if ($failed > 0) {
-            $this->error("{$failed} multipart session(s) could not be aborted and stay for the next run.");
+            $this->error("{$failed} upload session(s) could not be expired and stay for the next run.");
         }
 
         if ($this->option('storage-files')) {

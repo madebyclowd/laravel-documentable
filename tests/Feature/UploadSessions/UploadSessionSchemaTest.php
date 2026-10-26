@@ -26,8 +26,8 @@ class UploadSessionSchemaTest extends TestCase
         $this->assertTrue(Schema::hasTable('upload_sessions'));
 
         foreach ([
-            'id', 'user_id', 'document_type_id', 'disk', 'kind', 'path', 'upload_id', 'declared_size', 'declared_mime',
-            'declared_hash', 'status', 'owner_type', 'owner_id', 'storage_file_id', 'expires_at', 'created_at', 'updated_at',
+            'id', 'user_id', 'document_type_id', 'disk', 'kind', 'client_filename', 'path', 'upload_id', 'declared_size', 'declared_mime',
+            'declared_hash', 'object_size', 'object_mime', 'object_hash', 'status', 'owner_type', 'owner_id', 'storage_file_id', 'expires_at', 'created_at', 'updated_at',
         ] as $column) {
             $this->assertTrue(Schema::hasColumn('upload_sessions', $column), "missing column {$column}");
         }
@@ -54,6 +54,7 @@ class UploadSessionSchemaTest extends TestCase
             'disk' => 's3',
             'kind' => UploadKind::Multipart,
             'path' => 'docs/'.str_repeat('p', 995),
+            'client_filename' => 'a.txt',
             'upload_id' => str_repeat('u', 512),
             'status' => UploadSessionStatus::Initiated,
             'expires_at' => now()->addDay(),
@@ -72,6 +73,7 @@ class UploadSessionSchemaTest extends TestCase
             'disk' => 's3',
             'kind' => UploadKind::Single,
             'path' => 'docs/a',
+            'client_filename' => 'a.txt',
             'status' => UploadSessionStatus::Initiated,
             'expires_at' => now()->addHour(),
         ]);
@@ -84,8 +86,8 @@ class UploadSessionSchemaTest extends TestCase
         $this->assertSame($session->document_type_id, $session->documentType->id);
     }
 
-    public function test_the_legacy_multipart_table_is_untouched(): void
+    public function test_the_legacy_multipart_table_is_gone(): void
     {
-        $this->assertTrue(Schema::hasTable('multipart_uploads'));
+        $this->assertFalse(Schema::hasTable('multipart_uploads'));
     }
 }

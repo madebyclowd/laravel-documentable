@@ -121,12 +121,6 @@ parameters:
 			path: src/Console/Commands/ListDocumentTypesCommand.php
 
 		-
-			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$pending_count\.$#'
-			identifier: property.notFound
-			count: 1
-			path: src/Console/Commands/ListDocumentTypesCommand.php
-
-		-
 			message: '#^Access to an undefined property MadeByClowd\\Documentable\\Models\\DocumentType\:\:\$total_versions\.$#'
 			identifier: property.notFound
 			count: 1
@@ -187,97 +181,7 @@ parameters:
 			path: src/Drivers/S3MultipartDriver.php
 
 		-
-			message: '#^Parameter \#2 \$type of method MadeByClowd\\Documentable\\Http\\Controllers\\MultipartUploadController\:\:authorizeSessionAccess\(\) expects MadeByClowd\\Documentable\\Models\\DocumentType, MadeByClowd\\Documentable\\Models\\DocumentType\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Http/Controllers/MultipartUploadController.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\AbortMultipartUploadRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/AbortMultipartUploadRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\CompleteMultipartUploadRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/CompleteMultipartUploadRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\FinalizeUploadRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/FinalizeUploadRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\InitiateMultipartUploadRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/InitiateMultipartUploadRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\ListDocumentsRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/ListDocumentsRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\ListPartsRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/ListPartsRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\MultipartSessionStatusRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/MultipartSessionStatusRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\PartUploadUrlRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/PartUploadUrlRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\PresignUploadRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/PresignUploadRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\UploadDetachedDocumentRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/UploadDetachedDocumentRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\UploadDocumentRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/UploadDocumentRequest.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Http\\Requests\\UrlRequest\:\:rules\(\) return type has no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Http/Requests/UrlRequest.php
-
-		-
 			message: '#^Method MadeByClowd\\Documentable\\Models\\Document\:\:documentable\(\) return type with generic class Illuminate\\Database\\Eloquent\\Relations\\MorphTo does not specify its types\: TRelatedModel, TDeclaringModel$#'
-			identifier: missingType.generics
-			count: 1
-			path: src/Models/Document.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Models\\Document\:\:scopePending\(\) has parameter \$query with generic class Illuminate\\Database\\Eloquent\\Builder but does not specify its types\: TModel$#'
-			identifier: missingType.generics
-			count: 1
-			path: src/Models/Document.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Models\\Document\:\:scopePending\(\) return type with generic class Illuminate\\Database\\Eloquent\\Builder does not specify its types\: TModel$#'
 			identifier: missingType.generics
 			count: 1
 			path: src/Models/Document.php
@@ -317,24 +221,6 @@ parameters:
 			identifier: missingType.iterableValue
 			count: 1
 			path: src/Repositories/DocumentTypeRepository.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Repositories\\MultipartUploadRepository\:\:create\(\) has parameter \$data with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Repositories/MultipartUploadRepository.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Repositories\\StorageFileRepository\:\:create\(\) has parameter \$data with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Repositories/StorageFileRepository.php
-
-		-
-			message: '#^Method MadeByClowd\\Documentable\\Services\\DocumentService\:\:createDocumentFromStorageFile\(\) has parameter \$metadata with no value type specified in iterable type array\.$#'
-			identifier: missingType.iterableValue
-			count: 1
-			path: src/Services/DocumentService.php
 
 		-
 			message: '#^Trait MadeByClowd\\Documentable\\Traits\\Documentable is used zero times and is not analysed\.$#'

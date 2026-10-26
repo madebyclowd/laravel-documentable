@@ -42,6 +42,7 @@ class UploadSessionRepositoryTest extends TestCase
             'disk' => 's3',
             'kind' => UploadKind::Single,
             'path' => 'docs/'.uniqid(),
+            'client_filename' => 'a.txt',
             'expires_at' => now()->addHour(),
         ], $overrides));
     }
@@ -63,6 +64,7 @@ class UploadSessionRepositoryTest extends TestCase
             'disk' => 's3',
             'kind' => UploadKind::Single,
             'path' => 'docs/x',
+            'client_filename' => 'a.txt',
             'expires_at' => now()->addHour(),
         ] + (new UploadSessionData(sizeBytes: 10, mimeType: 'text/plain', sha256: str_repeat('b', 64)))->toColumns());
 

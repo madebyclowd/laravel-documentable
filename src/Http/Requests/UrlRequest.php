@@ -23,6 +23,9 @@ class UrlRequest extends FormRequest
      * bearer URL lives, so neither is taken as given: the disposition is an allow-list and the TTL is
      * bounded by `url.max_ttl_minutes`.
      */
+    /**
+     * @return array<string, array<int, mixed>>
+     */
     public function rules(): array
     {
         $maxTtl = max(1, (int) config('documentable.url.max_ttl_minutes', self::DEFAULT_MAX_TTL_MINUTES));

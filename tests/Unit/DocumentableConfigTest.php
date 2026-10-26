@@ -122,7 +122,6 @@ class DocumentableConfigTest extends TestCase
             'threshold not an int' => [['multipart' => ['threshold_bytes' => '10MB']], 'multipart.threshold_bytes', 'positive'],
             'session ttl negative' => [['multipart' => ['session_ttl_hours' => -1]], 'multipart.session_ttl_hours', 'positive'],
             'part url ttl unparsable' => [['multipart' => ['part_upload_url_ttl' => 'soon']], 'multipart.part_upload_url_ttl', '+1 hour'],
-            'pending ttl zero' => [['lifecycle' => ['pending_ttl_hours' => 0]], 'lifecycle.pending_ttl_hours', 'positive'],
             'grace hours negative' => [['lifecycle' => ['storage_file_grace_hours' => -5]], 'lifecycle.storage_file_grace_hours', 'zero or more'],
             'url max ttl zero' => [['url' => ['max_ttl_minutes' => 0]], 'url.max_ttl_minutes', 'positive'],
             'per page zero' => [['listing' => ['per_page' => 0]], 'listing.per_page', 'between 1 and 1000'],

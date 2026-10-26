@@ -10,13 +10,20 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
-use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
+use MadeByClowd\Documentable\ValueObjects\AttachOptions;
+use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
 
 /**
  * The public entry point for storing, reading and removing documents. Each method delegates to a focused
  * internal collaborator; only the public methods here follow semver. Protected members are not supported API.
+ *
+ * Every way of getting bytes in produces an upload session, and `attach()` is the only way a session becomes a
+ * document: server upload with an owner (`upload`), server upload without one (`stageUpload`), presigned single
+ * PUT (`initiatePresignedUpload` then `finalizeDirectUpload`) and multipart (`initiateMultipartUpload`, parts,
+ * `completeMultipartUpload`).
  *
  * @api
  */
@@ -26,10 +33,97 @@ class DocumentService
         protected DocumentRepository $documentRepository,
         protected DirectUploadService $directUploads,
         protected MultipartUploadService $multipartUploads,
+        protected UploadSessionLifecycle $sessionLifecycle,
         protected UrlSigner $urlSigner,
         protected DocumentPurger $purger,
         protected DocumentAttacher $attacher
     ) {}
+
+    /**
+     * Upload a file for an owner and attach it in one call.
+     *
+     * @param  array<string, mixed>|null  $metadata
+     */
+    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null): Document
+    {
+        return $this->directUploads->upload($file, $type, $documentable, $metadata, $documentGroupId);
+    }
+
+    /**
+     * Upload a file that has no owner yet. Returns its `uploaded` session; `attach()` it once the owner exists.
+     */
+    public function stageUpload(UploadedFile $file, DocumentType $type, ?string $userId = null): UploadSession
+    {
+        return $this->directUploads->stageUpload($file, $type, $userId);
+    }
+
+    /**
+     * Start a presigned single PUT.
+     *
+     * @return array{session: UploadSession, url: string, headers: array<string, mixed>}
+     */
+    public function initiatePresignedUpload(DocumentType $type, string $filename, ?string $userId = null, ?UploadSessionData $declared = null): array
+    {
+        return $this->directUploads->initiatePresignedUpload($type, $filename, $userId, $declared);
+    }
+
+    /**
+     * Check the object a client PUT for this session and mark it `uploaded`. Safe to call again.
+     */
+    public function finalizeDirectUpload(UploadSession $session, ?string $expectedHash = null): UploadSession
+    {
+        return $this->directUploads->finalizeDirectUpload($session, $expectedHash);
+    }
+
+    public function initiateMultipartUpload(DocumentType $type, string $filename, string $userId, ?UploadSessionData $declared = null): UploadSession
+    {
+        return $this->multipartUploads->initiate($type, $filename, $userId, $declared);
+    }
+
+    public function generatePartUploadUrl(UploadSession $session, int $partNumber): string
+    {
+        return $this->multipartUploads->presignPart($session, $partNumber);
+    }
+
+    /**
+     * @return array<int, array{PartNumber: int, ETag: string}>
+     */
+    public function listPartsForSession(UploadSession $session): array
+    {
+        return $this->multipartUploads->listParts($session);
+    }
+
+    /**
+     * @param  array<int, array{PartNumber: int, ETag: string}>|null  $clientParts
+     */
+    public function completeMultipartUpload(UploadSession $session, ?array $clientParts = null, ?string $expectedHash = null): UploadSession
+    {
+        return $this->multipartUploads->complete($session, $clientParts, $expectedHash);
+    }
+
+    /**
+     * Cancel an open session and release what it holds.
+     */
+    public function abortUploadSession(UploadSession $session): UploadSession
+    {
+        return $this->sessionLifecycle->abort($session);
+    }
+
+    /**
+     * End an open session that ran out of time. The reaper calls this.
+     */
+    public function expireUploadSession(UploadSession $session): UploadSession
+    {
+        return $this->sessionLifecycle->expire($session);
+    }
+
+    /**
+     * Attach an `uploaded` session to its owner, creating the document.
+     */
+    public function attach(UploadSession $session, Model $owner, AttachOptions $options = new AttachOptions): Document
+    {
+        return $this->attacher->attach($session, $owner, $options);
+    }
 
     /**
      * Generate a presigned URL for the document.
@@ -82,162 +176,10 @@ class DocumentService
     }
 
     /**
-     * @see DocumentAttacher::reassociate()
-     */
-    public function reassociateDocument(Document $document, Model $newOwner): Document
-    {
-        return $this->attacher->reassociate($document, $newOwner);
-    }
-
-    /**
      * @see UrlSigner::sanitizeHeaderFilename()
      */
     public static function sanitizeHeaderFilename(string $filename): string
     {
         return UrlSigner::sanitizeHeaderFilename($filename);
-    }
-
-    /**
-     * @see DocumentAttacher::attachStorageFile()
-     */
-    protected function createDocumentFromStorageFile(
-        StorageFile $storageFile,
-        DocumentType $type,
-        Model $documentable,
-        string $clientFilename,
-        array $metadata = [],
-        ?string $documentGroupId = null
-    ): Document {
-        return $this->attacher->attachStorageFile($storageFile, $type, $documentable, $clientFilename, $metadata, $documentGroupId);
-    }
-
-    /**
-     * @see DirectUploadService::upload()
-     *
-     * @param  array<string, mixed>|null  $metadata
-     */
-    public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null): Document
-    {
-        return $this->directUploads->upload($file, $type, $documentable, $metadata, $documentGroupId);
-    }
-
-    /**
-     * @see DirectUploadService::uploadDetached()
-     *
-     * @param  array<string, mixed>|null  $metadata
-     */
-    public function uploadDetached(UploadedFile $file, DocumentType $type, ?array $metadata = [], bool $pending = false, ?int $ttlHours = null): Document
-    {
-        return $this->directUploads->uploadDetached($file, $type, $metadata, $pending, $ttlHours);
-    }
-
-    /**
-     * @see DirectUploadService::createPresignedUpload()
-     *
-     * @return array{url: string, headers: array<string, mixed>, path: string, disk: string}
-     */
-    public function createPresignedUpload(DocumentType $type, string $originalFilename): array
-    {
-        return $this->directUploads->createPresignedUpload($type, $originalFilename);
-    }
-
-    /**
-     * @see DirectUploadService::finalizeDirectUpload()
-     *
-     * @param  array<string, mixed>  $metadata
-     */
-    public function finalizeDirectUpload(
-        string $path,
-        DocumentType $type,
-        Model $documentable,
-        string $originalFilename,
-        ?string $expectedHash = null,
-        array $metadata = [],
-        ?string $documentGroupId = null
-    ): Document {
-        return $this->directUploads->finalizeDirectUpload($path, $type, $documentable, $originalFilename, $expectedHash, $metadata, $documentGroupId);
-    }
-
-    /**
-     * @see MultipartUploadService::initiateMultipartUpload()
-     *
-     * @return array{upload_id: string, path: string, disk: string}
-     */
-    public function initiateMultipartUpload(string $originalFilename, DocumentType $type, string $userId): array
-    {
-        return $this->multipartUploads->initiateMultipartUpload($originalFilename, $type, $userId);
-    }
-
-    /**
-     * @see MultipartUploadService::listPartsForSession()
-     *
-     * @return array<int, array{PartNumber: int, ETag: string}>
-     */
-    public function listPartsForSession(string $path, string $uploadId, string $userId, DocumentType $type): array
-    {
-        return $this->multipartUploads->listPartsForSession($path, $uploadId, $userId, $type);
-    }
-
-    /**
-     * @see MultipartUploadService::multipartSessionStatus()
-     *
-     * @return array{exists: bool, expires_at: ?string, disk: ?string}
-     */
-    public function multipartSessionStatus(string $path, string $uploadId, string $userId): array
-    {
-        return $this->multipartUploads->multipartSessionStatus($path, $uploadId, $userId);
-    }
-
-    /**
-     * @see MultipartUploadService::findMultipartSession()
-     */
-    public function findMultipartSession(string $path, string $uploadId, string $userId): ?MultipartUpload
-    {
-        return $this->multipartUploads->findMultipartSession($path, $uploadId, $userId);
-    }
-
-    /**
-     * @see MultipartUploadService::generatePartUploadUrl()
-     */
-    public function generatePartUploadUrl(string $path, string $uploadId, string $userId, int $partNumber, DocumentType $type): string
-    {
-        return $this->multipartUploads->generatePartUploadUrl($path, $uploadId, $userId, $partNumber, $type);
-    }
-
-    /**
-     * @see MultipartUploadService::completeMultipartUpload()
-     *
-     * @param  array<int, array{PartNumber: int, ETag: string}>|null  $clientParts
-     * @param  array<string, mixed>  $metadata
-     */
-    public function completeMultipartUpload(
-        string $path,
-        string $uploadId,
-        string $userId,
-        DocumentType $type,
-        Model $documentable,
-        string $originalFilename,
-        ?array $clientParts = null,
-        ?string $expectedHash = null,
-        array $metadata = [],
-        ?string $documentGroupId = null
-    ): Document {
-        return $this->multipartUploads->completeMultipartUpload($path, $uploadId, $userId, $type, $documentable, $originalFilename, $clientParts, $expectedHash, $metadata, $documentGroupId);
-    }
-
-    /**
-     * @see MultipartUploadService::abortMultipartUpload()
-     */
-    public function abortMultipartUpload(string $path, string $uploadId, string $userId, DocumentType $type): void
-    {
-        $this->multipartUploads->abortMultipartUpload($path, $uploadId, $userId, $type);
-    }
-
-    /**
-     * @see MultipartUploadService::abortMultipartUploadSession()
-     */
-    public function abortMultipartUploadSession(MultipartUpload $session): void
-    {
-        $this->multipartUploads->abortMultipartUploadSession($session);
     }
 }

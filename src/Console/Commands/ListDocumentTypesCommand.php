@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
@@ -21,7 +23,6 @@ class ListDocumentTypesCommand extends Command
             ->withCount([
                 'documents as latest_count' => fn ($query) => $query->whereNotNull('latest_marker'),
                 'documents as total_versions' => fn ($query) => $query,
-                'documents as pending_count' => fn ($query) => $query->where('status', 'pending'),
             ])
             ->get();
 
@@ -32,14 +33,13 @@ class ListDocumentTypesCommand extends Command
         }
 
         $this->table(
-            ['Code', 'Name', 'Active', 'Latest Docs', 'Total Versions', 'Pending'],
+            ['Code', 'Name', 'Active', 'Latest Docs', 'Total Versions'],
             $types->map(fn (DocumentType $type) => [
                 $type->code,
                 $type->name,
                 $type->trashed() ? 'no' : 'yes',
                 $type->latest_count,
                 $type->total_versions,
-                $type->pending_count,
             ])
         );
 

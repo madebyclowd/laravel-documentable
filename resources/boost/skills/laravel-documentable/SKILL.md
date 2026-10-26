@@ -157,8 +157,7 @@ equivalent (no HTTP) further down. Every route lives under `config('documentable
    re-downloads, re-hashes and compares to `expected_hash`. `path` must be a relative key (no leading
    `/`, no `..`, no backslash, at most 1,024 characters) that no stored file uses yet. A rejected finalize
    does **not** delete the object, because the path is only a client claim, so add a bucket lifecycle rule
-   for upload prefixes. `security.enforce_path_prefix` (off by default) restricts a finalize to the type's
-   `path_prefix`.
+   for upload prefixes.
 
 **Large files — multipart** (`multipart.threshold_bytes` and above):
 

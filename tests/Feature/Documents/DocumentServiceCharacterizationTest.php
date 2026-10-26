@@ -11,14 +11,15 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Events\DocumentDeleted;
 use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
 use MadeByClowd\Documentable\Models\DocumentType;
-use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
@@ -179,67 +180,64 @@ class DocumentServiceCharacterizationTest extends TestCase
 
     // multipart completion
 
-    /**
-     * @return array{0: array{path: string, upload_id: string}, 1: DocumentType}
-     */
-    protected function startMultipart(array $typeOverrides = []): array
+    protected function startMultipart(array $typeOverrides = []): UploadSession
     {
         $type = $this->makeType($typeOverrides + ['code' => 'BIG', 'path_prefix' => 'uploads']);
-        $session = $this->service->initiateMultipartUpload('big.txt', $type, 'user-1');
-        FakeMultipartUploadDriver::uploadPart($session['upload_id'], 1, 'hello ');
-        FakeMultipartUploadDriver::uploadPart($session['upload_id'], 2, 'world');
+        $session = $this->service->initiateMultipartUpload($type, 'big.txt', 'user-1');
+        FakeMultipartUploadDriver::uploadPart($session->upload_id, 1, 'hello ');
+        FakeMultipartUploadDriver::uploadPart($session->upload_id, 2, 'world');
 
-        return [$session, $type];
+        return $session;
     }
 
-    public function test_completing_a_multipart_upload_creates_the_document_removes_the_session_and_fires_one_event_after_both(): void
+    public function test_attaching_a_completed_multipart_upload_creates_the_document_closes_the_session_and_fires_one_event_after_both(): void
     {
-        [$session, $type] = $this->startMultipart();
+        $session = $this->startMultipart();
         $seen = [];
-        Event::listen(DocumentUploaded::class, function (DocumentUploaded $event) use (&$seen) {
+        Event::listen(DocumentUploaded::class, function (DocumentUploaded $event) use (&$seen, $session) {
             $seen[] = [
-                'sessions' => MultipartUpload::count(),
+                'session' => UploadSession::find($session->id)->status,
                 'committed' => Document::whereKey($event->document->id)->exists(),
             ];
         });
 
-        $document = $this->service->completeMultipartUpload($session['path'], $session['upload_id'], 'user-1', $type, $this->owner(), 'big.txt');
+        $uploaded = $this->service->completeMultipartUpload($session);
+        $document = $this->service->attach($uploaded, $this->owner());
 
-        $this->assertSame([['sessions' => 0, 'committed' => true]], $seen);
-        $this->assertTrue($document->metadata['multipart']);
+        $this->assertSame([['session' => UploadSessionStatus::Attached, 'committed' => true]], $seen);
         $this->assertSame(hash('sha256', 'hello world'), $document->storageFile->file_hash);
-        $this->assertSame($session['path'], $document->storageFile->path);
+        $this->assertSame($session->path, $document->storageFile->path);
     }
 
-    public function test_a_multipart_upload_rejected_after_assembly_deletes_the_object_keeps_the_session_and_creates_nothing(): void
+    public function test_a_multipart_upload_rejected_after_assembly_deletes_the_object_ends_the_session_and_creates_nothing(): void
     {
-        [$session, $type] = $this->startMultipart(['allowed_mimes' => ['application/pdf']]);
+        $session = $this->startMultipart(['allowed_mimes' => ['application/pdf']]);
 
         try {
-            $this->service->completeMultipartUpload($session['path'], $session['upload_id'], 'user-1', $type, $this->owner(), 'big.txt');
+            $this->service->completeMultipartUpload($session);
             $this->fail('Expected the assembled object to be rejected.');
         } catch (ValidationException) {
             // expected
         }
 
-        $this->assertFalse(Storage::disk('test_disk')->exists($session['path']));
-        $this->assertSame(1, MultipartUpload::count());
+        $this->assertFalse(Storage::disk('test_disk')->exists($session->path));
+        $this->assertSame(UploadSessionStatus::Aborted, $session->fresh()->status);
         $this->assertSame(0, Document::count());
         $this->assertSame(0, StorageFile::count());
     }
 
     public function test_a_multipart_upload_with_a_wrong_expected_hash_deletes_the_object_and_creates_nothing(): void
     {
-        [$session, $type] = $this->startMultipart();
+        $session = $this->startMultipart();
 
         try {
-            $this->service->completeMultipartUpload($session['path'], $session['upload_id'], 'user-1', $type, $this->owner(), 'big.txt', null, str_repeat('0', 64));
+            $this->service->completeMultipartUpload($session, null, str_repeat('0', 64));
             $this->fail('Expected an integrity failure.');
         } catch (ValidationException) {
             // expected
         }
 
-        $this->assertFalse(Storage::disk('test_disk')->exists($session['path']));
+        $this->assertFalse(Storage::disk('test_disk')->exists($session->path));
         $this->assertSame(0, Document::count());
     }
 }

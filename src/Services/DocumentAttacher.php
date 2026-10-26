@@ -5,21 +5,25 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Services;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
-use MadeByClowd\Documentable\Events\DocumentReassociated;
+use Illuminate\Validation\ValidationException;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
+use MadeByClowd\Documentable\Exceptions\IllegalUploadSessionTransition;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
+use MadeByClowd\Documentable\Repositories\UploadSessionRepository;
+use MadeByClowd\Documentable\ValueObjects\AttachOptions;
 
 /**
  * Puts a stored file into an owner's slot: resolves the document group, demotes or replaces the previous
- * latest, bumps the version, and announces it. Every transport (upload, multipart, direct PUT, reassociation)
+ * latest, bumps the version, and announces it. Every transport (server upload, single PUT, multipart, attach later)
  * goes through here so a slot can never end up with two latest documents.
  *
  * @internal
@@ -28,58 +32,77 @@ final class DocumentAttacher
 {
     public function __construct(
         private readonly DocumentRepository $documentRepository,
+        private readonly UploadSessionRepository $sessions,
+        private readonly StoredObjectRegistrar $registrar,
+        private readonly UploadFinalizer $finalizer,
         private readonly ActorResolver $actor,
     ) {}
 
     /**
-     * Move a document to a different owner, typically a detached upload that finally has its real owner.
+     * Attach an uploaded session to its owner. This is the one place a slot is locked, demoted and versioned, so
+     * the "exactly one latest document per owner, type and group" invariant holds whatever the transport.
      *
-     * The move goes through the same slot and version resolution as an upload. For a single-slot type whose new
-     * owner already holds a latest document, the moved document joins that slot's chain: it takes the group, the
-     * previous latest is demoted (or soft-deleted when the type does not keep history) and the version is
-     * incremented, so the owner never ends up with two "latest" documents. A multi-slot type keeps the moved
-     * document in its own slot, and moving a document to the owner it already has changes nothing.
+     * The session moves to `attached` first, under a row lock, so two attach calls on the same session cannot
+     * both succeed. Everything after that runs in the same transaction: if registering the file or creating the
+     * document fails, the session is back to `uploaded`.
+     *
+     * @throws ValidationException when the session cannot be attached: not uploaded yet, expired, already
+     *                             attached, or the requested group is not the owner's
      */
-    public function reassociate(Document $document, Model $newOwner): Document
+    public function attach(UploadSession $session, Model $owner, AttachOptions $options = new AttachOptions): Document
     {
-        return DB::transaction(function () use ($document, $newOwner) {
-            $previousOwner = null;
+        $type = $session->documentTypeOrFail();
 
-            if ($document->documentable_type && $document->documentable_id) {
-                $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
+        UploadGuard::assertTypeActive($type);
 
-                $previousOwner = $morphClass::find($document->documentable_id);
+        if ($session->status === UploadSessionStatus::Uploaded) {
+            $this->finalizer->assertUsable($session);
+        }
+
+        $this->assertGroupBelongsToOwner($options->documentGroupId, $owner, $type);
+
+        return DB::transaction(function () use ($session, $owner, $options, $type) {
+            try {
+                $locked = $this->sessions->markAttached($session, $owner);
+            } catch (IllegalUploadSessionTransition) {
+                throw ValidationException::withMessages(['session_id' => 'This upload session is not ready to be attached, or was already attached.']);
             }
 
-            $morphType = $newOwner->getMorphClass();
-            $ownerId = (string) $newOwner->getKey();
+            $storageFile = $locked->storageFile ?? $this->registrar->registerSessionObject($locked, $owner);
 
-            $attributes = ['documentable_type' => $morphType, 'documentable_id' => $ownerId];
-            $supersedes = null;
-
-            $alreadyOwned = $document->documentable_type === $morphType && (string) $document->documentable_id === $ownerId;
-            $type = DocumentType::withTrashed()->find($document->document_type_id);
-
-            if (! $alreadyOwned && $document->is_latest && $type !== null && ! $type->allows_multiple) {
-                $supersedes = $this->documentRepository->findLatest($morphType, $ownerId, $type->id);
-
-                if ($supersedes !== null) {
-                    $attributes['document_group_id'] = $supersedes->document_group_id;
-                    $attributes['latest_marker'] = $supersedes->document_group_id;
-                    $attributes['version'] = $this->demoteAndResolveVersion($supersedes, $type);
-                }
+            if ($locked->storage_file_id === null) {
+                $locked->forceFill(['storage_file_id' => $storageFile->id])->save();
             }
 
-            $document->update($attributes);
-
-            if ($supersedes !== null) {
-                Event::dispatch(new DocumentVersionSuperseded($supersedes, $document));
-            }
-
-            Event::dispatch(new DocumentReassociated($document, $previousOwner));
-
-            return $document;
+            return $this->attachStorageFile(
+                $storageFile,
+                $type,
+                $owner,
+                $locked->client_filename,
+                $options->metadata,
+                $options->documentGroupId
+            );
         });
+    }
+
+    private function assertGroupBelongsToOwner(?string $groupId, Model $owner, DocumentType $type): void
+    {
+        if ($groupId === null) {
+            return;
+        }
+
+        $known = $this->documentRepository->groupExistsForOwner(
+            $owner->getMorphClass(),
+            (string) $owner->getKey(),
+            $type->id,
+            $groupId
+        );
+
+        if (! $known) {
+            throw ValidationException::withMessages([
+                'document_group_id' => 'This document group does not belong to the owner and document type.',
+            ]);
+        }
     }
 
     /**
