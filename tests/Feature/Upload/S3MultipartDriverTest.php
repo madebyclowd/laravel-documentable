@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Upload;
 
 use Aws\CommandInterface;
@@ -220,6 +222,30 @@ class S3MultipartDriverTest extends TestCase
         $this->assertSame('test-bucket', $captured['Bucket']);
         $this->assertSame('upload-123', $captured['UploadId']);
         $this->assertSame([['PartNumber' => 1, 'ETag' => '"etag-1"']], $captured['MultipartUpload']['Parts']);
+    }
+
+    public function test_complete_sends_parts_as_a_list_even_when_the_caller_keys_them_by_part_number(): void
+    {
+        $this->setUpDisk();
+        $handler = new MockHandler;
+        $captured = null;
+
+        $handler->append(function (CommandInterface $command) use (&$captured) {
+            $captured = $command;
+
+            return new Result([]);
+        });
+
+        $driver = $this->makeDriver($handler);
+        $driver->complete('s3_driver_test', 'uploads/a.bin', 'upload-123', [
+            2 => ['PartNumber' => 2, 'ETag' => '"etag-2"'],
+            1 => ['PartNumber' => 1, 'ETag' => '"etag-1"'],
+        ]);
+
+        $parts = $captured['MultipartUpload']['Parts'];
+
+        $this->assertTrue(array_is_list($parts));
+        $this->assertSame([2, 1], array_column($parts, 'PartNumber'));
     }
 
     public function test_abort_calls_abort_multipart_upload(): void
