@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Upload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Tests\TestCase;
 
@@ -111,8 +112,10 @@ class WidenMultipartColumnsMigrationTest extends TestCase
         $type = DocumentType::create([
             'code' => 'BIG', 'name' => 'Big', 'max_size_mb' => 10, 'disk' => 'test_disk', 'path_prefix' => 'docs',
         ]);
+        $id = (string) Str::uuid();
+
         DB::table('multipart_uploads')->insert([
-            'id' => 'legacy-1', 'path' => 'docs/abc', 'upload_id' => 'upload-1', 'user_id' => 'user-1', 'document_type_id' => $type->id,
+            'id' => $id, 'path' => 'docs/abc', 'upload_id' => 'upload-1', 'user_id' => 'user-1', 'document_type_id' => $type->id,
         ]);
 
         $this->migration()->up();
@@ -121,6 +124,6 @@ class WidenMultipartColumnsMigrationTest extends TestCase
         $this->assertSame('text', $this->columnTypes()['upload_id']);
         $this->assertContains(['user_id'], $this->indexColumns());
         $this->assertNotContains(['path', 'upload_id', 'user_id'], $this->indexColumns());
-        $this->assertSame('upload-1', DB::table('multipart_uploads')->where('id', 'legacy-1')->value('upload_id'));
+        $this->assertSame('upload-1', DB::table('multipart_uploads')->where('id', $id)->value('upload_id'));
     }
 }
