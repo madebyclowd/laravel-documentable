@@ -7,6 +7,17 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.1] - 2026-10-26
+
+### Changed
+- Raises the minimum supported versions to PHP 8.3 and Laravel 12, and requires `ext-fileinfo`. PHP 8.2 and Laravel 11 are no longer supported; upgrade PHP or Laravel before updating to 3.x.
+
+### Fixed
+- Completing a multipart upload now always sends the parts to S3 as a plain list, even when the caller keyed them by part number. Previously a keyed array produced a request S3 could not read.
+
+### Added
+- The package now validates `config/documentable.php` when the app boots. A bad value (an unknown disk, a class that does not implement its contract, a scheduler frequency that does not exist, an out-of-range number) throws `InvalidDocumentableConfig` naming the key and the fix, instead of failing at the first upload. `php artisan about` shows the resolved disk, ETag strategy and reaper frequency.
+
 ## [2.1.3] - 2026-10-24
 
 ### Changed
@@ -113,3 +124,5 @@ Initial release.
 [2.1.2]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.1...v2.1.2
 
 [2.1.3]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.2...v2.1.3
+
+[3.0.0-alpha.1]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.3...v3.0.0-alpha.1
