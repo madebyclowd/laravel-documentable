@@ -9,6 +9,7 @@ use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
+use MadeByClowd\Documentable\Services\ServerSideEncryption;
 
 /**
  * Covers S3, R2, MinIO, DigitalOcean Spaces, and any other S3-API-compatible
@@ -157,18 +158,6 @@ class S3MultipartDriver implements MultipartUploadDriver
      */
     protected function sseOptions(string $disk): array
     {
-        $sse = config("documentable.disks.{$disk}.server_side_encryption");
-
-        if (! $sse) {
-            return [];
-        }
-
-        $options = ['ServerSideEncryption' => $sse];
-
-        if ($sse === 'aws:kms' && $kmsKeyId = config("documentable.disks.{$disk}.kms_key_id")) {
-            $options['SSEKMSKeyId'] = $kmsKeyId;
-        }
-
-        return $options;
+        return ServerSideEncryption::options($disk);
     }
 }
