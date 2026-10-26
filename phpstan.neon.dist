@@ -3,7 +3,7 @@ includes:
     - phpstan-baseline.neon
 
 parameters:
-    level: 5
+    level: 8
 
     paths:
         - src
@@ -12,3 +12,7 @@ parameters:
         - src/../vendor
 
     checkModelProperties: false
+
+    # The baseline only shrinks: an entry that no longer matches fails the run, so a fixed error has to be
+    # removed from phpstan-baseline.neon in the same change.
+    reportUnmatchedIgnoredErrors: true

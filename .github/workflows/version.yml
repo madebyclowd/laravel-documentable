@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - '3.x'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -26,8 +27,12 @@ jobs:
           php-version: 8.3
           coverage: none
 
+      # On 3.x the version is a prerelease (3.0.0-alpha.N). The channel comes from the repository variable
+      # PRERELEASE_CHANNEL so moving alpha to rc is a settings change; set it to `stable` to cut the stable version.
       - name: Aggregate pending changesets
         id: aggregate
+        env:
+          PRERELEASE_CHANNEL: ${{ github.ref_name == '3.x' && (vars.PRERELEASE_CHANNEL || 'alpha') || '' }}
         run: |
           if [ "$(find .changes -maxdepth 1 -name '*.md' ! -name 'README.md' ! -name 'TEMPLATE.md' | wc -l)" -eq 0 ]; then
             echo "No pending changesets."
@@ -49,6 +54,11 @@ jobs:
           VERSION: ${{ steps.aggregate.outputs.version }}
         run: |
           BRANCH="chore/next-release"
+          BASE="${GITHUB_REF_NAME}"
+
+          if [ "$BASE" != "main" ]; then
+            BRANCH="chore/next-release-${BASE}"
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -67,7 +77,7 @@ jobs:
             gh pr edit "$OPEN_PR" --title "chore(release): v${VERSION}"
           else
             gh pr create \
-              --base main \
+              --base "$BASE" \
               --head "$BRANCH" \
               --title "chore(release): v${VERSION}" \
               --body "Aggregates pending changesets in \`.changes/\`. Merging this PR tags and releases v${VERSION}."
@@ -89,7 +99,7 @@ jobs:
       # `git tag && git push` always has.
       - name: Tag if the top CHANGELOG version isn't tagged yet
         run: |
-          TOP_VERSION=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          TOP_VERSION=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?\]' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?')
 
           if [ -z "$TOP_VERSION" ]; then
             echo "No version heading found in CHANGELOG.md."
