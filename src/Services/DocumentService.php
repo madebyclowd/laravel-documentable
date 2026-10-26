@@ -17,9 +17,7 @@ use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
-use MadeByClowd\Documentable\Events\DocumentReassociated;
 use MadeByClowd\Documentable\Events\DocumentUploaded;
-use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Events\MultipartUploadAborted;
 use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
@@ -43,7 +41,8 @@ class DocumentService
         protected GeneratesStoragePath $pathGenerator,
         protected ActorResolver $actor,
         protected UrlSigner $urlSigner,
-        protected DocumentPurger $purger
+        protected DocumentPurger $purger,
+        protected DocumentAttacher $attacher
     ) {}
 
     /**
@@ -194,54 +193,11 @@ class DocumentService
     }
 
     /**
-     * Move a document to a different owner, typically a detached upload that finally has its real owner.
-     *
-     * The move goes through the same slot and version resolution as an upload. For a single-slot type whose new
-     * owner already holds a latest document, the moved document joins that slot's chain: it takes the group, the
-     * previous latest is demoted (or soft-deleted when the type does not keep history) and the version is
-     * incremented, so the owner never ends up with two "latest" documents. A multi-slot type keeps the moved
-     * document in its own slot, and moving a document to the owner it already has changes nothing.
+     * @see DocumentAttacher::reassociate()
      */
     public function reassociateDocument(Document $document, Model $newOwner): Document
     {
-        return DB::transaction(function () use ($document, $newOwner) {
-            $previousOwner = null;
-
-            if ($document->documentable_type && $document->documentable_id) {
-                $morphClass = Relation::getMorphedModel($document->documentable_type) ?? $document->documentable_type;
-
-                $previousOwner = $morphClass::find($document->documentable_id);
-            }
-
-            $morphType = $newOwner->getMorphClass();
-            $ownerId = (string) $newOwner->getKey();
-
-            $attributes = ['documentable_type' => $morphType, 'documentable_id' => $ownerId];
-            $supersedes = null;
-
-            $alreadyOwned = $document->documentable_type === $morphType && (string) $document->documentable_id === $ownerId;
-            $type = DocumentType::withTrashed()->find($document->document_type_id);
-
-            if (! $alreadyOwned && $document->is_latest && $type !== null && ! $type->allows_multiple) {
-                $supersedes = $this->documentRepository->findLatest($morphType, $ownerId, $type->id);
-
-                if ($supersedes !== null) {
-                    $attributes['document_group_id'] = $supersedes->document_group_id;
-                    $attributes['latest_marker'] = $supersedes->document_group_id;
-                    $attributes['version'] = $this->demoteAndResolveVersion($supersedes, $type);
-                }
-            }
-
-            $document->update($attributes);
-
-            if ($supersedes !== null) {
-                Event::dispatch(new DocumentVersionSuperseded($supersedes, $document));
-            }
-
-            Event::dispatch(new DocumentReassociated($document, $previousOwner));
-
-            return $document;
-        });
+        return $this->attacher->reassociate($document, $newOwner);
     }
 
     /**
@@ -739,19 +695,7 @@ class DocumentService
     }
 
     /**
-     * Create a Document from an existing StorageFile, resolving which group/slot
-     * it belongs to and whether it starts a new version chain or a fresh one:
-     *
-     * - $documentGroupId given: new version of that specific, already-existing
-     *   group/slot (only meaningful when the type allows_multiple).
-     * - $documentGroupId null + allows_multiple: start a brand new independent
-     *   group/slot.
-     * - $documentGroupId null + !allows_multiple: resolve the type's single slot
-     *   (there can only ever be one group for this owner+type).
-     *
-     * Every created row is is_latest = true for its own group — allows_multiple
-     * no longer forces is_latest = false, which is what made versioning silently
-     * break for multi-document types before document_group_id existed.
+     * @see DocumentAttacher::attachStorageFile()
      */
     protected function createDocumentFromStorageFile(
         StorageFile $storageFile,
@@ -761,89 +705,6 @@ class DocumentService
         array $metadata = [],
         ?string $documentGroupId = null
     ): Document {
-        $metadata = array_merge([
-            'size' => $storageFile->size_bytes,
-            'mime_type' => $storageFile->mime_type,
-        ], $metadata);
-
-        $version = 1;
-        $groupId = $documentGroupId;
-        $previousLatest = null;
-
-        if ($groupId !== null) {
-            $previousLatest = $this->documentRepository->findLatest(
-                $documentable->getMorphClass(),
-                (string) $documentable->getKey(),
-                $type->id,
-                $groupId
-            );
-
-            $version = $this->demoteAndResolveVersion($previousLatest, $type);
-        } elseif ($type->allows_multiple) {
-            $groupId = (string) Str::uuid();
-        } else {
-            $previousLatest = $this->documentRepository->findLatest(
-                $documentable->getMorphClass(),
-                (string) $documentable->getKey(),
-                $type->id
-            );
-
-            if ($previousLatest) {
-                $groupId = $previousLatest->document_group_id;
-                $version = $this->demoteAndResolveVersion($previousLatest, $type);
-            } else {
-                $groupId = (string) Str::uuid();
-            }
-        }
-
-        $document = $this->documentRepository->create([
-            'storage_file_id' => $storageFile->id,
-            'document_type_id' => $type->id,
-            'document_group_id' => $groupId,
-            'documentable_type' => $documentable->getMorphClass(),
-            'documentable_id' => $documentable->getKey(),
-            'client_filename' => $clientFilename,
-            'metadata' => $metadata,
-            'version' => $version,
-            'is_latest' => true,
-            'latest_marker' => $groupId,
-            'created_by' => $this->actor->idForAudit(),
-        ]);
-
-        if ($previousLatest) {
-            Event::dispatch(new DocumentVersionSuperseded($previousLatest, $document));
-        }
-
-        Event::dispatch(new DocumentUploaded($document));
-
-        return $document;
-    }
-
-    /**
-     * Lock and demote the group's current latest document. Returns the version
-     * number the new document should take: incremented if the type keeps
-     * history, 1 if it hard-replaces (old row soft-deleted, no history kept).
-     */
-    protected function demoteAndResolveVersion(?Document $previousLatest, DocumentType $type): int
-    {
-        if (! $previousLatest) {
-            return 1;
-        }
-
-        $locked = Document::whereKey($previousLatest->id)->lockForUpdate()->first();
-
-        if (! $locked) {
-            return 1;
-        }
-
-        $locked->update(['is_latest' => false, 'latest_marker' => null]);
-
-        if ($type->requires_versioning) {
-            return $locked->version + 1;
-        }
-
-        $this->documentRepository->delete($locked);
-
-        return 1;
+        return $this->attacher->attachStorageFile($storageFile, $type, $documentable, $clientFilename, $metadata, $documentGroupId);
     }
 }
