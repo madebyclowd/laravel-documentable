@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable;
 
 use Illuminate\Cache\RateLimiting\Limit;
@@ -8,6 +10,7 @@ use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Console\Commands\AttachModelCommand;
 use MadeByClowd\Documentable\Console\Commands\CleanOrphanedDocumentsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketCorsCommand;
@@ -36,6 +39,11 @@ class DocumentableServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/documentable.php', 'documentable');
 
+        $this->app->singleton(DocumentableConfig::class, fn ($app) => DocumentableConfig::fromArray(
+            (array) $app['config']->get('documentable', []),
+            array_map('strval', array_keys((array) $app['config']->get('filesystems.disks', []))),
+        ));
+
         $this->app->bind(
             AuthorizesDocumentAccess::class,
             fn ($app) => $app->make(config('documentable.authorization.resolver') ?? PermissiveDocumentAuthorizer::class)
@@ -62,6 +70,9 @@ class DocumentableServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Resolve once so an invalid value fails the boot with the key and the fix, not the first upload.
+        $this->app->make(DocumentableConfig::class);
+
         if (config('documentable.load_migrations', true) || $this->app->runningUnitTests()) {
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         }
@@ -148,6 +159,9 @@ class DocumentableServiceProvider extends ServiceProvider
             'Routes' => config('documentable.load_routes', true) ? 'mounted' : 'not mounted',
             'Middleware' => implode(', ', (array) config('documentable.middleware', ['api'])),
             'Throttle' => (string) config('documentable.throttle', 'documents'),
+            'Disk' => $this->app->make(DocumentableConfig::class)->disk,
+            'Etag strategy' => $this->app->make(DocumentableConfig::class)->etagStrategy,
+            'Reaper' => $this->app->make(DocumentableConfig::class)->reaperFrequency,
             'Guest user_id' => config('documentable.security.allow_guest_user_id', false) ? 'allowed' : 'ignored',
             'Document types' => $this->documentTypeSummary(),
             'Insecure in production' => $this->isInsecureProductionSetup() ? 'yes' : 'no',
