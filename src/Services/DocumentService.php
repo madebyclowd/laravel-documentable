@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Services;
 
 use DateTimeInterface;
-use finfo;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -19,8 +18,6 @@ use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
-use MadeByClowd\Documentable\Contracts\ScanResult;
-use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Events\DocumentDeleted;
 use MadeByClowd\Documentable\Events\DocumentPurged;
 use MadeByClowd\Documentable\Events\DocumentReassociated;
@@ -44,7 +41,7 @@ class DocumentService
         protected StorageFileRepository $storageFileRepository,
         protected DocumentRepository $documentRepository,
         protected MultipartUploadRepository $multipartUploadRepository,
-        protected ScansUploadedFile $fileScanner,
+        protected ObjectVerifier $verifier,
         protected ResolvesDedupScope $dedupScopeResolver,
         protected GeneratesStoragePath $pathGenerator,
         protected ActorResolver $actor,
@@ -350,30 +347,7 @@ class DocumentService
 
     protected function validateFile(UploadedFile $file, DocumentType $type): void
     {
-        $this->validateSizeAndMime($file->getSize(), $file->getMimeType(), $type);
-    }
-
-    /**
-     * The one entry point every transport funnels through — local UploadedFile
-     * (upload()/uploadDetached()), multipart finalize, and direct-PUT finalize
-     * all resolve size/mime first, then call this, so no transport can skip
-     * validation or trust a client-asserted mime type.
-     */
-    protected function validateSizeAndMime(int $sizeBytes, ?string $mimeType, DocumentType $type): void
-    {
-        $maxBytes = $type->max_size_mb * 1024 * 1024;
-
-        if ($sizeBytes > $maxBytes) {
-            throw ValidationException::withMessages([
-                'file' => "File size exceeds limit of {$type->max_size_mb}MB.",
-            ]);
-        }
-
-        if ($type->allowed_mimes && (! $mimeType || ! in_array($mimeType, $type->allowed_mimes, true))) {
-            throw ValidationException::withMessages([
-                'file' => "File type '{$mimeType}' is not allowed.",
-            ]);
-        }
+        $this->verifier->assertSizeAndMime($file->getSize(), $file->getMimeType(), $type);
     }
 
     /**
@@ -494,10 +468,10 @@ class DocumentService
 
         $driver->complete($type->disk, $path, $uploadId, $parts);
 
-        $result = $this->resolveAssembledFileInfo($driver, $type->disk, $path);
+        $result = $this->verifier->assembledObjectInfo($driver, $type->disk, $path);
 
-        $this->validateOrDelete($type->disk, $path, $result['size'], $result['mime'], $type);
-        $this->verifyIntegrityOrDelete($type->disk, $path, $result['hash'], $expectedHash);
+        $this->deleteOnFailure($type->disk, $path, fn () => $this->verifier->assertSizeAndMime($result['size'], $result['mime'], $type));
+        $this->deleteOnFailure($type->disk, $path, fn () => $this->verifier->assertIntegrity($result['hash'], $expectedHash));
 
         return DB::transaction(function () use ($path, $type, $documentable, $originalFilename, $metadata, $result, $documentGroupId, $session) {
             $document = $this->createDocumentFromUploadedPath(
@@ -611,10 +585,10 @@ class DocumentService
             ]);
         }
 
-        $result = $this->hashAndDetectMime($type->disk, $path);
+        $result = $this->verifier->hashAndDetectMime($type->disk, $path);
 
-        $this->validateSizeAndMime($result['size'], $result['mime'], $type);
-        $this->assertIntegrity($result['hash'], $expectedHash);
+        $this->verifier->assertSizeAndMime($result['size'], $result['mime'], $type);
+        $this->verifier->assertIntegrity($result['hash'], $expectedHash);
 
         return DB::transaction(fn () => $this->createDocumentFromUploadedPath(
             $path,
@@ -765,154 +739,19 @@ class DocumentService
     }
 
     /**
-     * Optional fast path: when
-     * use_native_checksum is enabled and the driver can report a provider-computed
-     * full-object checksum, skip the full re-download-and-hash — only the first
-     * chunk is read (for mime sniffing) and size comes from a HeadObject-equivalent
-     * call. Falls back to the full-stream hash whenever the driver returns null
-     * (unsupported backend, or feature disabled) — this is never the only
-     * integrity path.
-     *
-     * @return array{hash: string, mime: string, size: int}
+     * A failed check after the bytes are already written (multipart assembly and direct PUT both land bytes
+     * before validation is possible) must not leave an orphaned blob with no StorageFile or Document pointing
+     * at it, so the object is deleted before the failure is rethrown.
      */
-    protected function resolveAssembledFileInfo(MultipartUploadDriver $driver, string $disk, string $path): array
-    {
-        if (config('documentable.multipart.use_native_checksum', false)) {
-            $checksum = $driver->retrieveChecksum($disk, $path);
-
-            if ($checksum !== null) {
-                return [
-                    'hash' => $checksum,
-                    'mime' => $this->detectMimeFromHead($disk, $path),
-                    'size' => Storage::disk($disk)->size($path),
-                ];
-            }
-        }
-
-        return $this->hashAndDetectMime($disk, $path);
-    }
-
-    /**
-     * Sniff mime from only the first chunk of the object — cheap regardless of
-     * object size, since Storage::readStream() is lazy and this never drains it.
-     */
-    protected function detectMimeFromHead(string $disk, string $path): string
-    {
-        $stream = Storage::disk($disk)->readStream($path);
-        $chunk = fread($stream, 8192);
-        fclose($stream);
-
-        return (new finfo(FILEINFO_MIME_TYPE))->buffer($chunk ?: '') ?: 'application/octet-stream';
-    }
-
-    /**
-     * Stream the object once: sha256 over the whole body (integrity, always
-     * independent of any provider ETag) and mime sniffed from the first chunk
-     * via fileinfo (never a client-asserted mime_type field).
-     *
-     * @return array{hash: string, mime: string, size: int}
-     */
-    protected function hashAndDetectMime(string $disk, string $path): array
-    {
-        $stream = Storage::disk($disk)->readStream($path);
-
-        $ctx = hash_init('sha256');
-        $sizeBytes = 0;
-        $firstChunk = null;
-
-        while (! feof($stream)) {
-            $chunk = fread($stream, 8192);
-
-            if ($firstChunk === null) {
-                $firstChunk = $chunk;
-            }
-
-            hash_update($ctx, $chunk);
-            $sizeBytes += strlen($chunk);
-        }
-
-        fclose($stream);
-
-        $mimeType = (new finfo(FILEINFO_MIME_TYPE))->buffer($firstChunk ?? '') ?: 'application/octet-stream';
-
-        return [
-            'hash' => hash_final($ctx),
-            'mime' => $mimeType,
-            'size' => $sizeBytes,
-        ];
-    }
-
-    /**
-     * A failed size/mime check after the bytes are already assembled/written
-     * (both multipart and direct-PUT land bytes before validation is
-     * possible) must not leave an orphaned blob with no StorageFile/Document
-     * pointing at it.
-     */
-    protected function validateOrDelete(string $disk, string $path, int $sizeBytes, ?string $mimeType, DocumentType $type): void
+    protected function deleteOnFailure(string $disk, string $path, callable $check): void
     {
         try {
-            $this->validateSizeAndMime($sizeBytes, $mimeType, $type);
+            $check();
         } catch (ValidationException $e) {
             Storage::disk($disk)->delete($path);
 
             throw $e;
         }
-    }
-
-    /**
-     * ScansUploadedFile hook (security-risks.md #1) — default is a no-op
-     * returning Clean, but always runs so wiring a real scanner in later
-     * doesn't require touching call sites.
-     */
-    protected function scanOrDelete(string $disk, string $path): void
-    {
-        $result = $this->fileScanner->scan($disk, $path);
-
-        if ($result === ScanResult::Clean) {
-            return;
-        }
-
-        if ($result === ScanResult::Error && config('documentable.security.scan_error_policy', 'reject') === 'allow') {
-            Log::warning("Documentable stored [{$path}] on disk [{$disk}] without a scan verdict, because the scanner reported an error and security.scan_error_policy is 'allow'.");
-
-            return;
-        }
-
-        Storage::disk($disk)->delete($path);
-
-        throw ValidationException::withMessages([
-            'file' => $result->isInfected()
-                ? 'Uploaded file failed a security scan.'
-                : 'Uploaded file could not be scanned. Try again later.',
-        ]);
-    }
-
-    protected function verifyIntegrityOrDelete(string $disk, string $path, string $actualHash, ?string $expectedHash): void
-    {
-        try {
-            $this->assertIntegrity($actualHash, $expectedHash);
-        } catch (ValidationException $e) {
-            Storage::disk($disk)->delete($path);
-
-            throw $e;
-        }
-    }
-
-    /**
-     * Compare the server-computed hash with the one the client declared, without touching storage. Use
-     * this where the object was not written by this package in the current request (a presigned PUT),
-     * because there the path is only a client-supplied claim and deleting it would destroy data the
-     * caller may not own.
-     */
-    protected function assertIntegrity(string $actualHash, ?string $expectedHash): void
-    {
-        if ($expectedHash === null || hash_equals($expectedHash, $actualHash)) {
-            return;
-        }
-
-        throw ValidationException::withMessages([
-            'file' => "Integrity check failed. Server hash ({$actualHash}) does not match client hash ({$expectedHash}).",
-        ]);
     }
 
     /**
@@ -977,7 +816,7 @@ class DocumentService
         if (! $storageFile) {
             $path = $pathProvider();
 
-            $this->scanOrDelete($disk, $path);
+            $this->deleteOnFailure($disk, $path, fn () => $this->verifier->assertScanClean($disk, $path));
 
             $storageFile = $this->storageFileRepository->create([
                 'file_hash' => $hash,
