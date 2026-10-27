@@ -14,6 +14,7 @@ use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class ArtisanCommandsTest extends TestCase
 {
@@ -213,11 +214,16 @@ class ArtisanCommandsTest extends TestCase
                 'code-first',
                 ['code-first', 'db-only']
             )
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
             )
             ->assertExitCode(0);
     }
@@ -270,11 +276,16 @@ class ArtisanCommandsTest extends TestCase
                 'code-first',
                 ['code-first', 'db-only']
             )
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
             )
             ->assertExitCode(0);
 
@@ -289,14 +300,8 @@ class ArtisanCommandsTest extends TestCase
     {
         @unlink(config_path('documentable.php'));
 
-        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'monolith'])
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'monolith', '--authorizer' => 'none'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
-            )
             ->assertExitCode(0);
 
         $published = file_get_contents(config_path('documentable.php'));
@@ -309,14 +314,8 @@ class ArtisanCommandsTest extends TestCase
     {
         @unlink(config_path('documentable.php'));
 
-        $this->artisan('documents:install', ['--no-interaction' => true])
+        $this->artisan('documents:install', ['--no-interaction' => true, '--authorizer' => 'none'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
-            )
             ->expectsOutputToContain("defaulting to 'separate-api'")
             ->assertExitCode(0);
 
@@ -344,14 +343,8 @@ class ArtisanCommandsTest extends TestCase
     {
         @unlink(config_path('documentable.php'));
 
-        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--key-type' => 'uuid'])
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--key-type' => 'uuid', '--authorizer' => 'none'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
-            )
             ->assertExitCode(0);
 
         $this->assertStringContainsString("'key_type' => 'uuid'", file_get_contents(config_path('documentable.php')));
@@ -375,11 +368,16 @@ class ArtisanCommandsTest extends TestCase
                 ['int', 'uuid', 'ulid', 'string']
             )
             ->expectsConfirmation('Run the new database migrations now?', 'no')
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
             )
             ->assertExitCode(0);
 
@@ -456,21 +454,113 @@ class ArtisanCommandsTest extends TestCase
                     'db-only',
                     ['code-first', 'db-only']
                 )
-                ->expectsConfirmation(
-                    "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                    "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                    'document — fine for local development, not fine for production.',
-                    'yes'
+                ->expectsChoice(
+                    "How do you want to control who's allowed to upload, view and delete documents?\n".
+                    "Until you do, every request is denied, and a production boot refuses to start.\n".
+                    "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                    "              quickest way to start, and it works with Laravel policies too.\n".
+                    "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                    "              not fit Gates.\n".
+                    '  none — Skip this; write your own before going to production.',
+                    'gates',
+                    ['gates', 'class', 'none']
                 )
                 ->expectsOutputToContain("Leave config('documentable.types') empty and manage the document_types table directly.")
                 ->expectsOutputToContain('Open the authorizer file we just generated in app/Documentable and fill in your real ownership/role checks.')
                 ->assertExitCode(0);
 
-            $this->assertFileExists($fakeAppPath.'/Documentable/AppDocumentAuthorizer.php');
+            $this->assertFileExists($fakeAppPath.'/Documentable/AppDocumentGates.php');
         } finally {
             File::deleteDirectory($fakeAppPath);
             @unlink(config_path('documentable.php'));
         }
+    }
+
+    public function test_install_command_invalid_authorizer_option_fails_fast(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', [
+            '--no-interaction' => true,
+            '--shape' => 'separate-api',
+            '--etag-strategy' => 'server-authoritative',
+            '--types' => 'code-first',
+            '--authorizer' => 'bogus',
+        ])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsOutputToContain("Invalid --authorizer value: 'bogus'. Expected 'gates', 'class' or 'none'.")
+            ->assertExitCode(1);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function authorizerOptions(): array
+    {
+        return [
+            'gates' => ['gates', 'AppDocumentGates.php'],
+            'class' => ['class', 'AppDocumentAuthorizer.php'],
+        ];
+    }
+
+    #[DataProvider('authorizerOptions')]
+    public function test_install_command_authorizer_option_scaffolds_that_style_without_asking(string $style, string $file): void
+    {
+        @unlink(config_path('documentable.php'));
+        $fakeAppPath = sys_get_temp_dir().'/documentable-install-test-'.uniqid();
+        File::ensureDirectoryExists($fakeAppPath);
+        $this->app->useAppPath($fakeAppPath);
+
+        try {
+            $this->artisan('documents:install', [
+                '--no-interaction' => true,
+                '--shape' => 'separate-api',
+                '--etag-strategy' => 'server-authoritative',
+                '--types' => 'code-first',
+                '--authorizer' => $style,
+            ])
+                ->expectsConfirmation('Run the new database migrations now?', 'no')
+                ->expectsOutputToContain('Open the authorizer file we just generated in app/Documentable')
+                ->assertExitCode(0);
+
+            $this->assertFileExists($fakeAppPath.'/Documentable/'.$file);
+        } finally {
+            File::deleteDirectory($fakeAppPath);
+            @unlink(config_path('documentable.php'));
+        }
+    }
+
+    public function test_install_command_scaffolds_the_gates_authorizer_by_default_when_not_interactive(): void
+    {
+        @unlink(config_path('documentable.php'));
+        $fakeAppPath = sys_get_temp_dir().'/documentable-install-test-'.uniqid();
+        File::ensureDirectoryExists($fakeAppPath);
+        $this->app->useAppPath($fakeAppPath);
+
+        try {
+            $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api'])
+                ->expectsConfirmation('Run the new database migrations now?', 'no')
+                ->assertExitCode(0);
+
+            $this->assertFileExists($fakeAppPath.'/Documentable/AppDocumentGates.php');
+        } finally {
+            File::deleteDirectory($fakeAppPath);
+            @unlink(config_path('documentable.php'));
+        }
+    }
+
+    public function test_install_command_skipping_the_authorizer_says_every_request_stays_denied(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--authorizer' => 'none'])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsOutputToContain('until you do, every request is denied')
+            ->assertExitCode(0);
+
+        @unlink(config_path('documentable.php'));
     }
 
     public function test_write_config_value_is_a_noop_when_config_file_missing(): void

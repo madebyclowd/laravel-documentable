@@ -4,23 +4,20 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Foundation\Auth\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
-use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
-use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\UploadSession;
+use MadeByClowd\Documentable\Tests\Fixtures\ConfigurableAuthorizer;
 use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
+use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
- * The multipart follow-up endpoints (part-url, parts, status, abort) used to skip the authorizer that
- * `initiate` and `complete` already call, `user_id` was trusted from the request body, and `/documents/types`
- * listed every type to every caller.
+ * Every follow-up on an upload session reaches the authorizer with the session itself, so an app can refuse
+ * `finalize` for a session it should not complete. A `user_id` in the request is never honoured as an owner.
  */
 class AuthorizationGapsTest extends TestCase
 {
@@ -34,7 +31,6 @@ class AuthorizationGapsTest extends TestCase
         Storage::fake('test_disk');
         config()->set('documentable.multipart.drivers.local', FakeMultipartUploadDriver::class);
         FakeMultipartUploadDriver::reset();
-        config()->set('documentable.security.allow_guest_user_id', true);
     }
 
     protected function makeType(string $code = 'BIG'): DocumentType
@@ -51,36 +47,12 @@ class AuthorizationGapsTest extends TestCase
     /**
      * @return array{id: string}
      */
-    protected function initiateSession(DocumentType $type, string $userId = 'user-1'): array
+    protected function initiateSession(DocumentType $type, int $userId = 1): array
     {
-        return $this->postJson('/documents/multipart/initiate', [
+        return $this->signIn($userId)->postJson('/documents/multipart/initiate', [
             'filename' => 'f.bin',
             'document_type_id' => $type->id,
-            'user_id' => $userId,
         ])->assertCreated()->json();
-    }
-
-    protected function bindAuthorizer(bool $canUpload, ?callable $canTypeBeUploaded = null): void
-    {
-        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class($canUpload, $canTypeBeUploaded) implements AuthorizesDocumentAccess
-        {
-            public function __construct(private bool $canUpload, private $perType) {}
-
-            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
-            {
-                return $this->perType !== null ? (bool) ($this->perType)($type) : $this->canUpload;
-            }
-
-            public function canView(?Authenticatable $user, Document $document): bool
-            {
-                return true;
-            }
-
-            public function canDelete(?Authenticatable $user, Document $document): bool
-            {
-                return true;
-            }
-        });
     }
 
     /**
@@ -97,17 +69,12 @@ class AuthorizationGapsTest extends TestCase
     }
 
     #[DataProvider('followUpEndpoints')]
-    public function test_follow_up_endpoints_are_forbidden_when_the_authorizer_denies_upload(string $method, string $uri): void
+    public function test_follow_up_endpoints_are_forbidden_when_the_authorizer_denies_the_session(string $method, string $uri): void
     {
-        $type = $this->makeType();
-        $session = $this->initiateSession($type);
-        $this->bindAuthorizer(canUpload: false);
+        $session = $this->initiateSession($this->makeType());
+        $this->useAuthorizer(ConfigurableAuthorizer::denying('canFinalize'));
 
-        $payload = [
-            'session_id' => $session['id'],
-            'part_number' => 1,
-            'user_id' => 'user-1',
-        ];
+        $payload = ['session_id' => $session['id'], 'part_number' => 1];
 
         $response = $method === 'GET'
             ? $this->getJson($uri.'?'.http_build_query($payload))
@@ -116,32 +83,79 @@ class AuthorizationGapsTest extends TestCase
         $response->assertForbidden();
     }
 
-    public function test_status_cannot_be_used_to_probe_a_session_of_a_type_the_caller_may_not_upload(): void
+    public function test_the_authorizer_is_asked_about_the_session_being_driven(): void
+    {
+        $session = $this->initiateSession($this->makeType());
+        $asked = [];
+        $this->useAuthorizer(ConfigurableAuthorizer::with([
+            'canFinalize' => function ($user, UploadSession $driven) use (&$asked) {
+                $asked[] = [$user?->getAuthIdentifier(), $driven->id, $driven->user_id];
+
+                return true;
+            },
+        ]));
+
+        $this->getJson('/documents/multipart/parts?'.http_build_query(['session_id' => $session['id']]))->assertOk();
+
+        $this->assertSame([[1, $session['id'], '1']], $asked);
+    }
+
+    public function test_status_cannot_be_used_to_probe_a_session_of_a_type_the_caller_may_not_drive(): void
     {
         $allowed = $this->makeType('ALLOWED');
         $denied = $this->makeType('DENIED');
         $session = $this->initiateSession($denied);
-        $this->bindAuthorizer(canUpload: true, canTypeBeUploaded: fn (DocumentType $type) => $type->id === $allowed->id);
+        $this->useAuthorizer(ConfigurableAuthorizer::with([
+            'canFinalize' => fn ($user, UploadSession $driven) => $driven->document_type_id === $allowed->id,
+        ]));
 
-        $this->getJson('/documents/multipart/status?'.http_build_query([
-            'session_id' => $session['id'],
-            'user_id' => 'user-1',
-        ]))->assertForbidden();
+        $this->getJson('/documents/multipart/status?'.http_build_query(['session_id' => $session['id']]))->assertForbidden();
     }
 
     public function test_status_of_an_unknown_session_still_reports_it_does_not_exist(): void
     {
         $this->makeType();
 
-        $this->getJson('/documents/multipart/status?'.http_build_query([
+        $this->signIn(1)->getJson('/documents/multipart/status?'.http_build_query([
             'session_id' => '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-            'user_id' => 'user-1',
         ]))->assertOk()->assertJson(['exists' => false]);
     }
 
-    public function test_initiate_ignores_a_client_supplied_user_id_by_default(): void
+    public function test_complete_is_refused_when_the_authorizer_rejects_finalizing_the_session(): void
     {
-        config()->set('documentable.security.allow_guest_user_id', false);
+        $session = $this->initiateSession($this->makeType());
+        FakeMultipartUploadDriver::uploadPart(UploadSession::findOrFail($session['id'])->upload_id, 1, 'hello world');
+        $this->useAuthorizer(ConfigurableAuthorizer::denying('canFinalize'));
+
+        $this->postJson('/documents/multipart/complete', ['session_id' => $session['id']])->assertForbidden();
+
+        $this->assertSame(UploadSessionStatus::Initiated, UploadSession::findOrFail($session['id'])->status);
+    }
+
+    public function test_direct_finalize_is_refused_when_the_authorizer_rejects_finalizing_the_session(): void
+    {
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
+
+        $type = $this->makeType('SMALL');
+        $started = $this->signIn(1)->postJson('/documents/presigned', [
+            'document_type_id' => $type->id,
+            'filename' => 'small.txt',
+        ])->assertOk()->json();
+        Storage::disk('test_disk')->put(UploadSession::findOrFail($started['session_id'])->path, 'small content');
+        $this->useAuthorizer(ConfigurableAuthorizer::denying('canFinalize'));
+
+        $this->postJson('/documents/presigned/finalize', ['session_id' => $started['session_id']])->assertForbidden();
+        $this->postJson('/documents/attach', [
+            'session_id' => $started['session_id'],
+            'documentable_type' => 'test_model',
+            'documentable_id' => (string) TestModel::create(['name' => 'owner'])->getKey(),
+        ])->assertForbidden();
+
+        $this->assertSame(UploadSessionStatus::Initiated, UploadSession::findOrFail($started['session_id'])->status);
+    }
+
+    public function test_initiate_ignores_a_client_supplied_user_id_for_an_anonymous_caller(): void
+    {
         $type = $this->makeType();
 
         $this->postJson('/documents/multipart/initiate', [
@@ -150,49 +164,56 @@ class AuthorizationGapsTest extends TestCase
             'user_id' => 'victim',
         ])->assertStatus(422)->assertJsonValidationErrors(['user_id']);
 
-        $this->assertSame(0, UploadSession::where('user_id', 'victim')->count());
+        $this->assertSame(0, UploadSession::count());
     }
 
-    public function test_initiate_accepts_a_guest_user_id_when_explicitly_allowed(): void
+    public function test_the_authenticated_user_wins_over_a_client_supplied_user_id(): void
     {
-        config()->set('documentable.security.allow_guest_user_id', true);
         $type = $this->makeType();
 
-        $this->postJson('/documents/multipart/initiate', [
-            'filename' => 'f.bin',
-            'document_type_id' => $type->id,
-            'user_id' => 'device-9',
-        ])->assertCreated();
-
-        $this->assertSame(1, UploadSession::where('user_id', 'device-9')->count());
-    }
-
-    public function test_authenticated_user_wins_over_a_client_supplied_user_id(): void
-    {
-        config()->set('documentable.security.allow_guest_user_id', true);
-        $type = $this->makeType();
-
-        $this->actingAs(new class extends User
-        {
-            public function getAuthIdentifier(): string
-            {
-                return 'real-user';
-            }
-        })->postJson('/documents/multipart/initiate', [
+        $this->signIn(7)->postJson('/documents/multipart/initiate', [
             'filename' => 'f.bin',
             'document_type_id' => $type->id,
             'user_id' => 'victim',
         ])->assertCreated();
 
-        $this->assertSame(1, UploadSession::where('user_id', 'real-user')->count());
+        $this->assertSame(1, UploadSession::where('user_id', '7')->count());
         $this->assertSame(0, UploadSession::where('user_id', 'victim')->count());
+    }
+
+    public function test_a_client_supplied_user_id_cannot_reach_someone_elses_session(): void
+    {
+        $session = $this->initiateSession($this->makeType(), 10);
+
+        $this->signIn(11)->postJson('/documents/multipart/part-url', [
+            'session_id' => $session['id'],
+            'part_number' => 1,
+            'user_id' => '10',
+        ])->assertForbidden();
+    }
+
+    public function test_an_anonymous_presign_stores_an_anonymous_session_whatever_user_id_says(): void
+    {
+        $this->skipUnlessFakeDiskSupportsUploadUrls();
+
+        $type = $this->makeType('SMALL');
+
+        $started = $this->postJson('/documents/presigned', [
+            'document_type_id' => $type->id,
+            'filename' => 'small.txt',
+            'user_id' => 'victim',
+        ])->assertOk()->json();
+
+        $this->assertNull(UploadSession::findOrFail($started['session_id'])->user_id);
     }
 
     public function test_type_listing_only_returns_types_the_authorizer_allows(): void
     {
         $allowed = $this->makeType('ALLOWED');
         $this->makeType('HIDDEN');
-        $this->bindAuthorizer(canUpload: true, canTypeBeUploaded: fn (DocumentType $type) => $type->id === $allowed->id);
+        $this->useAuthorizer(ConfigurableAuthorizer::with([
+            'canInitiateUpload' => fn ($user, DocumentType $type) => $type->id === $allowed->id,
+        ]));
 
         $response = $this->getJson('/documents/types')->assertOk();
 

@@ -1,25 +1,23 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Services\DocumentService;
+use MadeByClowd\Documentable\Tests\Fixtures\ConfigurableAuthorizer;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
 
 /**
- * Regression coverage for docs/feedbacks/feedback.md #6 — no endpoint to list
- * "all of this owner's documents, grouped by slot". See
- * docs/implementations/v2.0.0/phase-12-document-listing-endpoint.md.
+ * The owner-scoped listing endpoint: all of an owner's latest documents, grouped by type and slot.
  */
 class DocumentListingEndpointTest extends TestCase
 {
@@ -152,23 +150,9 @@ class DocumentListingEndpointTest extends TestCase
 
     public function test_custom_authorizer_excludes_only_denied_documents(): void
     {
-        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
-        {
-            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
-            {
-                return true;
-            }
-
-            public function canView(?Authenticatable $user, Document $document): bool
-            {
-                return $document->client_filename !== 'secret.txt';
-            }
-
-            public function canDelete(?Authenticatable $user, Document $document): bool
-            {
-                return true;
-            }
-        });
+        $this->useAuthorizer(ConfigurableAuthorizer::with([
+            'canView' => fn ($user, Document $document) => $document->client_filename !== 'secret.txt',
+        ]));
 
         $type = $this->makeType(['allows_multiple' => true]);
         $owner = TestModel::create(['name' => 'owner']);

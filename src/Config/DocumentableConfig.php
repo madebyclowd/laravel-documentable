@@ -64,7 +64,6 @@ final readonly class DocumentableConfig
         public ?string $scanner,
         public ?array $allowedDocumentableTypes,
         public array $validators,
-        public bool $allowGuestUserId,
         public string $scanErrorPolicy,
         public int $urlMaxTtlMinutes,
         public ?string $storagePathGenerator,
@@ -164,7 +163,6 @@ final readonly class DocumentableConfig
             scanner: self::implementing($c['security']['scanner'], ScansUploadedFile::class, 'security.scanner'),
             allowedDocumentableTypes: $allowed,
             validators: $validators,
-            allowGuestUserId: self::bool($c['security']['allow_guest_user_id'], 'security.allow_guest_user_id'),
             scanErrorPolicy: $scanPolicy,
             urlMaxTtlMinutes: self::int($c['url']['max_ttl_minutes'], 'url.max_ttl_minutes', 1, 'a positive number of minutes'),
             storagePathGenerator: self::implementing($c['storage_path']['generator'], GeneratesStoragePath::class, 'storage_path.generator'),
@@ -208,7 +206,6 @@ final readonly class DocumentableConfig
             'security' => [
                 'scanner' => null,
                 'allowed_documentable_types' => null,
-                'allow_guest_user_id' => false,
                 'scan_error_policy' => 'reject',
             ],
             'verification' => ['sync_hash_max_bytes' => 50 * 1024 * 1024, 'connection' => null, 'queue' => null],

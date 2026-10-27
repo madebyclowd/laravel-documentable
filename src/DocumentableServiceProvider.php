@@ -7,7 +7,7 @@ namespace MadeByClowd\Documentable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Console\AboutCommand;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
@@ -27,9 +27,10 @@ use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Defaults\DefaultStoragePathGenerator;
+use MadeByClowd\Documentable\Defaults\GateDocumentAuthorizer;
 use MadeByClowd\Documentable\Defaults\HashOnlyDedupScope;
 use MadeByClowd\Documentable\Defaults\NullFileScanner;
-use MadeByClowd\Documentable\Defaults\PermissiveDocumentAuthorizer;
+use MadeByClowd\Documentable\Exceptions\InsecureConfiguration;
 use MadeByClowd\Documentable\Models\DocumentType;
 
 class DocumentableServiceProvider extends ServiceProvider
@@ -48,7 +49,7 @@ class DocumentableServiceProvider extends ServiceProvider
 
         $this->app->bind(
             AuthorizesDocumentAccess::class,
-            fn ($app) => $app->make(config('documentable.authorization.resolver') ?? PermissiveDocumentAuthorizer::class)
+            fn ($app) => $app->make(config('documentable.authorization.resolver') ?? GateDocumentAuthorizer::class)
         );
 
         $this->app->bind(
@@ -73,25 +74,24 @@ class DocumentableServiceProvider extends ServiceProvider
     public function boot(): void
     {
         // Resolve once so an invalid value fails the boot with the key and the fix, not the first upload.
-        $this->app->make(DocumentableConfig::class);
+        $config = $this->app->make(DocumentableConfig::class);
 
         if (config('documentable.load_migrations', true) || $this->app->runningUnitTests()) {
             $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         }
 
-        if (config('documentable.load_routes', true)) {
+        if ($config->loadRoutes) {
+            $this->failWithoutAuthorizerInProduction($config);
             $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
         }
 
         $this->registerAboutSection();
 
-        $this->app->booted(function () {
-            $this->warnAboutInsecureProductionSetup();
-
-            $limiterName = config('documentable.throttle', 'documents');
-
-            if (! RateLimiter::limiter($limiterName)) {
-                RateLimiter::for($limiterName, fn ($request) => Limit::none());
+        $this->app->booted(function () use ($config) {
+            if (! RateLimiter::limiter($config->throttle)) {
+                RateLimiter::for($config->throttle, fn (Request $request) => Limit::perMinute(60)->by(
+                    (string) ($request->user()?->getAuthIdentifier() ?? $request->ip())
+                ));
             }
         });
 
@@ -132,43 +132,28 @@ class DocumentableServiceProvider extends ServiceProvider
     }
 
     /**
-     * Production with the package routes mounted and the allow-everything authorizer means any caller can
-     * upload, view and delete. A patch release must not fail boot over it, so it is a warning and an
-     * `about` row, and the secure default (deny-all, boot failure) is left to the next major.
+     * Without a configured authorizer the Gate-backed default denies everything the app has not defined, which
+     * is safe but is also what an app that forgot the key looks like. Production must name its authorizer, so a
+     * deploy that skipped it fails at boot instead of serving a surface nobody chose.
      */
-    protected function isInsecureProductionSetup(): bool
+    protected function failWithoutAuthorizerInProduction(DocumentableConfig $config): void
     {
-        if (! $this->app->isProduction() || ! config('documentable.load_routes', true)) {
-            return false;
+        if ($this->app->isProduction() && $config->authorizerResolver === null) {
+            throw InsecureConfiguration::noAuthorizer();
         }
-
-        $resolver = config('documentable.authorization.resolver') ?? PermissiveDocumentAuthorizer::class;
-
-        return is_a($resolver, PermissiveDocumentAuthorizer::class, true);
-    }
-
-    protected function warnAboutInsecureProductionSetup(): void
-    {
-        if (! $this->isInsecureProductionSetup()) {
-            return;
-        }
-
-        Log::warning('Documentable is mounted with the permissive authorizer in production, so every caller can upload, view and delete documents. Set documentable.authorization.resolver to your own AuthorizesDocumentAccess implementation (php artisan make:document-authorizer).');
     }
 
     protected function registerAboutSection(): void
     {
         AboutCommand::add('Documentable', fn () => [
-            'Authorizer' => config('documentable.authorization.resolver') ?? PermissiveDocumentAuthorizer::class,
+            'Authorizer' => config('documentable.authorization.resolver') ?? GateDocumentAuthorizer::class,
             'Routes' => config('documentable.load_routes', true) ? 'mounted' : 'not mounted',
             'Middleware' => implode(', ', (array) config('documentable.middleware', ['api'])),
             'Throttle' => (string) config('documentable.throttle', 'documents'),
             'Disk' => $this->app->make(DocumentableConfig::class)->disk,
             'Etag strategy' => $this->app->make(DocumentableConfig::class)->etagStrategy,
             'Reaper' => $this->app->make(DocumentableConfig::class)->reaperFrequency,
-            'Guest user_id' => config('documentable.security.allow_guest_user_id', false) ? 'allowed' : 'ignored',
             'Document types' => $this->documentTypeSummary(),
-            'Insecure in production' => $this->isInsecureProductionSetup() ? 'yes' : 'no',
         ]);
     }
 

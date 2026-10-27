@@ -139,24 +139,6 @@ parameters:
 			path: src/Console/Commands/ListDocumentTypesCommand.php
 
 		-
-			message: '#^Binary operation "\." between ''Documentable/'' and array\|bool\|float\|int\|string\|null results in an error\.$#'
-			identifier: binaryOp.invalid
-			count: 1
-			path: src/Console/Commands/MakeAuthorizerCommand.php
-
-		-
-			message: '#^Parameter \#1 \$name of method MadeByClowd\\Documentable\\Console\\Commands\\MakeAuthorizerCommand\:\:stub\(\) expects string, array\|bool\|float\|int\|string\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Console/Commands/MakeAuthorizerCommand.php
-
-		-
-			message: '#^Part \$name \(array\|bool\|float\|int\|string\|null\) of encapsed string cannot be cast to string\.$#'
-			identifier: encapsedStringPart.nonString
-			count: 1
-			path: src/Console/Commands/MakeAuthorizerCommand.php
-
-		-
 			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
 			identifier: method.notFound
 			count: 1

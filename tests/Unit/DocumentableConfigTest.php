@@ -33,7 +33,6 @@ class DocumentableConfigTest extends TestCase
         $this->assertSame('server-authoritative', $config->etagStrategy);
         $this->assertSame('hourly', $config->reaperFrequency);
         $this->assertSame('reject', $config->scanErrorPolicy);
-        $this->assertFalse($config->allowGuestUserId);
         $this->assertNull($config->authorizerResolver);
     }
 
@@ -54,6 +53,14 @@ class DocumentableConfigTest extends TestCase
         $this->assertSame('client', $config->etagStrategy);
         $this->assertSame(10 * 1024 * 1024, $config->multipartThresholdBytes);
         $this->assertSame(24, $config->sessionTtlHours);
+    }
+
+    public function test_the_removed_guest_user_id_key_in_an_old_published_config_is_ignored(): void
+    {
+        $this->assertEquals(
+            DocumentableConfig::fromArray([], self::DISKS),
+            DocumentableConfig::fromArray(['security' => ['allow_guest_user_id' => true]], self::DISKS),
+        );
     }
 
     public function test_an_unknown_top_level_key_is_ignored(): void

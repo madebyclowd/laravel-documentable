@@ -1,11 +1,16 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Auth\User;
 use Illuminate\Support\Facades\Storage;
+use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\DocumentableServiceProvider;
+use MadeByClowd\Documentable\Tests\Fixtures\AllowAllAuthorizer;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 
@@ -73,6 +78,10 @@ abstract class TestCase extends OrchestraTestCase
         });
 
         $app['config']->set('documentable.load_migrations', true);
+
+        // The package denies everything until an app defines its abilities, which would make every test that
+        // is not about authorization fail. Tests about the default clear this key.
+        $app['config']->set('documentable.authorization.resolver', AllowAllAuthorizer::class);
     }
 
     /**
@@ -100,5 +109,23 @@ abstract class TestCase extends OrchestraTestCase
         if (! method_exists(Storage::disk($disk), 'buildTemporaryUploadUrlsUsing')) {
             $this->markTestSkipped('Storage::fake() cannot fake temporaryUploadUrl() before Laravel 12 (buildTemporaryUploadUrlsUsing() was added later); the real S3 driver always supports this in production.');
         }
+    }
+
+    /**
+     * Replaces the authorizer the controllers resolve for the rest of the test.
+     */
+    protected function useAuthorizer(AuthorizesDocumentAccess $authorizer): AuthorizesDocumentAccess
+    {
+        $this->app->instance(AuthorizesDocumentAccess::class, $authorizer);
+
+        return $authorizer;
+    }
+
+    /**
+     * Authenticates the next requests as a user with this id, whatever guard the route uses.
+     */
+    protected function signIn(string|int $id = 1): static
+    {
+        return $this->actingAs((new User)->forceFill(['id' => $id]));
     }
 }
