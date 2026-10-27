@@ -34,14 +34,12 @@ final class UrlSigner
             throw new DocumentNotReady($document->id, $document->status);
         }
 
-        $filename = self::sanitizeHeaderFilename($document->client_filename);
-
         try {
             $url = Storage::disk($storageFile->disk)->temporaryUrl(
                 $storageFile->path,
                 $expiration,
                 [
-                    'ResponseContentDisposition' => $disposition.'; filename="'.$filename.'"',
+                    'ResponseContentDisposition' => self::contentDisposition($disposition, $document->client_filename),
                 ]
             );
         } catch (RuntimeException $e) {
@@ -54,12 +52,34 @@ final class UrlSigner
     }
 
     /**
-     * Strips quotes and control characters, the header-injection primitives in a `Content-Disposition`
-     * filename. Pure and static so a consumer building their own download endpoint can reuse it.
+     * The `Content-Disposition` value for a download (RFC 6266): a plain ASCII `filename` every client
+     * understands, plus `filename*` (RFC 5987, UTF-8, percent-encoded) when the real name has anything else, so a
+     * browser saves "résumé.pdf" as written.
+     */
+    public static function contentDisposition(string $disposition, string $filename): string
+    {
+        $ascii = self::sanitizeHeaderFilename($filename);
+        $value = $disposition.'; filename="'.($ascii === '' ? 'download' : $ascii).'"';
+
+        $clean = (string) preg_replace('/[\x00-\x1F\x7F"]/', '', $filename);
+
+        if ($clean !== '' && ! mb_check_encoding($clean, 'ASCII')) {
+            $value .= "; filename*=UTF-8''".rawurlencode($clean);
+        }
+
+        return $value;
+    }
+
+    /**
+     * The ASCII-only form of a name that is safe inside a quoted header value: quotes and control characters are
+     * dropped (the header-injection primitives), a backslash or any non-ASCII character becomes `_`. Pure and
+     * static so a consumer building their own download endpoint can reuse it.
      */
     public static function sanitizeHeaderFilename(string $filename): string
     {
+        $stripped = preg_replace('/[\x00-\x1F\x7F"]/', '', $filename);
+
         // A failed match yields an empty name rather than an unsanitized one.
-        return preg_replace('/[\x00-\x1F\x7F"]/', '', $filename) ?? '';
+        return $stripped === null ? '' : (string) preg_replace('/[^\x20-\x7E]|\\\\/u', '_', $stripped);
     }
 }

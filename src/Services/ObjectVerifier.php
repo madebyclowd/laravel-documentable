@@ -55,7 +55,7 @@ final class ObjectVerifier
     {
         $this->assertSize($sizeBytes, $type);
 
-        $extension = self::extensionOf($filename);
+        $extension = self::extensionOf(FilenameNormalizer::normalize($filename));
         $this->assertExtension($type, $extension);
 
         $mime = $this->mimeOf($head);
@@ -71,15 +71,13 @@ final class ObjectVerifier
     }
 
     /**
-     * The lowercase extension after the last dot, or an empty string for a name with none or a name that is
-     * only a dot-prefixed word (`.dwg` is a hidden file, not a drawing).
+     * The lowercase extension after the last dot of a normalized name, or an empty string for a name with none.
      */
-    private static function extensionOf(string $filename): string
+    private static function extensionOf(string $normalizedName): string
     {
-        $name = basename(str_replace('\\', '/', $filename));
-        $dot = strrpos($name, '.');
+        $dot = strrpos($normalizedName, '.');
 
-        return $dot === false || $dot === 0 ? '' : strtolower(substr($name, $dot + 1));
+        return $dot === false ? '' : strtolower(substr($normalizedName, $dot + 1));
     }
 
     private function assertSize(int $sizeBytes, DocumentType $type): void

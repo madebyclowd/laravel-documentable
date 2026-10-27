@@ -178,10 +178,12 @@ final class DocumentAttacher
         ?string $documentGroupId,
         DocumentStatus $status
     ): Document {
+        $normalizedName = FilenameNormalizer::normalize($clientFilename);
+
         $metadata = array_merge([
             'size' => $storageFile->size_bytes,
             'mime_type' => $storageFile->mime_type,
-        ], $metadata);
+        ], $normalizedName === $clientFilename ? [] : ['original_filename' => $clientFilename], $metadata);
 
         $version = 1;
         $groupId = $documentGroupId;
@@ -221,7 +223,7 @@ final class DocumentAttacher
             'document_group_id' => $groupId,
             'documentable_type' => $documentable->getMorphClass(),
             'documentable_id' => $documentable->getKey(),
-            'client_filename' => $clientFilename,
+            'client_filename' => $normalizedName,
             'metadata' => $metadata,
             'version' => $version,
             'status' => $status,
