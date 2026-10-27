@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Documents;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -49,7 +50,8 @@ class DedupUniquenessTest extends TestCase
 
         $this->expectException(UniqueConstraintViolationException::class);
 
-        $this->storageFile('hash-1', 'test_disk');
+        // A savepoint, because PostgreSQL aborts the whole transaction on a violation.
+        DB::transaction(fn () => $this->storageFile('hash-1', 'test_disk'));
     }
 
     public function test_the_same_hash_on_another_disk_is_allowed(): void

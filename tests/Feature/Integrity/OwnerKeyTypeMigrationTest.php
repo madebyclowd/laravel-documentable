@@ -60,7 +60,11 @@ class OwnerKeyTypeMigrationTest extends TestCase
 
         $this->expectException(UniqueConstraintViolationException::class);
 
-        $this->latestDocument($type, $owner, marker: $type->id);
+        // PostgreSQL aborts the whole transaction on a violation, so it needs a savepoint. MySQL's ALTER TABLE
+        // already committed the test's transaction, so a savepoint would not exist there.
+        DB::connection()->getDriverName() === 'pgsql'
+            ? DB::transaction(fn () => $this->latestDocument($type, $owner, marker: $type->id))
+            : $this->latestDocument($type, $owner, marker: $type->id);
     }
 
     public function test_a_uuid_key_type_converts_the_column(): void

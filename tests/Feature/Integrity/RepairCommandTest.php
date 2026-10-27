@@ -6,7 +6,6 @@ namespace MadeByClowd\Documentable\Tests\Feature\Integrity;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -151,9 +150,7 @@ class RepairCommandTest extends TestCase
     public function test_a_problem_it_cannot_fix_keeps_the_exit_code_failing(): void
     {
         $document = $this->latestDocument($this->singleSlotType(), $this->owner());
-        Schema::disableForeignKeyConstraints();
-        $document->storageFile->delete();
-        Schema::enableForeignKeyConstraints();
+        $this->orphanTheStorageFileOf($document);
 
         $this->artisan('documents:repair', ['--apply' => true])
             ->expectsOutputToContain('cannot be repaired automatically')

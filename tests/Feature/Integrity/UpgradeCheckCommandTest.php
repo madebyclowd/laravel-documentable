@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Tests\Feature\Integrity;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Models\Document;
@@ -104,9 +103,7 @@ class UpgradeCheckCommandTest extends TestCase
         $type = $this->singleSlotType();
         $document = $this->latestDocument($type, $this->owner());
 
-        Schema::disableForeignKeyConstraints();
-        $document->storageFile->delete();
-        Schema::enableForeignKeyConstraints();
+        $this->orphanTheStorageFileOf($document);
 
         $this->artisan('documents:upgrade-check')
             ->expectsOutputToContain($document->id)

@@ -6,6 +6,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Documents;
 
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Exceptions\SlotConflict;
 use MadeByClowd\Documentable\Models\Document;
@@ -60,7 +61,8 @@ class SingleSlotMarkerTest extends TestCase
 
         $this->expectException(UniqueConstraintViolationException::class);
 
-        Document::create([
+        // A savepoint, because PostgreSQL aborts the whole transaction on a violation.
+        DB::transaction(fn () => Document::create([
             'storage_file_id' => $this->storageFile()->id,
             'document_type_id' => $type->id,
             'document_group_id' => (string) Str::uuid(),
@@ -69,7 +71,7 @@ class SingleSlotMarkerTest extends TestCase
             'client_filename' => 'b.pdf',
             'is_latest' => true,
             'latest_marker' => $type->id,
-        ]);
+        ]));
     }
 
     public function test_a_lost_race_is_retried_as_a_new_version_of_the_winner(): void

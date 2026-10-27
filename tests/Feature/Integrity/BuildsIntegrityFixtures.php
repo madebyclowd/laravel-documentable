@@ -26,6 +26,21 @@ trait BuildsIntegrityFixtures
         Schema::table('storage_files', fn ($table) => $table->dropUnique('storage_files_hash_disk_unique'));
     }
 
+    /**
+     * Leaves `$document` pointing at a stored file that no longer exists. Engines that enforce the foreign key
+     * (MySQL, PostgreSQL) cannot reach that state at all, so there the test has nothing to check.
+     */
+    protected function orphanTheStorageFileOf(Document $document): void
+    {
+        Schema::disableForeignKeyConstraints();
+        $document->storageFile->delete();
+        Schema::enableForeignKeyConstraints();
+
+        if (! Document::withTrashed()->whereKey($document->id)->exists()) {
+            $this->markTestSkipped('This database enforces the documents.storage_file_id foreign key, so a document cannot outlive its stored file.');
+        }
+    }
+
     protected function singleSlotType(string $code = 'PASSPORT', bool $versioned = false): DocumentType
     {
         return DocumentType::create(['code' => $code, 'name' => $code, 'max_size_mb' => 5, 'disk' => 'test_disk', 'path_prefix' => strtolower($code), 'allows_multiple' => false, 'requires_versioning' => $versioned]);
