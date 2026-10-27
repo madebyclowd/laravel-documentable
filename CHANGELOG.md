@@ -7,6 +7,64 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.4] - 2026-10-27
+
+### Changed
+- `client_filename` is now normalized when the document is written: the directory part, control characters,
+  leading dots and trailing dots or spaces are removed, invalid UTF-8 is dropped and the length is capped at 255
+  bytes keeping the extension. The name the client sent is kept in `metadata.original_filename` when it differs, and
+  the extension rule judges the normalized name. Download URLs now send an RFC 6266 `Content-Disposition`: an ASCII
+  `filename` for old clients plus `filename*` with the real UTF-8 name, so a browser saves "résumé.pdf" as written
+  instead of an underscore. `UrlSigner::sanitizeHeaderFilename()` also replaces a backslash with `_`, and a name that
+  sanitizes to nothing is sent as `download` instead of an empty `filename=""`.
+- Large uploads are no longer hashed inside the request. An object above `verification.sync_hash_max_bytes`
+  (default 50 MiB) is checked for size and content type from its first bytes, its document is created with the new
+  `processing` status, and a queued job (`VerifyUploadedObject`) streams the hash, applies the client's hash, the
+  type rules and the scanner, then commits the document or rejects it and removes the object. `processing` and
+  `rejected` documents have no download URL (`DocumentNotReady`, HTTP 409) and are never a dedup target, and a
+  rejected replacement gives the slot back to the previous document. New events: `DocumentProcessed` and
+  `DocumentRejected`. Handle the `processing` status in your UI, and run a queue worker; with the `sync` queue
+  driver the job runs inside the request. A scanner outage is retried rather than treated as a verdict.
+
+### Removed
+- `multipart.use_native_checksum` and `MultipartUploadDriver::retrieveChecksum()` are removed. An S3 multipart
+  checksum is a checksum of the part checksums, so it never equalled a file's SHA-256 and turning the option on
+  made a correct `expected_hash` delete the upload. The server now always verifies the object itself, streaming
+  it through the hash in constant memory (about four times faster than the previous 8 KiB read loop on a 1 GiB
+  object). A custom multipart driver must drop `retrieveChecksum()`, and a published config should drop the key.
+
+### Security
+- Authorization is now deny by default. With no authorizer configured the package asks Laravel's Gate
+  (`Defaults\GateDocumentAuthorizer`) for `documents.initiate-upload`, `documents.finalize`, `documents.attach`,
+  `documents.view` and `documents.delete`, and denies every ability your app has not defined; where no Gate ability
+  exists it asks a registered policy for `initiateUpload`, `finalize`, `attach`, `view` or `delete`, and a Document
+  policy's `viewMany` answers a whole listing page at once. `PermissiveDocumentAuthorizer` is removed.
+  
+  `AuthorizesDocumentAccess::canUpload(?Authenticatable, DocumentType, ?Model)`, whose null owner meant three
+  different things, is replaced by `canInitiateUpload($user, $type)`, `canFinalize($user, $session)` (asked for every
+  follow-up on an upload session, so an app can finally refuse a finalize), `canAttach($user, $sessionOrDocument,
+  $owner)` and `canViewMany($user, $documents)`, next to `canView` and `canDelete`.
+  
+  Booting in production with the routes mounted and no `documentable.authorization.resolver` now throws
+  `InsecureConfiguration`; local, testing and `load_routes = false` boot as before. `documents:make-authorizer
+  --style=gates|class` scaffolds either style and `documents:install` scaffolds one by default (`--authorizer`
+  skips the prompt). The `documents` rate limiter defaults to 60 requests a minute per user or IP instead of
+  unlimited. A `user_id` sent by the client is never used as an upload owner, and `security.allow_guest_user_id` is
+  removed: multipart uploads require an authenticated user.
+  
+  `GET /documents` pages in SQL in a stable order and asks `canViewMany()` once for the page, so `meta.total`
+  counts the owner's documents rather than only those the caller may view, and a page can hold fewer than
+  `per_page` documents when some are hidden.
+
+### Added
+- A document type can now limit an upload by extension (`allowed_extensions`, a list of lowercase extensions) and
+  accept files fileinfo can only call `application/octet-stream` or `text/plain` when the extension is on that list
+  (`trust_extension_for_generic_mime`; a specific MIME type that is not allowed is never excused). Content validators
+  registered per type under `documentable.validators` read the file's first bytes: `DwgValidator`, `DxfValidator`,
+  `ZipValidator` (docx, xlsx, pptx), `OleDocumentValidator`, `SevenZipValidator`, `RarValidator` and
+  `GzipValidator`, or your own `ValidatesUploadedFile`. The rules apply to every transport, including a large upload
+  before it is queued. `GET /documents/types` returns the two new fields. Run the new migration.
+
 ## [3.0.0-alpha.3] - 2026-10-27
 
 ### Changed
@@ -171,3 +229,5 @@ Initial release.
 [3.0.0-alpha.2]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.1...v3.0.0-alpha.2
 
 [3.0.0-alpha.3]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.2...v3.0.0-alpha.3
+
+[3.0.0-alpha.4]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.3...v3.0.0-alpha.4
