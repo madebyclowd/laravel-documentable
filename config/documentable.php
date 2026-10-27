@@ -120,6 +120,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Verification
+    |--------------------------------------------------------------------------
+    |
+    | Every upload is checked before it can be served: its size, its real
+    | content type, the client's hash if one was declared, and the scanner. The
+    | hash needs the whole object read once.
+    |
+    | sync_hash_max_bytes: an object up to this size is verified inside the
+    | request. A larger one is only checked for size and content type from its
+    | first bytes, its document is created as `processing`, and a queued job
+    | hashes and scans it, then marks it `committed` or `rejected`. A
+    | `processing` document cannot be downloaded or deduplicated against. Needs
+    | a queue worker; with the `sync` queue driver the job runs in the request.
+    | Reading is fast (a 1 GiB object hashed in about a second from storage on
+    | the same network), so the limit protects the request time, not the CPU:
+    | 50 MiB leaves a wide margin at 10 MB/s. Set 0 to always verify in a job.
+    |
+    | connection / queue: where the job runs. null uses the application default.
+    |
+    */
+    'verification' => [
+        'sync_hash_max_bytes' => 50 * 1024 * 1024,
+        'connection' => null,
+        'queue' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Lifecycle / Orphan Cleanup
     |--------------------------------------------------------------------------
     |

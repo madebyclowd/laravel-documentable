@@ -21,6 +21,9 @@ use MadeByClowd\Documentable\Repositories\StorageFileRepository;
  */
 final class StoredObjectRegistrar
 {
+    /** The `file_hash` of a stored file whose bytes have not been hashed yet. A sha256 can never start with it. */
+    public const PENDING_KEY_PREFIX = 'pending:';
+
     public function __construct(
         private readonly StorageFileRepository $storageFileRepository,
         private readonly ResolvesDedupScope $dedupScopeResolver,
@@ -96,6 +99,10 @@ final class StoredObjectRegistrar
      */
     public function registerSessionObject(UploadSession $session, Model $owner): StorageFile
     {
+        if (! $session->isVerified()) {
+            return $this->registerUnverifiedObject($session);
+        }
+
         $dedupKey = $this->dedupScopeResolver->scopeKey((string) $session->object_hash, $owner);
         $existing = $this->storageFileRepository->findByHash($dedupKey, $session->disk, lock: true);
 
@@ -114,5 +121,20 @@ final class StoredObjectRegistrar
         }
 
         return $storageFile;
+    }
+
+    /**
+     * An object whose hash is not known yet gets a stored file under a key no real hash can equal, so nothing
+     * deduplicates against it. The verification job renames the key to the real one, or merges the document onto
+     * an existing stored file when the bytes turn out to be known.
+     */
+    private function registerUnverifiedObject(UploadSession $session): StorageFile
+    {
+        return $this->storageFileRepository->createOrFirst(self::PENDING_KEY_PREFIX.$session->id, $session->disk, [
+            'path' => $session->path,
+            'mime_type' => (string) $session->object_mime,
+            'size_bytes' => (int) $session->object_size,
+            'metadata' => [],
+        ]);
     }
 }

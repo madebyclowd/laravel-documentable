@@ -7,7 +7,9 @@ namespace MadeByClowd\Documentable\Services;
 use DateTimeInterface;
 use Illuminate\Support\Facades\Storage;
 use LogicException;
+use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
+use MadeByClowd\Documentable\Exceptions\DocumentNotReady;
 use MadeByClowd\Documentable\Models\Document;
 use RuntimeException;
 
@@ -21,11 +23,16 @@ final class UrlSigner
     public function __construct(private readonly AccessLogger $accessLogger) {}
 
     /**
+     * @throws DocumentNotReady when the document is still being verified, or was refused
      * @throws DiskDoesNotSupportTemporaryUrlsException when the document's disk cannot sign temporary URLs
      */
     public function sign(Document $document, DateTimeInterface $expiration, string $disposition = 'inline'): string
     {
         $storageFile = $document->storageFile ?? throw new LogicException("Document {$document->id} has no storage file to sign a URL for.");
+
+        if ($document->status !== DocumentStatus::Committed) {
+            throw new DocumentNotReady($document->id, $document->status);
+        }
 
         $filename = self::sanitizeHeaderFilename($document->client_filename);
 

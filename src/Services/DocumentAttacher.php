@@ -10,11 +10,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
+use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Exceptions\IllegalUploadSessionTransition;
 use MadeByClowd\Documentable\Exceptions\SlotConflict;
+use MadeByClowd\Documentable\Jobs\VerifyUploadedObject;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -38,6 +41,7 @@ final class DocumentAttacher
         private readonly StoredObjectRegistrar $registrar,
         private readonly UploadFinalizer $finalizer,
         private readonly ActorResolver $actor,
+        private readonly DocumentableConfig $config,
     ) {}
 
     /**
@@ -76,14 +80,24 @@ final class DocumentAttacher
                 $locked->forceFill(['storage_file_id' => $storageFile->id])->save();
             }
 
-            return $this->attachStorageFile(
+            $document = $this->attachStorageFile(
                 $storageFile,
                 $type,
                 $owner,
                 $locked->client_filename,
                 $options->metadata,
-                $options->documentGroupId
+                $options->documentGroupId,
+                $locked->isVerified() ? DocumentStatus::Committed : DocumentStatus::Processing
             );
+
+            if ($document->status === DocumentStatus::Processing) {
+                VerifyUploadedObject::dispatch($document->id)
+                    ->onConnection($this->config->verificationConnection)
+                    ->onQueue($this->config->verificationQueue)
+                    ->afterCommit();
+            }
+
+            return $document;
         });
     }
 
@@ -136,9 +150,10 @@ final class DocumentAttacher
         Model $documentable,
         string $clientFilename,
         array $metadata = [],
-        ?string $documentGroupId = null
+        ?string $documentGroupId = null,
+        DocumentStatus $status = DocumentStatus::Committed
     ): Document {
-        $place = fn () => DB::transaction(fn () => $this->placeInSlot($storageFile, $type, $documentable, $clientFilename, $metadata, $documentGroupId));
+        $place = fn () => DB::transaction(fn () => $this->placeInSlot($storageFile, $type, $documentable, $clientFilename, $metadata, $documentGroupId, $status));
 
         try {
             return $place();
@@ -160,7 +175,8 @@ final class DocumentAttacher
         Model $documentable,
         string $clientFilename,
         array $metadata,
-        ?string $documentGroupId
+        ?string $documentGroupId,
+        DocumentStatus $status
     ): Document {
         $metadata = array_merge([
             'size' => $storageFile->size_bytes,
@@ -208,6 +224,7 @@ final class DocumentAttacher
             'client_filename' => $clientFilename,
             'metadata' => $metadata,
             'version' => $version,
+            'status' => $status,
             'is_latest' => true,
             'latest_marker' => $type->allows_multiple ? $groupId : $type->id,
             'created_by' => $this->actor->idForAudit(),

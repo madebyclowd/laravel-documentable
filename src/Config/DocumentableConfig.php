@@ -53,6 +53,9 @@ final readonly class DocumentableConfig
         public array $multipartDrivers,
         public string $reaperFrequency,
         public int $storageFileGraceHours,
+        public int $syncHashMaxBytes,
+        public ?string $verificationConnection,
+        public ?string $verificationQueue,
         public ?string $authorizerResolver,
         public ?string $dedupScopeResolver,
         public ?string $scanner,
@@ -147,6 +150,9 @@ final readonly class DocumentableConfig
             multipartDrivers: $drivers,
             reaperFrequency: self::frequency($c['lifecycle']['reaper_frequency']),
             storageFileGraceHours: self::int($c['lifecycle']['storage_file_grace_hours'], 'lifecycle.storage_file_grace_hours', 0, 'zero or more hours'),
+            syncHashMaxBytes: self::int($c['verification']['sync_hash_max_bytes'], 'verification.sync_hash_max_bytes', 0, 'zero or more bytes'),
+            verificationConnection: self::nullableString($c['verification']['connection'], 'verification.connection'),
+            verificationQueue: self::nullableString($c['verification']['queue'], 'verification.queue'),
             authorizerResolver: self::implementing($c['authorization']['resolver'], AuthorizesDocumentAccess::class, 'authorization.resolver'),
             dedupScopeResolver: self::implementing($c['dedup']['scope_resolver'], ResolvesDedupScope::class, 'dedup.scope_resolver'),
             scanner: self::implementing($c['security']['scanner'], ScansUploadedFile::class, 'security.scanner'),
@@ -197,6 +203,7 @@ final readonly class DocumentableConfig
                 'allow_guest_user_id' => false,
                 'scan_error_policy' => 'reject',
             ],
+            'verification' => ['sync_hash_max_bytes' => 50 * 1024 * 1024, 'connection' => null, 'queue' => null],
             'url' => ['max_ttl_minutes' => 1440],
             'storage_path' => ['generator' => null],
             'disks' => [],
@@ -233,7 +240,7 @@ final readonly class DocumentableConfig
 
     private static function isFixedSection(string $key): bool
     {
-        return in_array($key, ['multipart', 'lifecycle', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit'], true);
+        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit'], true);
     }
 
     /**
@@ -255,6 +262,15 @@ final readonly class DocumentableConfig
         if (! in_array($disk, $knownDisks, true)) {
             throw new InvalidDocumentableConfig($key, "names the disk '{$disk}', which is not defined", 'Add it to config/filesystems.php or point the key at an existing disk');
         }
+    }
+
+    private static function nullableString(mixed $value, string $key): ?string
+    {
+        if ($value !== null && (! is_string($value) || $value === '')) {
+            throw new InvalidDocumentableConfig($key, 'must be null or a non-empty string', 'Use null for the application default, or name a queue connection or queue');
+        }
+
+        return $value;
     }
 
     private static function string(mixed $value, string $key, string $fix): string

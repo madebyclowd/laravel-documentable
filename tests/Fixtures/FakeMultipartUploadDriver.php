@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Fixtures;
 
 use Illuminate\Support\Facades\Storage;

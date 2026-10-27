@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\ScanResult;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
+use MadeByClowd\Documentable\Exceptions\ScannerUnavailable;
 use MadeByClowd\Documentable\Models\DocumentType;
 use RuntimeException;
 
@@ -91,11 +92,11 @@ final class ObjectVerifier
             return;
         }
 
-        throw ValidationException::withMessages([
-            'file' => $result->isInfected()
-                ? 'Uploaded file failed a security scan.'
-                : 'Uploaded file could not be scanned. Try again later.',
-        ]);
+        if ($result->isInfected()) {
+            throw ValidationException::withMessages(['file' => 'Uploaded file failed a security scan.']);
+        }
+
+        throw ScannerUnavailable::withMessages(['file' => 'Uploaded file could not be scanned. Try again later.']);
     }
 
     /**
@@ -108,11 +109,7 @@ final class ObjectVerifier
     public function hashAndDetectMime(string $disk, string $path): array
     {
         return $this->withStream($disk, $path, function ($stream) {
-            $head = stream_get_contents($stream, self::HEAD_BYTES);
-
-            if ($head === false) {
-                throw new RuntimeException('Could not read the stored object.');
-            }
+            $head = (string) stream_get_contents($stream, self::HEAD_BYTES);
 
             $context = hash_init('sha256');
             hash_update($context, $head);
@@ -135,6 +132,14 @@ final class ObjectVerifier
         return $this->withStream($disk, $path, function ($stream) use ($bytes) {
             return stream_get_contents($stream, $bytes) ?: '';
         });
+    }
+
+    /**
+     * The content type from the object's first bytes alone, so a large object costs one small read.
+     */
+    public function detectMime(string $disk, string $path): string
+    {
+        return $this->sniffMime($this->head($disk, $path));
     }
 
     /**

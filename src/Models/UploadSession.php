@@ -84,6 +84,15 @@ class UploadSession extends Model
     }
 
     /**
+     * Whether the stored object was hashed and fully checked. An object above the synchronous limit is
+     * `uploaded` first and verified later by a job, so its hash is not known yet.
+     */
+    public function isVerified(): bool
+    {
+        return $this->object_hash !== null;
+    }
+
+    /**
      * @return BelongsTo<DocumentType, $this>
      */
     public function documentType(): BelongsTo
