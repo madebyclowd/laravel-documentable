@@ -18,7 +18,9 @@ use MadeByClowd\Documentable\Console\Commands\ConfigureBucketLifecycleCommand;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Console\Commands\ListDocumentTypesCommand;
 use MadeByClowd\Documentable\Console\Commands\MakeAuthorizerCommand;
+use MadeByClowd\Documentable\Console\Commands\RepairIntegrityCommand;
 use MadeByClowd\Documentable\Console\Commands\SyncDocumentTypesCommand;
+use MadeByClowd\Documentable\Console\Commands\UpgradeCheckCommand;
 use MadeByClowd\Documentable\Console\Commands\VerifyDocumentIntegrityCommand;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
@@ -113,8 +115,10 @@ class DocumentableServiceProvider extends ServiceProvider
                 ConfigureBucketLifecycleCommand::class,
                 InstallCommand::class,
                 MakeAuthorizerCommand::class,
+                RepairIntegrityCommand::class,
                 SyncDocumentTypesCommand::class,
                 ListDocumentTypesCommand::class,
+                UpgradeCheckCommand::class,
                 VerifyDocumentIntegrityCommand::class,
             ]);
 

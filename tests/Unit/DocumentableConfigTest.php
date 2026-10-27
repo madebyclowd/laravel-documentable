@@ -21,6 +21,7 @@ class DocumentableConfigTest extends TestCase
         $config = DocumentableConfig::fromArray([], self::DISKS);
 
         $this->assertSame('s3', $config->disk);
+        $this->assertSame('string', $config->keyType);
         $this->assertTrue($config->loadRoutes);
         $this->assertSame(['api'], $config->middleware);
         $this->assertSame('documents', $config->throttle);
@@ -71,6 +72,20 @@ class DocumentableConfigTest extends TestCase
         $this->assertSame(HashOnlyDedupScope::class, $config->dedupScopeResolver);
     }
 
+    #[DataProvider('keyTypes')]
+    public function test_every_supported_key_type_is_accepted(string $keyType): void
+    {
+        $this->assertSame($keyType, DocumentableConfig::fromArray(['key_type' => $keyType], self::DISKS)->keyType);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function keyTypes(): array
+    {
+        return ['int' => ['int'], 'uuid' => ['uuid'], 'ulid' => ['ulid'], 'string' => ['string']];
+    }
+
     public function test_the_object_is_immutable(): void
     {
         $this->assertTrue((new ReflectionClass(DocumentableConfig::class))->isReadOnly());
@@ -104,6 +119,7 @@ class DocumentableConfigTest extends TestCase
     public static function invalidInputs(): array
     {
         return [
+            'unknown key type' => [['key_type' => 'bigint'], 'key_type', 'int, uuid, ulid, string'],
             'unknown disk' => [['disk' => 'nope'], 'disk', 'config/filesystems.php'],
             'empty disk' => [['disk' => ''], 'disk', 'config/filesystems.php'],
             'unknown per-type disk' => [['types' => ['invoice' => ['name' => 'Invoice', 'disk' => 'nope']]], 'types.invoice.disk', 'config/filesystems.php'],

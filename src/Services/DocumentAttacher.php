@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Services;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
@@ -13,6 +14,7 @@ use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Exceptions\IllegalUploadSessionTransition;
+use MadeByClowd\Documentable\Exceptions\SlotConflict;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -120,7 +122,13 @@ final class DocumentAttacher
      * no longer forces is_latest = false, which is what made versioning silently
      * break for multi-document types before document_group_id existed.
      *
+     * The slot is guarded by a unique index on `latest_marker`, so two uploads racing for an empty slot cannot
+     * both win. The loser's insert is rejected, rolled back to its savepoint, and run once more: the second
+     * pass finds the winner and becomes its next version. Only a second collision is surfaced.
+     *
      * @param  array<string, mixed>  $metadata
+     *
+     * @throws SlotConflict
      */
     public function attachStorageFile(
         StorageFile $storageFile,
@@ -129,6 +137,30 @@ final class DocumentAttacher
         string $clientFilename,
         array $metadata = [],
         ?string $documentGroupId = null
+    ): Document {
+        $place = fn () => DB::transaction(fn () => $this->placeInSlot($storageFile, $type, $documentable, $clientFilename, $metadata, $documentGroupId));
+
+        try {
+            return $place();
+        } catch (UniqueConstraintViolationException) {
+            try {
+                return $place();
+            } catch (UniqueConstraintViolationException $e) {
+                throw new SlotConflict($type, $documentable, $e);
+            }
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    private function placeInSlot(
+        StorageFile $storageFile,
+        DocumentType $type,
+        Model $documentable,
+        string $clientFilename,
+        array $metadata,
+        ?string $documentGroupId
     ): Document {
         $metadata = array_merge([
             'size' => $storageFile->size_bytes,
@@ -144,7 +176,8 @@ final class DocumentAttacher
                 $documentable->getMorphClass(),
                 (string) $documentable->getKey(),
                 $type->id,
-                $groupId
+                $groupId,
+                lock: true
             );
 
             $version = $this->demoteAndResolveVersion($previousLatest, $type);
@@ -154,7 +187,8 @@ final class DocumentAttacher
             $previousLatest = $this->documentRepository->findLatest(
                 $documentable->getMorphClass(),
                 (string) $documentable->getKey(),
-                $type->id
+                $type->id,
+                lock: true
             );
 
             if ($previousLatest) {
@@ -175,7 +209,7 @@ final class DocumentAttacher
             'metadata' => $metadata,
             'version' => $version,
             'is_latest' => true,
-            'latest_marker' => $groupId,
+            'latest_marker' => $type->allows_multiple ? $groupId : $type->id,
             'created_by' => $this->actor->idForAudit(),
         ]);
 

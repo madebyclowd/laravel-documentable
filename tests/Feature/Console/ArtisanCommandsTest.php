@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Console;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
@@ -172,7 +173,7 @@ class ArtisanCommandsTest extends TestCase
 
     public function test_install_command_runs_end_to_end_without_error(): void
     {
-        $this->artisan('documents:install')
+        $this->artisan('documents:install', ['--key-type' => 'string'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
             ->expectsChoice(
                 "How does your app handle logging in users? This decides which security setup we\n".
@@ -229,7 +230,7 @@ class ArtisanCommandsTest extends TestCase
         // no-op. Testbench's config_path() is a shared, regenerable skeleton path.
         @unlink(config_path('documentable.php'));
 
-        $this->artisan('documents:install')
+        $this->artisan('documents:install', ['--key-type' => 'string'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
             ->expectsChoice(
                 "How does your app handle logging in users? This decides which security setup we\n".
@@ -339,6 +340,60 @@ class ArtisanCommandsTest extends TestCase
             ->assertExitCode(1);
     }
 
+    public function test_install_command_key_type_option_is_written_to_the_config_and_applied_to_the_running_app(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--key-type' => 'uuid'])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsConfirmation(
+                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                'document — fine for local development, not fine for production.',
+                'no'
+            )
+            ->assertExitCode(0);
+
+        $this->assertStringContainsString("'key_type' => 'uuid'", file_get_contents(config_path('documentable.php')));
+        $this->assertSame('uuid', $this->app->make(DocumentableConfig::class)->keyType);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_asks_for_the_key_type_when_interactive(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--shape' => 'separate-api', '--etag-strategy' => 'server-authoritative', '--types' => 'code-first'])
+            ->expectsChoice(
+                "What type is the primary key of the models that will own documents?\n".
+                "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+                "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+                "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+                '                use the column index, and PostgreSQL needs no casts.',
+                'ulid',
+                ['int', 'uuid', 'ulid', 'string']
+            )
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsConfirmation(
+                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                'document — fine for local development, not fine for production.',
+                'no'
+            )
+            ->assertExitCode(0);
+
+        $this->assertStringContainsString("'key_type' => 'ulid'", file_get_contents(config_path('documentable.php')));
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_invalid_key_type_option_fails_fast(): void
+    {
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--key-type' => 'bigint'])
+            ->assertExitCode(1);
+    }
+
     public function test_install_command_invalid_types_option_fails_fast(): void
     {
         $this->artisan('documents:install', [
@@ -361,7 +416,7 @@ class ArtisanCommandsTest extends TestCase
         $this->app->useAppPath($fakeAppPath);
 
         try {
-            $this->artisan('documents:install')
+            $this->artisan('documents:install', ['--key-type' => 'string'])
                 ->expectsConfirmation('Run the new database migrations now?', 'yes')
                 ->expectsChoice(
                     "How does your app handle logging in users? This decides which security setup we\n".

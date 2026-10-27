@@ -44,8 +44,11 @@ final class StoredObjectRegistrar
     }
 
     /**
-     * Get existing StorageFile by hash or create a new one. $pathProvider is
+     * Get the existing StorageFile for this hash and disk or create a new one. $pathProvider is
      * executed ONLY if the file needs to be stored/registered.
+     *
+     * Two uploads of identical bytes can both miss the lookup. The unique `(file_hash, disk)` index lets only one
+     * insert through; the other adopts the winner's stored file and deletes the copy it just wrote.
      *
      * @param  array<string, mixed>  $metadata
      */
@@ -58,23 +61,27 @@ final class StoredObjectRegistrar
         array $metadata = [],
         bool $scan = true
     ): StorageFile {
-        $storageFile = $this->storageFileRepository->findByHash($hash);
+        $existing = $this->storageFileRepository->findByHash($hash, $disk, lock: true);
 
-        if (! $storageFile) {
-            $path = $pathProvider();
+        if ($existing !== null) {
+            return $existing;
+        }
 
-            if ($scan) {
-                $this->deleteOnFailure($disk, $path, fn () => $this->verifier->assertScanClean($disk, $path));
-            }
+        $path = $pathProvider();
 
-            $storageFile = $this->storageFileRepository->create([
-                'file_hash' => $hash,
-                'disk' => $disk,
-                'path' => $path,
-                'mime_type' => $mimeType,
-                'size_bytes' => $sizeBytes,
-                'metadata' => $metadata,
-            ]);
+        if ($scan) {
+            $this->deleteOnFailure($disk, $path, fn () => $this->verifier->assertScanClean($disk, $path));
+        }
+
+        $storageFile = $this->storageFileRepository->createOrFirst($hash, $disk, [
+            'path' => $path,
+            'mime_type' => $mimeType,
+            'size_bytes' => $sizeBytes,
+            'metadata' => $metadata,
+        ]);
+
+        if ($storageFile->path !== $path) {
+            Storage::disk($disk)->delete($path);
         }
 
         return $storageFile;
@@ -90,7 +97,7 @@ final class StoredObjectRegistrar
     public function registerSessionObject(UploadSession $session, Model $owner): StorageFile
     {
         $dedupKey = $this->dedupScopeResolver->scopeKey((string) $session->object_hash, $owner);
-        $existing = $this->storageFileRepository->findByHash($dedupKey);
+        $existing = $this->storageFileRepository->findByHash($dedupKey, $session->disk, lock: true);
 
         $storageFile = $this->getOrCreateStorageFile(
             $dedupKey,
