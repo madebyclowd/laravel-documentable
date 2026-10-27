@@ -30,7 +30,6 @@ final class MultipartUploadService
         private readonly GeneratesStoragePath $pathGenerator,
         private readonly MultipartDriverResolver $drivers,
         private readonly UploadFinalizer $finalizer,
-        private readonly ObjectVerifier $verifier,
         private readonly Config $config,
     ) {}
 
@@ -109,9 +108,7 @@ final class MultipartUploadService
 
         $driver->complete($session->disk, $session->path, $uploadId, $parts);
 
-        $facts = $this->verifier->assembledObjectInfo($driver, $session->disk, $session->path);
-
-        return $this->finalizer->finalize($session, $facts, $expectedHash);
+        return $this->finalizer->finalize($session, null, $expectedHash);
     }
 
     private function assertOpenMultipart(UploadSession $session): void

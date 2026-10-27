@@ -113,10 +113,6 @@ return [
         'etag_strategy' => 'server-authoritative',
         'part_upload_url_ttl' => '+1 hour',
         'session_ttl_hours' => 24,
-        // Leave false. S3 multipart checksums are composite (a checksum of the part checksums), so
-        // the value this reads back never equals the file's SHA-256: an upload with an expected_hash
-        // is rejected, and one without stores a hash that breaks deduplication. Slated for removal.
-        'use_native_checksum' => false,
         'drivers' => [
             's3' => S3MultipartDriver::class,
         ],

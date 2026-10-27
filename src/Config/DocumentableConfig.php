@@ -50,7 +50,6 @@ final readonly class DocumentableConfig
         public string $etagStrategy,
         public string $partUploadUrlTtl,
         public int $sessionTtlHours,
-        public bool $useNativeChecksum,
         public array $multipartDrivers,
         public string $reaperFrequency,
         public int $storageFileGraceHours,
@@ -145,7 +144,6 @@ final readonly class DocumentableConfig
             etagStrategy: $etag,
             partUploadUrlTtl: $partTtl,
             sessionTtlHours: self::int($multipart['session_ttl_hours'], 'multipart.session_ttl_hours', 1, 'a positive number of hours'),
-            useNativeChecksum: self::bool($multipart['use_native_checksum'], 'multipart.use_native_checksum'),
             multipartDrivers: $drivers,
             reaperFrequency: self::frequency($c['lifecycle']['reaper_frequency']),
             storageFileGraceHours: self::int($c['lifecycle']['storage_file_grace_hours'], 'lifecycle.storage_file_grace_hours', 0, 'zero or more hours'),
@@ -185,7 +183,6 @@ final readonly class DocumentableConfig
                 'etag_strategy' => 'server-authoritative',
                 'part_upload_url_ttl' => '+1 hour',
                 'session_ttl_hours' => 24,
-                'use_native_checksum' => false,
                 'drivers' => ['s3' => S3MultipartDriver::class],
             ],
             'lifecycle' => [

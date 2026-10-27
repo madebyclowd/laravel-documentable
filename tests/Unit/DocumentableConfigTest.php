@@ -86,6 +86,13 @@ class DocumentableConfigTest extends TestCase
         return ['int' => ['int'], 'uuid' => ['uuid'], 'ulid' => ['ulid'], 'string' => ['string']];
     }
 
+    public function test_the_removed_native_checksum_setting_is_ignored_not_honoured(): void
+    {
+        $config = DocumentableConfig::fromArray(['multipart' => ['use_native_checksum' => true]], self::DISKS);
+
+        $this->assertFalse(property_exists($config, 'useNativeChecksum'));
+    }
+
     public function test_the_object_is_immutable(): void
     {
         $this->assertTrue((new ReflectionClass(DocumentableConfig::class))->isReadOnly());

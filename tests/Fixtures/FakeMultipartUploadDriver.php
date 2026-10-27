@@ -19,12 +19,6 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
     public static array $sessions = [];
 
     /**
-     * Test-controllable: null (default) simulates a provider that doesn't support
-     * native checksums, forcing DocumentService's full-stream-hash fallback.
-     */
-    public static ?string $fakeChecksum = null;
-
-    /**
      * When true, `create()` returns a 512 character upload id, the shape Cloudflare R2 produces (343
      * characters) and then some, so tests can prove the session table stores ids a varchar(255) cannot.
      */
@@ -89,11 +83,6 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
         unset(static::$sessions[$uploadId]);
     }
 
-    public function retrieveChecksum(string $disk, string $path): ?string
-    {
-        return static::$fakeChecksum;
-    }
-
     /**
      * Test helper simulating a client's presigned PUT of one part's bytes.
      */
@@ -109,7 +98,6 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
     public static function reset(): void
     {
         static::$sessions = [];
-        static::$fakeChecksum = null;
         static::$longIds = false;
         static::$abortErrors = [];
     }

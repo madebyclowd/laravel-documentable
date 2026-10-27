@@ -258,10 +258,9 @@ config:
   (`--verify` runs a live presigned-PUT smoke test afterward).
 
 Either way, integrity is verified independently via a server-computed sha256 compared against the
-client's declared hash — an ETag is never a real content checksum on any provider. Leave
-`multipart.use_native_checksum` false: an S3 multipart checksum is composite (a checksum of the part
-checksums), so it never equals the file's SHA-256 and the option breaks both the integrity check and
-deduplication.
+client's declared hash — an ETag is never a real content checksum on any provider, and an S3 multipart
+checksum is composite (a checksum of the part checksums), so the server re-reads the object and hashes
+it as a stream instead of trusting the provider.
 
 ### Multipart part retry safety
 
