@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Console\Commands;
 use Illuminate\Console\Command;
 use MadeByClowd\Documentable\Integrity\IntegrityInspector;
 use MadeByClowd\Documentable\Integrity\IntegrityRepairer;
+use MadeByClowd\Documentable\Integrity\IntegrityReport;
 use MadeByClowd\Documentable\Integrity\RepairStep;
 
 /**
@@ -35,7 +36,7 @@ class RepairIntegrityCommand extends Command
         if ($plan === []) {
             $this->info('Nothing to repair.');
 
-            return $this->reportUnrepairable($report->documentsMissingStorageFile);
+            return $this->reportUnrepairable($report);
         }
 
         foreach ($plan as $step) {
@@ -45,7 +46,7 @@ class RepairIntegrityCommand extends Command
         if ($this->option('dry-run')) {
             $this->info('Dry run: nothing was changed.');
 
-            return $this->reportUnrepairable($report->documentsMissingStorageFile);
+            return $this->reportUnrepairable($report);
         }
 
         $failed = $repairer->apply($plan);
@@ -59,19 +60,26 @@ class RepairIntegrityCommand extends Command
 
         $this->info('Repair complete. Run `php artisan documents:upgrade-check` to confirm.');
 
-        return $this->reportUnrepairable($report->documentsMissingStorageFile);
+        return $this->reportUnrepairable($report);
     }
 
     /**
-     * @param  list<string>  $documentIds
+     * Problems no automatic fix can settle, because they need a decision about data. They keep the exit code
+     * failing so a deploy script does not mistake a partial repair for a clean one.
      */
-    private function reportUnrepairable(array $documentIds): int
+    private function reportUnrepairable(IntegrityReport $report): int
     {
-        if ($documentIds === []) {
+        if ($report->documentsMissingStorageFile === [] && $report->documentsOutsideKeyType === []) {
             return self::SUCCESS;
         }
 
-        $this->error(count($documentIds).' document(s) point at a missing stored file and cannot be repaired automatically: '.implode(', ', $documentIds));
+        if ($report->documentsMissingStorageFile !== []) {
+            $this->error(count($report->documentsMissingStorageFile).' document(s) point at a missing stored file and cannot be repaired automatically: '.implode(', ', $report->documentsMissingStorageFile));
+        }
+
+        if ($report->documentsOutsideKeyType !== []) {
+            $this->error(count($report->documentsOutsideKeyType)." document(s) have an owner key that does not fit key_type '{$report->keyType}' and cannot be repaired automatically: ".implode(', ', $report->documentsOutsideKeyType));
+        }
 
         return self::FAILURE;
     }

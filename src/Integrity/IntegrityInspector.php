@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Integrity;
 
+use Illuminate\Support\Str;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
@@ -21,12 +23,16 @@ use MadeByClowd\Documentable\Models\UploadSession;
  */
 final class IntegrityInspector
 {
+    public function __construct(private readonly DocumentableConfig $config) {}
+
     public function inspect(): IntegrityReport
     {
         return new IntegrityReport(
             duplicateSlots: $this->duplicateSlots(),
             duplicateStorageFiles: $this->duplicateStorageFiles(),
             documentsMissingStorageFile: $this->documentsMissingStorageFile(),
+            documentsOutsideKeyType: $this->documentsOutsideKeyType(),
+            keyType: $this->config->keyType,
             openUploadSessions: UploadSession::query()->whereIn('status', array_map(
                 fn (UploadSessionStatus $status) => $status->value,
                 array_filter(UploadSessionStatus::cases(), fn (UploadSessionStatus $status) => $status->isOpen()),
@@ -129,5 +135,40 @@ final class IntegrityInspector
             ->pluck('id')
             ->map(fn (mixed $id) => (string) $id)
             ->all());
+    }
+
+    /**
+     * Documents whose owner key cannot be stored in a column of the configured `key_type`. Nothing is wrong
+     * with them while the column is a string; they block the conversion to a typed column.
+     *
+     * @return list<string>
+     */
+    private function documentsOutsideKeyType(): array
+    {
+        $fits = match ($this->config->keyType) {
+            'int' => ctype_digit(...),
+            'uuid' => Str::isUuid(...),
+            'ulid' => Str::isUlid(...),
+            default => null,
+        };
+
+        if ($fits === null) {
+            return [];
+        }
+
+        $misfits = [];
+
+        Document::withTrashed()
+            ->select('id', 'documentable_id')
+            ->whereNotNull('documentable_id')
+            ->chunkById(1000, function ($documents) use ($fits, &$misfits) {
+                foreach ($documents as $document) {
+                    if (! $fits((string) $document->documentable_id)) {
+                        $misfits[] = $document->id;
+                    }
+                }
+            });
+
+        return $misfits;
     }
 }

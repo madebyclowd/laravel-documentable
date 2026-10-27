@@ -23,6 +23,7 @@ class UpgradeCheckCommand extends Command
         $report = $inspector->inspect();
 
         $this->renderBlockingFindings($report);
+        $this->renderKeyTypeFindings($report);
         $this->renderNotices($report);
 
         if (! $report->hasBlockingFindings()) {
@@ -63,6 +64,17 @@ class UpgradeCheckCommand extends Command
             array_map(fn (string $id) => $this->line("    - {$id}"), $report->documentsMissingStorageFile);
             $this->line('Restore the stored file row from a backup, or delete these documents, before upgrading.');
         }
+    }
+
+    private function renderKeyTypeFindings(IntegrityReport $report): void
+    {
+        if ($report->documentsOutsideKeyType === []) {
+            return;
+        }
+
+        $this->error(count($report->documentsOutsideKeyType)." document(s) have an owner key that does not fit key_type '{$report->keyType}' and cannot be repaired automatically:");
+        array_map(fn (string $id) => $this->line("    - {$id}"), $report->documentsOutsideKeyType);
+        $this->line("Set key_type back to 'string' if your owners have different key types, or fix these owners' keys.");
     }
 
     private function renderNotices(IntegrityReport $report): void

@@ -23,6 +23,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Owner Key Type
+    |--------------------------------------------------------------------------
+    |
+    | The column type of documents.documentable_id, the primary key of the
+    | models that own documents. One of: int, uuid, ulid, string.
+    |
+    | Match it when every owner model shares one key type: queries then use the
+    | column's index, and PostgreSQL needs no casts. Keep 'string' when owners
+    | have different key types (an int User and a uuid Invoice, say), because
+    | one column cannot hold both.
+    |
+    | Changing it on an install that already has documents converts the column
+    | with a migration. Run `php artisan documents:upgrade-check` first. On
+    | MySQL the conversion rewrites the table and blocks writes while it runs.
+    |
+    */
+    'key_type' => 'string',
+
+    /*
+    |--------------------------------------------------------------------------
     | Migrations
     |--------------------------------------------------------------------------
     |

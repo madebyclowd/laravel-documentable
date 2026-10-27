@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 
 /**
  * Interactive wizard mirroring the reference package's `sequence:install`.
@@ -10,6 +13,7 @@ use Illuminate\Console\Command;
 class InstallCommand extends Command
 {
     protected $signature = 'documents:install
+        {--key-type= : Primary key type of the models that own documents — int, uuid, ulid or string. Skips the interactive prompt when set.}
         {--shape= : App shape — separate-api or monolith. Skips the interactive prompt when set.}
         {--etag-strategy= : Multipart ETag strategy — server-authoritative or client. Skips the interactive prompt when set.}
         {--types= : Document type catalog mode — code-first or db-only. Skips the interactive prompt when set.}';
@@ -22,6 +26,16 @@ class InstallCommand extends Command
         $this->newLine();
 
         $this->call('vendor:publish', ['--tag' => 'documentable-config']);
+
+        // Asked before the migrations run, because the conversion migration reads the answer.
+        $keyType = $this->chooseKeyType();
+
+        if ($keyType === null) {
+            return self::FAILURE;
+        }
+
+        $this->applyKeyType($keyType);
+
         $this->call('vendor:publish', ['--tag' => 'documentable-migrations']);
 
         if ($this->confirm('Run the new database migrations now?', true)) {
@@ -147,6 +161,54 @@ class InstallCommand extends Command
         $this->line('See the README for a full walkthrough and every HTTP route the package ships.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @return string|null a supported key type, or null after reporting an invalid `--key-type`
+     */
+    protected function chooseKeyType(): ?string
+    {
+        $option = $this->option('key-type');
+
+        if ($option === null) {
+            return $this->input->isInteractive() ? $this->askKeyType() : 'string';
+        }
+
+        $keyType = is_string($option) ? $option : '';
+
+        if (! in_array($keyType, DocumentableConfig::KEY_TYPES, true)) {
+            $this->error("Invalid --key-type value: '{$keyType}'. Expected ".implode(', ', DocumentableConfig::KEY_TYPES).'.');
+
+            return null;
+        }
+
+        return $keyType;
+    }
+
+    protected function askKeyType(): string
+    {
+        $answer = $this->choice(
+            "What type is the primary key of the models that will own documents?\n".
+            "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+            "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+            "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+            '                use the column index, and PostgreSQL needs no casts.',
+            DocumentableConfig::KEY_TYPES,
+            array_search('string', DocumentableConfig::KEY_TYPES, true)
+        );
+
+        return is_string($answer) ? $answer : 'string';
+    }
+
+    /**
+     * Writes the choice to the published config and to the running app, so the migrations run later in this
+     * same command already see it.
+     */
+    protected function applyKeyType(string $keyType): void
+    {
+        $this->writeConfigValue('key_type', $keyType);
+        config()->set('documentable.key_type', $keyType);
+        $this->laravel->forgetInstance(DocumentableConfig::class);
     }
 
     /**

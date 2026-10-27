@@ -22,6 +22,9 @@ use ReflectionMethod;
  */
 final readonly class DocumentableConfig
 {
+    /** @var list<string> */
+    public const KEY_TYPES = ['int', 'uuid', 'ulid', 'string'];
+
     private const ETAG_STRATEGIES = ['client', 'server-authoritative'];
 
     private const SCAN_ERROR_POLICIES = ['reject', 'allow'];
@@ -39,6 +42,7 @@ final readonly class DocumentableConfig
      */
     private function __construct(
         public string $disk,
+        public string $keyType,
         public bool $loadMigrations,
         public bool $loadRoutes,
         public array $types,
@@ -78,6 +82,11 @@ final readonly class DocumentableConfig
 
         $disk = self::string($c['disk'], 'disk', 'Set it to the name of a disk in config/filesystems.php');
         self::requireDisk($disk, 'disk', $knownDisks);
+
+        $keyType = $c['key_type'];
+        if (! is_string($keyType) || ! in_array($keyType, self::KEY_TYPES, true)) {
+            throw new InvalidDocumentableConfig('key_type', 'must be one of '.implode(', ', self::KEY_TYPES), "Use 'string' unless every document owner shares one key type, then match it: int, uuid or ulid");
+        }
 
         $types = self::arrayValue($c['types'], 'types');
         foreach ($types as $code => $definition) {
@@ -128,6 +137,7 @@ final readonly class DocumentableConfig
 
         return new self(
             disk: $disk,
+            keyType: $keyType,
             loadMigrations: self::bool($c['load_migrations'], 'load_migrations'),
             loadRoutes: self::bool($c['load_routes'], 'load_routes'),
             types: $types,
@@ -166,6 +176,7 @@ final readonly class DocumentableConfig
     {
         return [
             'disk' => 's3',
+            'key_type' => 'string',
             'load_migrations' => true,
             'load_routes' => true,
             'types' => [],
