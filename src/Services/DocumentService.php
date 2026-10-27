@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Services;
 
 use DateTimeInterface;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
@@ -148,6 +149,23 @@ class DocumentService
             $documentable->getMorphClass(),
             (string) $documentable->getKey(),
             $documentTypeId
+        );
+    }
+
+    /**
+     * One page of `listForOwner()`, cut in SQL in a stable order. `total()` on the result counts every
+     * latest-per-group document of the owner, whoever may view it.
+     *
+     * @return LengthAwarePaginator<int, Document>
+     */
+    public function pageForOwner(Model $documentable, ?string $documentTypeId, int $perPage, int $page): LengthAwarePaginator
+    {
+        return $this->documentRepository->paginateLatestForOwnerGrouped(
+            $documentable->getMorphClass(),
+            (string) $documentable->getKey(),
+            $documentTypeId,
+            $perPage,
+            $page
         );
     }
 

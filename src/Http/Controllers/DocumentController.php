@@ -25,10 +25,13 @@ class DocumentController extends Controller
     /**
      * Owner-scoped listing, grouped by document_type_id then document_group_id —
      * the query every consumer otherwise hand-rolls.
-     * canView() is per-Document, so it's applied as a post-query collection filter,
-     * not a WHERE clause — pagination therefore happens on the filtered collection
-     * (so `total` counts only the documents the caller may view), not at the
-     * database level.
+     *
+     * The page is cut in SQL in a stable order (type, group, id), then the authorizer is asked once, through
+     * `canViewMany()`, which of that page's documents the caller may see. So `meta.total` and `meta.last_page`
+     * count the owner's latest documents, hidden ones included, and a page can hold fewer than `per_page`
+     * documents (even none) when some are hidden. The contract has no way to count what a caller may view
+     * without loading it, and loading everything to find out is what this method no longer does. The
+     * response shape is unchanged.
      */
     public function index(ListDocumentsRequest $request): JsonResponse
     {
@@ -39,17 +42,15 @@ class DocumentController extends Controller
 
         $documentTypeId = $request->input('document_type_id');
 
-        $documents = $this->service->listForOwner($documentable, $documentTypeId)
-            ->filter(fn (Document $document) => $this->authorizer->canView($request->user(), $document))
-            ->values();
-
         $perPage = max(1, (int) config('documentable.listing.per_page', 50));
         $page = max(1, (int) $request->input('page', 1));
-        $total = $documents->count();
 
-        $paged = $documents->forPage($page, $perPage)->values();
+        $paginator = $this->service->pageForOwner($documentable, $documentTypeId, $perPage, $page);
+        $total = $paginator->total();
 
-        $grouped = $paged
+        $visible = $this->authorizer->canViewMany($request->user(), collect($paginator->items()));
+
+        $grouped = $visible
             ->groupBy('document_type_id')
             ->map(fn ($group) => $group->groupBy('document_group_id')->map(fn ($versions) => $versions->first()));
 
@@ -72,11 +73,11 @@ class DocumentController extends Controller
     {
         $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
 
-        if (! $request->filled('documentable_type')) {
-            if (! $this->authorizer->canUpload($request->user(), $type, null)) {
-                abort(403);
-            }
+        if (! $this->authorizer->canInitiateUpload($request->user(), $type)) {
+            abort(403);
+        }
 
+        if (! $request->filled('documentable_type')) {
             return response()->json($this->service->stageUpload($request->file('file'), $type, $this->sessionUserKey($request)), 201);
         }
 
@@ -85,7 +86,11 @@ class DocumentController extends Controller
             $request->string('documentable_id')->toString()
         );
 
-        if (! $this->authorizer->canUpload($request->user(), $type, $documentable)) {
+        // No session or document exists before the bytes are stored, so the attach question is asked of an unsaved
+        // document that carries the type and nothing else.
+        $candidate = new Document(['document_type_id' => $type->id]);
+
+        if (! $this->authorizer->canAttach($request->user(), $candidate, $documentable)) {
             abort(403);
         }
 

@@ -4,17 +4,15 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
-use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\UploadSession;
+use MadeByClowd\Documentable\Tests\Fixtures\ConfigurableAuthorizer;
 use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
@@ -372,23 +370,7 @@ class SessionEndpointsTest extends TestCase
 
     protected function denyOwners(): void
     {
-        $this->app->bind(AuthorizesDocumentAccess::class, fn () => new class implements AuthorizesDocumentAccess
-        {
-            public function canUpload(?Authenticatable $user, DocumentType $type, ?Model $documentable): bool
-            {
-                return $documentable === null;
-            }
-
-            public function canView(?Authenticatable $user, Document $document): bool
-            {
-                return true;
-            }
-
-            public function canDelete(?Authenticatable $user, Document $document): bool
-            {
-                return true;
-            }
-        });
+        $this->useAuthorizer(ConfigurableAuthorizer::denying('canAttach'));
     }
 
     public function test_attaching_to_an_owner_the_authorizer_denies_is_forbidden_and_leaves_the_session_uploaded(): void

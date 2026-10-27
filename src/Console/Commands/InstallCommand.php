@@ -12,11 +12,14 @@ use MadeByClowd\Documentable\Config\DocumentableConfig;
  */
 class InstallCommand extends Command
 {
+    private const AUTHORIZER_STYLES = ['gates', 'class', 'none'];
+
     protected $signature = 'documents:install
         {--key-type= : Primary key type of the models that own documents — int, uuid, ulid or string. Skips the interactive prompt when set.}
         {--shape= : App shape — separate-api or monolith. Skips the interactive prompt when set.}
         {--etag-strategy= : Multipart ETag strategy — server-authoritative or client. Skips the interactive prompt when set.}
-        {--types= : Document type catalog mode — code-first or db-only. Skips the interactive prompt when set.}';
+        {--types= : Document type catalog mode — code-first or db-only. Skips the interactive prompt when set.}
+        {--authorizer= : Authorizer to scaffold — gates, class or none. Skips the interactive prompt when set.}';
 
     protected $description = 'Publish config/migrations and configure laravel-documentable.';
 
@@ -134,15 +137,16 @@ class InstallCommand extends Command
             $this->info("Leave config('documentable.types') empty and manage the document_types table directly.");
         }
 
+        $authorizerStyle = $this->chooseAuthorizerStyle();
+
+        if ($authorizerStyle === null) {
+            return self::FAILURE;
+        }
+
         $generatedAuthorizer = false;
 
-        if ($this->confirm(
-            "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-            "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-            'document — fine for local development, not fine for production.',
-            true
-        )) {
-            $this->call('documents:make-authorizer');
+        if ($authorizerStyle !== 'none') {
+            $this->call('documents:make-authorizer', ['--style' => $authorizerStyle]);
             $generatedAuthorizer = true;
         }
 
@@ -154,13 +158,52 @@ class InstallCommand extends Command
         if ($generatedAuthorizer) {
             $this->line('  3. Open the authorizer file we just generated in app/Documentable and fill in your real ownership/role checks.');
         } else {
-            $this->line('  3. Before going to production, run `php artisan documents:make-authorizer` — right now ANY user can upload/view/delete ANY document.');
+            $this->line('  3. Before going to production, run `php artisan documents:make-authorizer` — until you do, every request is denied.');
         }
 
         $this->line('  4. Upload your first file: $document = app(\MadeByClowd\Documentable\Services\DocumentService::class)->upload($file, $type, $owner);');
         $this->line('See the README for a full walkthrough and every HTTP route the package ships.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @return string|null `gates`, `class` or `none`, or null after reporting an invalid `--authorizer`
+     */
+    protected function chooseAuthorizerStyle(): ?string
+    {
+        $option = $this->option('authorizer');
+
+        if ($option === null) {
+            return $this->input->isInteractive() ? $this->askAuthorizerStyle() : 'gates';
+        }
+
+        $style = is_string($option) ? $option : '';
+
+        if (! in_array($style, self::AUTHORIZER_STYLES, true)) {
+            $this->error("Invalid --authorizer value: '{$style}'. Expected 'gates', 'class' or 'none'.");
+
+            return null;
+        }
+
+        return $style;
+    }
+
+    protected function askAuthorizerStyle(): string
+    {
+        $answer = $this->choice(
+            "How do you want to control who's allowed to upload, view and delete documents?\n".
+            "Until you do, every request is denied, and a production boot refuses to start.\n".
+            "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+            "              quickest way to start, and it works with Laravel policies too.\n".
+            "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+            "              not fit Gates.\n".
+            '  none — Skip this; write your own before going to production.',
+            self::AUTHORIZER_STYLES,
+            0
+        );
+
+        return is_string($answer) ? $answer : 'gates';
     }
 
     /**

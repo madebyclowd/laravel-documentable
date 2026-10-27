@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Repositories;
 
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Models\Document;
@@ -92,6 +93,29 @@ class DocumentRepository
         }
 
         return $query->get();
+    }
+
+    /**
+     * One page of the rows `findAllLatestForOwnerGrouped()` returns, cut in SQL. The order (type, then group,
+     * then id) is total, so a row never moves between pages while the owner's documents are unchanged.
+     *
+     * @return LengthAwarePaginator<int, Document>
+     */
+    public function paginateLatestForOwnerGrouped(string $documentableType, string $documentableId, ?string $documentTypeId, int $perPage, int $page): LengthAwarePaginator
+    {
+        $query = Document::where('documentable_type', $documentableType)
+            ->where('documentable_id', $documentableId)
+            ->whereNotNull('latest_marker')
+            ->with('storageFile')
+            ->orderBy('document_type_id')
+            ->orderBy('document_group_id')
+            ->orderBy('id');
+
+        if ($documentTypeId !== null) {
+            $query->where('document_type_id', $documentTypeId);
+        }
+
+        return $query->paginate($perPage, ['*'], 'page', $page);
     }
 
     /**
