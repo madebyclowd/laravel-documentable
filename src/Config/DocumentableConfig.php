@@ -58,7 +58,6 @@ final readonly class DocumentableConfig
         public ?string $dedupScopeResolver,
         public ?string $scanner,
         public ?array $allowedDocumentableTypes,
-        public bool $allowGuestUserId,
         public string $scanErrorPolicy,
         public int $urlMaxTtlMinutes,
         public ?string $storagePathGenerator,
@@ -153,7 +152,6 @@ final readonly class DocumentableConfig
             dedupScopeResolver: self::implementing($c['dedup']['scope_resolver'], ResolvesDedupScope::class, 'dedup.scope_resolver'),
             scanner: self::implementing($c['security']['scanner'], ScansUploadedFile::class, 'security.scanner'),
             allowedDocumentableTypes: $allowed,
-            allowGuestUserId: self::bool($c['security']['allow_guest_user_id'], 'security.allow_guest_user_id'),
             scanErrorPolicy: $scanPolicy,
             urlMaxTtlMinutes: self::int($c['url']['max_ttl_minutes'], 'url.max_ttl_minutes', 1, 'a positive number of minutes'),
             storagePathGenerator: self::implementing($c['storage_path']['generator'], GeneratesStoragePath::class, 'storage_path.generator'),
@@ -197,7 +195,6 @@ final readonly class DocumentableConfig
             'security' => [
                 'scanner' => null,
                 'allowed_documentable_types' => null,
-                'allow_guest_user_id' => false,
                 'scan_error_policy' => 'reject',
             ],
             'url' => ['max_ttl_minutes' => 1440],

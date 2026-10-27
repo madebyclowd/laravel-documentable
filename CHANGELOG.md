@@ -7,6 +7,11 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [1.0.0] - 2026-10-27
+
+### Security
+- Authorization is now deny-by-default, and the `AuthorizesDocumentAccess` contract changed to match. With no authorizer configured the package asks Laravel's Gate (`Defaults\GateDocumentAuthorizer`) for `documents.initiate-upload`, `documents.finalize`, `documents.attach`, `documents.view` and `documents.delete`, and denies every ability your app has not defined, so a fresh install allows nothing until you write the rules. `PermissiveDocumentAuthorizer` is removed. The contract no longer has `canUpload(?Authenticatable, DocumentType, ?Model)`, whose null owner meant three different things; it is replaced by `canInitiateUpload($user, $type)`, `canFinalize($user, $session)` (asked for every follow-up on an upload session, so an app can finally refuse `finalize`), `canAttach($user, $sessionOrDocument, $owner)` and `canViewMany($user, $documents)`, alongside the existing `canView` and `canDelete`. Booting in production with the routes mounted and no `documentable.authorization.resolver` now throws `InsecureConfiguration`, which names the key and `php artisan documents:make-authorizer`; local and testing environments, and `load_routes = false`, boot as before. `documents:make-authorizer --style=gates|class` scaffolds either style, and `documents:install` scaffolds one by default (`--authorizer=gates|class|none` skips the prompt). The `documents` rate limiter now defaults to 60 requests a minute per user or IP instead of unlimited. A `user_id` sent by the client is never used as an upload owner, and `security.allow_guest_user_id` is removed: multipart uploads require an authenticated user. `GET /documents` now pages in SQL in a stable order and asks `canViewMany()` once for the page, so `meta.total` counts the owner's documents rather than only those the caller may view, and a page can hold fewer than `per_page` documents when some are hidden.
+
 ## [3.0.0-alpha.3] - 2026-10-27
 
 ### Changed
@@ -171,3 +176,5 @@ Initial release.
 [3.0.0-alpha.2]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.1...v3.0.0-alpha.2
 
 [3.0.0-alpha.3]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.2...v3.0.0-alpha.3
+
+[1.0.0]: https://github.com/madebyclowd/laravel-documentable/compare/v0.0.0...v1.0.0

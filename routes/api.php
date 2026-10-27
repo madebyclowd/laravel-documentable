@@ -16,10 +16,11 @@ use MadeByClowd\Documentable\Http\Controllers\MultipartUploadController;
 | Loaded only when config('documentable.load_routes') is true. Middleware
 | stack is config('documentable.middleware') (default ['api'] — no
 | session/auth, see that config key's comment for the failure mode) plus a
-| throttle behind the named limiter in config('documentable.throttle') —
-| define it with RateLimiter::for() in your own AppServiceProvider; the
-| package doesn't hardcode a rate. Disable this file entirely and mount
-| these controllers yourself for full control over prefix/middleware/guard.
+| throttle behind the named limiter in config('documentable.throttle'). When
+| your app defines no limiter of that name the package registers one at 60
+| requests a minute per user or IP; define your own with RateLimiter::for()
+| in your AppServiceProvider to change it. Disable this file entirely and
+| mount these controllers yourself for full control over prefix/middleware/guard.
 |
 */
 Route::prefix('documents')

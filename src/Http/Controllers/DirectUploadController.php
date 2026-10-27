@@ -31,7 +31,7 @@ class DirectUploadController extends Controller
     {
         $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
 
-        if (! $this->authorizer->canUpload($request->user(), $type, null)) {
+        if (! $this->authorizer->canInitiateUpload($request->user(), $type)) {
             abort(403);
         }
 
@@ -85,7 +85,7 @@ class DirectUploadController extends Controller
             $request->string('documentable_id')->toString()
         );
 
-        if (! $this->authorizer->canUpload($request->user(), $session->documentTypeOrFail(), $owner)) {
+        if (! $this->authorizer->canAttach($request->user(), $session, $owner)) {
             abort(403);
         }
 
@@ -98,12 +98,12 @@ class DirectUploadController extends Controller
     }
 
     /**
-     * Follow-up calls on a session act with the same authority as the call that started it. The owner is not
-     * attached yet, hence the null documentable.
+     * Follow-up calls on a session are asked of the session itself, which carries its type and the user it was
+     * started for.
      */
     private function authorizeSession(Request $request, UploadSession $session): void
     {
-        if (! $this->authorizer->canUpload($request->user(), $session->documentTypeOrFail(), null)) {
+        if (! $this->authorizer->canFinalize($request->user(), $session)) {
             abort(403);
         }
     }

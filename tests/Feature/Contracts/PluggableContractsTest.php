@@ -9,6 +9,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
+use MadeByClowd\Documentable\Defaults\GateDocumentAuthorizer;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Services\DocumentService;
@@ -73,13 +74,16 @@ class PluggableContractsTest extends TestCase
         $service->stageUpload(UploadedFile::fake()->createWithContent('a.txt', 'x'), $type);
     }
 
-    public function test_default_authorizer_allows_everything(): void
+    public function test_the_default_authorizer_is_gate_backed_and_denies_what_the_app_has_not_defined(): void
     {
+        config()->set('documentable.authorization.resolver', null);
+
         $authorizer = $this->app->make(AuthorizesDocumentAccess::class);
         $type = $this->makeType();
 
-        $this->assertTrue($authorizer->canUpload(null, $type, null));
-        $this->assertTrue($authorizer->canDelete(null, new Document));
+        $this->assertInstanceOf(GateDocumentAuthorizer::class, $authorizer);
+        $this->assertFalse($authorizer->canInitiateUpload(null, $type));
+        $this->assertFalse($authorizer->canDelete(null, new Document));
     }
 
     public function test_custom_authorizer_binding_overrides_default(): void
@@ -88,7 +92,13 @@ class PluggableContractsTest extends TestCase
 
         $authorizer = $this->app->make(AuthorizesDocumentAccess::class);
 
-        $this->assertFalse($authorizer->canUpload(null, $this->makeType(), null));
+        $this->assertInstanceOf(FakeAuthorizer::class, $authorizer);
+        $this->assertFalse($authorizer->canInitiateUpload(null, $this->makeType()));
+    }
+
+    public function test_the_package_ships_no_allow_everything_authorizer(): void
+    {
+        $this->assertFalse(class_exists('MadeByClowd\\Documentable\\Defaults\\PermissiveDocumentAuthorizer'));
     }
 
     public function test_default_dedup_scope_shares_storage_across_different_owners(): void

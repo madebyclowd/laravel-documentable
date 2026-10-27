@@ -63,16 +63,12 @@ abstract class Controller extends BaseController
     }
 
     /**
-     * The key a session is stored under: the authenticated user, else a guest `user_id` when the install allows
-     * one, else null. Anonymous callers therefore only ever reach anonymous sessions.
+     * The key a session is stored under: the authenticated user, else null. Anonymous callers therefore only
+     * ever reach anonymous sessions. Nothing the client sends can name another owner.
      */
     protected function sessionUserKey(Request $request): ?string
     {
         $userId = $request->user()?->getAuthIdentifier();
-
-        if ($userId === null && config('documentable.security.allow_guest_user_id', false)) {
-            $userId = $request->input('user_id');
-        }
 
         return $userId === null ? null : (string) $userId;
     }
@@ -85,16 +81,11 @@ abstract class Controller extends BaseController
     /**
      * Ownership-scoped operations (multipart sessions) need a stable user identifier. It comes from the
      * authenticated request user, whatever guard the consuming app configured (the package does not hardcode
-     * one). A client-supplied `user_id` is only honoured when `security.allow_guest_user_id` is on, because
-     * anyone who can send the request can name any owner, including another user's session.
+     * one); a `user_id` in the request is never read.
      */
     protected function resolveUserId(Request $request): string
     {
-        $userId = $request->user()?->getAuthIdentifier();
-
-        if ($userId === null && config('documentable.security.allow_guest_user_id', false)) {
-            $userId = $request->input('user_id');
-        }
+        $userId = $this->sessionUserKey($request);
 
         if ($userId === null) {
             throw ValidationException::withMessages([
@@ -102,6 +93,6 @@ abstract class Controller extends BaseController
             ]);
         }
 
-        return (string) $userId;
+        return $userId;
     }
 }

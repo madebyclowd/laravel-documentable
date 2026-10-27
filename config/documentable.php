@@ -149,8 +149,17 @@ return [
     |
     | Bind your own implementation of
     | MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess to control
-    | who can upload/view/delete documents. Default is permissive (allows
-    | everything) — replace before production use.
+    | who can upload, attach, view and delete documents. Left null, the
+    | Gate-backed default (Defaults\GateDocumentAuthorizer) is used: it asks
+    | the abilities documents.initiate-upload, documents.finalize,
+    | documents.attach, documents.view and documents.delete, and denies any
+    | the app has not defined, so nothing is allowed until you define them.
+    |
+    | In production, booting with the routes mounted and this key null throws
+    | InsecureConfiguration. Run `php artisan documents:make-authorizer` to
+    | scaffold an authorizer, then set the key to its class. To keep the
+    | Gate-backed default, set it to
+    | MadeByClowd\Documentable\Defaults\GateDocumentAuthorizer::class.
     |
     */
     'authorization' => [
@@ -189,19 +198,13 @@ return [
     | appears in this array — null means "reject every unmapped type"
     | (the safe default). Without Relation::enforceMorphMap() AND this
     | allowlist, a client can pass any Eloquent model FQCN in the app as
-    | documentable_type; the (default-permissive) authorizer is the only
+    | documentable_type; the authorizer is the only
     | other gate.
     |
     */
     'security' => [
         'scanner' => null,
         'allowed_documentable_types' => null,
-
-        // Discouraged. When true and nobody is authenticated, the multipart endpoints accept `user_id`
-        // from the request body as the session owner. Anyone who can reach the route can then name any
-        // owner, so only enable it for a device/guest flow you protect another way (signed URLs, a
-        // device token checked by your own middleware). Authenticated requests always use the real user.
-        'allow_guest_user_id' => false,
 
         // What to do when the scanner returns ScanResult::Error (it could not reach a verdict). `reject`
         // (default) refuses the file, so a scanner outage cannot silently turn scanning off. `allow` stores
@@ -261,15 +264,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | Applied to every route in routes/api.php, in addition to the throttle
-    | middleware below. Default ('api') has no session/auth — $request->user()
-    | is null, so AuthorizesDocumentAccess always receives a null $user,
-    | created_by/deleted_by stay null, and the multipart endpoints reject the
-    | request unless security.allow_guest_user_id lets a client-supplied
-    | user_id stand in as the session owner. Session-based monolith (Inertia,
-    | Livewire, classic SPA-on-same-origin): use ['web', 'auth']. Separate
-    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). With only
-    | ['api'] there is no session or auth, so $request->user() is null on
-    | every request.
+    | middleware below. Default ('api') has no session/auth, so $request->user()
+    | is null on every request: AuthorizesDocumentAccess receives a null $user,
+    | created_by/deleted_by stay null and the multipart endpoints refuse the
+    | request, because a session needs a real user to belong to. Session-based
+    | monolith (Inertia, Livewire, classic SPA-on-same-origin): use
+    | ['web', 'auth']. Separate token-auth API: use ['api', 'auth:sanctum'] (or
+    | your guard).
     |
     */
     'middleware' => ['api'],
@@ -281,9 +282,10 @@ return [
     |
     | Default page size for GET /documents (owner-scoped, grouped by
     | document_type_id then document_group_id). The owner's latest documents are
-    | loaded, canView() is applied to each in PHP, and only then is the result
-    | paged, so `total` counts just what the caller may view. For an owner with
-    | thousands of documents, list a narrower set with document_type_id.
+    | paged in SQL in a stable order, then AuthorizesDocumentAccess::canViewMany()
+    | is asked once for that page. A page can therefore hold fewer than per_page
+    | documents when some are hidden from the caller; `total` counts the owner's
+    | documents, not only those the caller may view.
     |
     */
     'listing' => [
@@ -295,9 +297,11 @@ return [
     | Throttle
     |--------------------------------------------------------------------------
     |
-    | Named rate limiter the package's routes are mounted behind.
-    | Package doesn't hardcode a specific rate — define this limiter
-    | (RateLimiter::for('documents', ...)) in your own AppServiceProvider.
+    | Named rate limiter the package's routes are mounted behind. When the app
+    | defines no limiter of this name, the package registers one that allows 60
+    | requests per minute per user, or per IP address for guests. Define your own
+    | (RateLimiter::for('documents', ...)) in your AppServiceProvider to change
+    | the rate.
     |
     */
     'throttle' => 'documents',
