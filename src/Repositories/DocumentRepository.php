@@ -18,8 +18,11 @@ class DocumentRepository
      * Find the latest document for an owner+type. Pass $documentGroupId to scope
      * to one specific group/slot (needed once a type `allows_multiple`); omit it
      * for single-slot types where at most one group can ever exist.
+     *
+     * With `$lock` the row is read `FOR UPDATE`, so two uploads that version the same document take turns. It
+     * only holds inside a transaction.
      */
-    public function findLatest(string $documentableType, string $documentableId, string $documentTypeId, ?string $documentGroupId = null): ?Document
+    public function findLatest(string $documentableType, string $documentableId, string $documentTypeId, ?string $documentGroupId = null, bool $lock = false): ?Document
     {
         $query = Document::where('documentable_type', $documentableType)
             ->where('documentable_id', $documentableId)
@@ -28,6 +31,10 @@ class DocumentRepository
 
         if ($documentGroupId !== null) {
             $query->where('document_group_id', $documentGroupId);
+        }
+
+        if ($lock) {
+            $query->lockForUpdate();
         }
 
         return $query->first();

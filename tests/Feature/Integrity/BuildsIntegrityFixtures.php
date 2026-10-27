@@ -16,9 +16,9 @@ use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
  */
 trait BuildsIntegrityFixtures
 {
-    protected function singleSlotType(string $code = 'PASSPORT'): DocumentType
+    protected function singleSlotType(string $code = 'PASSPORT', bool $versioned = false): DocumentType
     {
-        return DocumentType::create(['code' => $code, 'name' => $code, 'max_size_mb' => 5, 'disk' => 'test_disk', 'path_prefix' => strtolower($code), 'allows_multiple' => false]);
+        return DocumentType::create(['code' => $code, 'name' => $code, 'max_size_mb' => 5, 'disk' => 'test_disk', 'path_prefix' => strtolower($code), 'allows_multiple' => false, 'requires_versioning' => $versioned]);
     }
 
     protected function multiSlotType(string $code = 'ATTACHMENT'): DocumentType
@@ -48,7 +48,7 @@ trait BuildsIntegrityFixtures
         return $file->refresh();
     }
 
-    protected function latestDocument(DocumentType $type, TestModel $owner, ?StorageFile $file = null, int $version = 1, ?string $createdAt = null): Document
+    protected function latestDocument(DocumentType $type, TestModel $owner, ?StorageFile $file = null, int $version = 1, ?string $createdAt = null, ?string $marker = null): Document
     {
         $groupId = (string) Str::uuid();
 
@@ -61,7 +61,7 @@ trait BuildsIntegrityFixtures
             'client_filename' => 'file.pdf',
             'version' => $version,
             'is_latest' => true,
-            'latest_marker' => $groupId,
+            'latest_marker' => $marker ?? $groupId,
         ]);
 
         if ($createdAt !== null) {
