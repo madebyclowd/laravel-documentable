@@ -7,6 +7,34 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.3] - 2026-10-27
+
+### Changed
+- The database now enforces one latest document per owner for single-slot document types. `latest_marker` holds the
+  document type id for those types (multi-slot types keep the group id), so two concurrent first uploads can no
+  longer both succeed. The loser retries once as the next version of the winner, and a second collision throws
+  `SlotConflict`. The new migration stops with the commands to run (`documents:upgrade-check`,
+  `documents:repair`) when an owner already has two latest documents.
+- `storage_files` now has a unique `(file_hash, disk)` index, so concurrent uploads of identical bytes create one
+  stored file and the loser adopts the winner's and deletes its own copy. The dedup lookup includes the disk, which
+  stops a type on one disk from resolving to a blob stored on another. `StorageFileRepository::findByHash()` takes
+  the disk as a second argument. The new migration stops with the commands to run (`documents:upgrade-check`,
+  `documents:repair`) while duplicate stored files exist.
+
+### Added
+- `php artisan documents:upgrade-check` reports data that would block the new integrity constraints: more than one
+  latest document for an owner and single-slot type, several stored files sharing a `(file_hash, disk)` pair, and
+  documents that point at a missing stored file. `php artisan documents:repair --dry-run` prints the fix and
+  `--apply` runs it: the highest version (newest on a tie) stays latest, duplicate stored files are merged, and a
+  blob is only deleted when no other row uses it.
+- New `documentable.key_type` setting (`int`, `uuid`, `ulid` or `string`, default `string`) gives
+  `documents.documentable_id` the type of your owner models' primary key. A new migration converts an existing
+  column after checking that every stored key fits, and stops with `php artisan documents:upgrade-check` when one
+  does not. With a typed key `$model->documents()` is Laravel's stock `MorphMany`, so PostgreSQL needs no casts
+  and the column index is usable; the default `string` keeps the string-cast relation. `documents:install` asks
+  for the key type before it runs the migrations (`--key-type` skips the prompt). Converting rewrites the
+  `documents` table, so run it in a maintenance window on a large MySQL table.
+
 ## [3.0.0-alpha.2] - 2026-10-26
 
 ### Changed
@@ -141,3 +169,5 @@ Initial release.
 [3.0.0-alpha.1]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.3...v3.0.0-alpha.1
 
 [3.0.0-alpha.2]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.1...v3.0.0-alpha.2
+
+[3.0.0-alpha.3]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.2...v3.0.0-alpha.3
