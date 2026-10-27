@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Integrity;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Integrity\IntegrityRepairer;
 use MadeByClowd\Documentable\Integrity\RepairStep;
@@ -184,7 +185,7 @@ class RepairCommandTest extends TestCase
 
     public function test_removing_a_duplicate_that_is_already_gone_counts_as_done(): void
     {
-        $failed = $this->app->make(IntegrityRepairer::class)->apply([RepairStep::removeStorageFile('missing-id', 'kept-id')]);
+        $failed = $this->app->make(IntegrityRepairer::class)->apply([RepairStep::removeStorageFile((string) Str::uuid(), (string) Str::uuid())]);
 
         $this->assertSame([], $failed);
     }
