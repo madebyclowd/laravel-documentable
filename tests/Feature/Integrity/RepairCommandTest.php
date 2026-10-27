@@ -86,6 +86,7 @@ class RepairCommandTest extends TestCase
 
     public function test_it_repoints_documents_of_duplicate_storage_files_and_deletes_the_extra_blob(): void
     {
+        $this->dropDedupIndex();
         Storage::disk('test_disk')->put('blobs/keep', 'bytes');
         Storage::disk('test_disk')->put('blobs/extra', 'bytes');
         $keep = $this->storageFile('hash-1', path: 'blobs/keep', createdAt: '2026-01-01 10:00:00');
@@ -106,6 +107,7 @@ class RepairCommandTest extends TestCase
 
     public function test_it_never_deletes_the_blob_when_the_duplicate_rows_share_one_path(): void
     {
+        $this->dropDedupIndex();
         Storage::disk('test_disk')->put('blobs/shared', 'bytes');
         $keep = $this->storageFile('hash-1', path: 'blobs/shared', createdAt: '2026-01-01 10:00:00');
         $extra = $this->storageFile('hash-1', path: 'blobs/shared', createdAt: '2026-01-02 10:00:00');

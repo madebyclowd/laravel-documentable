@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Tests\Feature\Integrity;
 
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
@@ -16,6 +17,15 @@ use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
  */
 trait BuildsIntegrityFixtures
 {
+    /**
+     * A healthy install cannot hold two stored files for one `(file_hash, disk)`; an install being upgraded can,
+     * so tests that seed that state take the index away first.
+     */
+    protected function dropDedupIndex(): void
+    {
+        Schema::table('storage_files', fn ($table) => $table->dropUnique('storage_files_hash_disk_unique'));
+    }
+
     protected function singleSlotType(string $code = 'PASSPORT', bool $versioned = false): DocumentType
     {
         return DocumentType::create(['code' => $code, 'name' => $code, 'max_size_mb' => 5, 'disk' => 'test_disk', 'path_prefix' => strtolower($code), 'allows_multiple' => false, 'requires_versioning' => $versioned]);

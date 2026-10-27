@@ -87,6 +87,7 @@ class UpgradeCheckCommandTest extends TestCase
 
     public function test_duplicate_storage_files_on_one_disk_fail_but_the_same_hash_on_two_disks_does_not(): void
     {
+        $this->dropDedupIndex();
         $a = $this->storageFile('hash-1', 'test_disk');
         $b = $this->storageFile('hash-1', 'test_disk');
         $this->storageFile('hash-2', 'test_disk');
