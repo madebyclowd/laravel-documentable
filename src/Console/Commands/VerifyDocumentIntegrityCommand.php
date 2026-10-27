@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
