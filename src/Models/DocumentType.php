@@ -13,6 +13,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $name
  * @property int $max_size_mb
  * @property array<int, string>|null $allowed_mimes
+ * @property array<int, string>|null $allowed_extensions
+ * @property bool $trust_extension_for_generic_mime
  * @property string $disk
  * @property string $path_prefix
  * @property bool $requires_versioning
@@ -28,6 +30,8 @@ class DocumentType extends Model
         'name',
         'max_size_mb',
         'allowed_mimes',
+        'allowed_extensions',
+        'trust_extension_for_generic_mime',
         'disk',
         'path_prefix',
         'requires_versioning',
@@ -37,6 +41,8 @@ class DocumentType extends Model
 
     protected $casts = [
         'allowed_mimes' => 'array',
+        'allowed_extensions' => 'array',
+        'trust_extension_for_generic_mime' => 'boolean',
         'max_size_mb' => 'integer',
         'requires_versioning' => 'boolean',
         'allows_multiple' => 'boolean',

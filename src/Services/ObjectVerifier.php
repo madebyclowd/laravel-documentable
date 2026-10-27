@@ -6,9 +6,11 @@ namespace MadeByClowd\Documentable\Services;
 
 use finfo;
 use Illuminate\Contracts\Config\Repository as Config;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Contracts\ScanResult;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Exceptions\ScannerUnavailable;
@@ -27,31 +29,93 @@ final class ObjectVerifier
     /** Enough for fileinfo and every magic-byte check; one small ranged read. */
     private const HEAD_BYTES = 8192;
 
+    /** What fileinfo answers for a format it has no signature for. */
+    private const GENERIC_MIMES = ['application/octet-stream', 'text/plain'];
+
     public function __construct(
         private readonly ScansUploadedFile $scanner,
-        private readonly Config $config,
+        private readonly Config $laravelConfig,
+        private readonly DocumentableConfig $config,
+        private readonly Container $container,
     ) {}
 
     /**
      * The one entry point every transport funnels through (local upload, multipart finalize, direct-PUT
-     * finalize): size and mime are resolved from the bytes first, then checked here, so no transport can skip
-     * validation or trust a client-asserted mime type.
+     * finalize, background verification): the size, the extension, the content type and the signature are all
+     * resolved from the bytes and the filename here, so no transport can skip a rule or trust a client-asserted
+     * type.
+     *
+     * The content type is sniffed from `$head`, the object's first bytes. A type that lists extensions and sets
+     * `trust_extension_for_generic_mime` also accepts a file fileinfo can only call `application/octet-stream` or
+     * `text/plain`, when the extension is on the list; a specific type that is not allowed is never excused.
      *
      * @throws ValidationException
      */
-    public function assertSizeAndMime(int $sizeBytes, ?string $mimeType, DocumentType $type): void
+    public function assertUploadRules(DocumentType $type, string $filename, int $sizeBytes, string $head): void
     {
-        $maxBytes = $type->max_size_mb * 1024 * 1024;
+        $this->assertSize($sizeBytes, $type);
 
-        if ($sizeBytes > $maxBytes) {
+        $extension = self::extensionOf($filename);
+        $this->assertExtension($type, $extension);
+
+        $mime = $this->mimeOf($head);
+        $this->assertMime($type, $extension, $mime);
+
+        foreach ($this->config->validators[$type->code] ?? [] as $class) {
+            $reason = $this->container->make($class)->validate($type, $filename, $head);
+
+            if ($reason !== null) {
+                throw ValidationException::withMessages(['file' => $reason]);
+            }
+        }
+    }
+
+    /**
+     * The lowercase extension after the last dot, or an empty string for a name with none or a name that is
+     * only a dot-prefixed word (`.dwg` is a hidden file, not a drawing).
+     */
+    private static function extensionOf(string $filename): string
+    {
+        $name = basename(str_replace('\\', '/', $filename));
+        $dot = strrpos($name, '.');
+
+        return $dot === false || $dot === 0 ? '' : strtolower(substr($name, $dot + 1));
+    }
+
+    private function assertSize(int $sizeBytes, DocumentType $type): void
+    {
+        if ($sizeBytes > $type->max_size_mb * 1024 * 1024) {
             throw ValidationException::withMessages([
                 'file' => "File size exceeds limit of {$type->max_size_mb}MB.",
             ]);
         }
+    }
 
-        if ($type->allowed_mimes && (! $mimeType || ! in_array($mimeType, $type->allowed_mimes, true))) {
+    private function assertExtension(DocumentType $type, string $extension): void
+    {
+        if ($type->allowed_extensions && ! in_array($extension, $type->allowed_extensions, true)) {
+            $shown = $extension === '' ? 'without an extension' : "'.{$extension}'";
+
             throw ValidationException::withMessages([
-                'file' => "File type '{$mimeType}' is not allowed.",
+                'file' => "File extension {$shown} is not allowed.",
+            ]);
+        }
+    }
+
+    private function assertMime(DocumentType $type, string $extension, string $mime): void
+    {
+        if (! $type->allowed_mimes || in_array($mime, $type->allowed_mimes, true)) {
+            return;
+        }
+
+        $trusted = $type->trust_extension_for_generic_mime
+            && in_array($mime, self::GENERIC_MIMES, true)
+            && $extension !== ''
+            && in_array($extension, $type->allowed_extensions ?? [], true);
+
+        if (! $trusted) {
+            throw ValidationException::withMessages([
+                'file' => "File type '{$mime}' is not allowed.",
             ]);
         }
     }
@@ -86,7 +150,7 @@ final class ObjectVerifier
             return;
         }
 
-        if ($result === ScanResult::Error && $this->config->get('documentable.security.scan_error_policy', 'reject') === 'allow') {
+        if ($result === ScanResult::Error && $this->laravelConfig->get('documentable.security.scan_error_policy', 'reject') === 'allow') {
             Log::warning("Documentable stored [{$path}] on disk [{$disk}] without a scan verdict, because the scanner reported an error and security.scan_error_policy is 'allow'.");
 
             return;
@@ -117,7 +181,7 @@ final class ObjectVerifier
 
             return [
                 'hash' => hash_final($context),
-                'mime' => $this->sniffMime($head),
+                'mime' => $this->mimeOf($head),
                 'size' => strlen($head) + $rest,
             ];
         });
@@ -132,14 +196,6 @@ final class ObjectVerifier
         return $this->withStream($disk, $path, function ($stream) use ($bytes) {
             return stream_get_contents($stream, $bytes) ?: '';
         });
-    }
-
-    /**
-     * The content type from the object's first bytes alone, so a large object costs one small read.
-     */
-    public function detectMime(string $disk, string $path): string
-    {
-        return $this->sniffMime($this->head($disk, $path));
     }
 
     /**
@@ -168,7 +224,10 @@ final class ObjectVerifier
         }
     }
 
-    private function sniffMime(string $head): string
+    /**
+     * The content type fileinfo reads from an object's first bytes, never from a client-asserted field.
+     */
+    public function mimeOf(string $head): string
     {
         return (new finfo(FILEINFO_MIME_TYPE))->buffer($head) ?: 'application/octet-stream';
     }

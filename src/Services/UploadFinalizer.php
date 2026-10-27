@@ -79,12 +79,12 @@ final class UploadFinalizer
     private function deferVerification(UploadSession $session, ?string $expectedHash): UploadSession
     {
         $size = $this->verifier->size($session->disk, $session->path);
-        $mime = $this->verifier->detectMime($session->disk, $session->path);
+        $head = $this->verifier->head($session->disk, $session->path);
 
         $this->assertDeclaredSize($session, $size);
-        $this->assertTypeAllows($session, $size, $mime);
+        $this->assertTypeAllows($session, $size, $head);
 
-        return $this->markUploaded(fn () => $this->sessions->markUploadedUnverified($session, $size, $mime, $expectedHash), $session);
+        return $this->markUploaded(fn () => $this->sessions->markUploadedUnverified($session, $size, $this->verifier->mimeOf($head), $expectedHash), $session);
     }
 
     /**
@@ -126,7 +126,7 @@ final class UploadFinalizer
     public function assertAcceptable(UploadSession $session, array $facts, ?string $expectedHash = null): void
     {
         $this->assertDeclaredSize($session, $facts['size']);
-        $this->assertTypeAllows($session, $facts['size'], $facts['mime']);
+        $this->assertTypeAllows($session, $facts['size'], $this->verifier->head($session->disk, $session->path));
         $this->verifier->assertIntegrity($facts['hash'], $expectedHash ?? $session->declared_hash);
         $this->verifier->assertScanClean($session->disk, $session->path);
     }
@@ -146,13 +146,13 @@ final class UploadFinalizer
     /**
      * @throws ValidationException
      */
-    private function assertTypeAllows(UploadSession $session, int $size, string $mime): void
+    private function assertTypeAllows(UploadSession $session, int $size, string $head): void
     {
         $type = $session->documentTypeOrFail();
 
         UploadGuard::assertTypeActive($type);
 
-        $this->verifier->assertSizeAndMime($size, $mime, $type);
+        $this->verifier->assertUploadRules($type, $session->client_filename, $size, $head);
     }
 
     /**

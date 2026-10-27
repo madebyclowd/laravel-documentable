@@ -92,6 +92,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Content Validators
+    |--------------------------------------------------------------------------
+    |
+    | Checks on what an upload really is, run on its first bytes, per document
+    | type code. A type can also set `allowed_extensions` (a list of lowercase
+    | extensions) and `trust_extension_for_generic_mime` in its definition above.
+    | Built in: DwgValidator, DxfValidator, ZipValidator (also docx, xlsx, pptx),
+    | OleDocumentValidator (doc, xls, ppt), SevenZipValidator, RarValidator and
+    | GzipValidator. Write your own by implementing ValidatesUploadedFile.
+    |
+    | 'validators' => [
+    |     'DRAWING' => [\MadeByClowd\Documentable\Validators\DwgValidator::class],
+    | ],
+    |
+    */
+    'validators' => [
+        // ...
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Multipart Upload
     |--------------------------------------------------------------------------
     |

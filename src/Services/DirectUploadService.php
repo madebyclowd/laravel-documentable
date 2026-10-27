@@ -57,7 +57,7 @@ final class DirectUploadService
     public function upload(UploadedFile $file, DocumentType $type, Model $documentable, ?array $metadata = [], ?string $documentGroupId = null, ?string $userId = null): Document
     {
         UploadGuard::assertTypeActive($type);
-        $this->verifier->assertSizeAndMime($file->getSize(), $file->getMimeType(), $type);
+        $this->verifier->assertUploadRules($type, $file->getClientOriginalName(), (int) $file->getSize(), $this->headOf($file));
 
         return DB::transaction(function () use ($file, $type, $documentable, $metadata, $documentGroupId, $userId) {
             $hash = $this->hashOf($file);
@@ -98,7 +98,7 @@ final class DirectUploadService
     public function stageUpload(UploadedFile $file, DocumentType $type, ?string $userId = null): UploadSession
     {
         UploadGuard::assertTypeActive($type);
-        $this->verifier->assertSizeAndMime($file->getSize(), $file->getMimeType(), $type);
+        $this->verifier->assertUploadRules($type, $file->getClientOriginalName(), (int) $file->getSize(), $this->headOf($file));
 
         $path = $this->storeUploadedFile($file, $type);
 
@@ -165,6 +165,14 @@ final class DirectUploadService
     private function expiry(): Carbon
     {
         return now()->addHours((int) $this->config->get('documentable.multipart.session_ttl_hours', 24));
+    }
+
+    /**
+     * The first bytes of the upload, which is all the type rules read.
+     */
+    private function headOf(UploadedFile $file): string
+    {
+        return (string) file_get_contents((string) $file->getRealPath(), false, null, 0, 8192);
     }
 
     private function hashOf(UploadedFile $file): string
