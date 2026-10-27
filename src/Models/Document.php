@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use LogicException;
 use MadeByClowd\Documentable\Enums\DocumentStatus;
 
 /**
@@ -72,6 +73,15 @@ class Document extends Model
     public function documentType(): BelongsTo
     {
         return $this->belongsTo(DocumentType::class);
+    }
+
+    /**
+     * The document's type. A document is created with one and the foreign key keeps it, so a missing type means
+     * the row was tampered with; fail loudly rather than carry a null around.
+     */
+    public function documentTypeOrFail(): DocumentType
+    {
+        return $this->documentType ?? throw new LogicException("Document {$this->id} has no document type.");
     }
 
     public function documentable(): MorphTo

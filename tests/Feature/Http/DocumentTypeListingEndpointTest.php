@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -46,8 +48,17 @@ class DocumentTypeListingEndpointTest extends TestCase
         $this->assertArrayHasKey('name', $first);
         $this->assertArrayHasKey('max_size_mb', $first);
         $this->assertArrayHasKey('allowed_mimes', $first);
+        $this->assertArrayHasKey('allowed_extensions', $first);
+        $this->assertArrayHasKey('trust_extension_for_generic_mime', $first);
         $this->assertArrayHasKey('allows_multiple', $first);
         $this->assertArrayHasKey('requires_versioning', $first);
+    }
+
+    public function test_a_client_can_see_the_extensions_a_type_accepts(): void
+    {
+        $this->makeType(['code' => 'drawing', 'allowed_extensions' => ['dwg', 'dxf']]);
+
+        $this->assertSame(['dwg', 'dxf'], $this->getJson('/documents/types')->json('0.allowed_extensions'));
     }
 
     public function test_excludes_soft_deleted_type(): void

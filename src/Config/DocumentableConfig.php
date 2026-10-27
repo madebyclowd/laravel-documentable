@@ -10,6 +10,7 @@ use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
+use MadeByClowd\Documentable\Contracts\ValidatesUploadedFile;
 use MadeByClowd\Documentable\Drivers\S3MultipartDriver;
 use MadeByClowd\Documentable\Exceptions\InvalidDocumentableConfig;
 use ReflectionMethod;
@@ -35,6 +36,8 @@ final readonly class DocumentableConfig
      * @param  array<string, array<string, mixed>>  $disks
      * @param  array<string, class-string<MultipartUploadDriver>>  $multipartDrivers
      * @param  list<string>|null  $allowedDocumentableTypes
+     * @param  array<string, list<class-string<ValidatesUploadedFile>>>  $validators  keyed by document type code
+     * @param  array<string, list<class-string<ValidatesUploadedFile>>>  $validators  keyed by document type code
      * @param  class-string<AuthorizesDocumentAccess>|null  $authorizerResolver
      * @param  class-string<ResolvesDedupScope>|null  $dedupScopeResolver
      * @param  class-string<ScansUploadedFile>|null  $scanner
@@ -50,14 +53,17 @@ final readonly class DocumentableConfig
         public string $etagStrategy,
         public string $partUploadUrlTtl,
         public int $sessionTtlHours,
-        public bool $useNativeChecksum,
         public array $multipartDrivers,
         public string $reaperFrequency,
         public int $storageFileGraceHours,
+        public int $syncHashMaxBytes,
+        public ?string $verificationConnection,
+        public ?string $verificationQueue,
         public ?string $authorizerResolver,
         public ?string $dedupScopeResolver,
         public ?string $scanner,
         public ?array $allowedDocumentableTypes,
+        public array $validators,
         public bool $allowGuestUserId,
         public string $scanErrorPolicy,
         public int $urlMaxTtlMinutes,
@@ -122,6 +128,8 @@ final readonly class DocumentableConfig
             throw new InvalidDocumentableConfig('security.allowed_documentable_types', 'must be null or an array of class names', 'Use null to reject every unmapped type, or list the model classes you accept');
         }
 
+        $validators = self::validators($c['validators']);
+
         $middleware = $c['middleware'];
         if (! is_array($middleware)) {
             throw new InvalidDocumentableConfig('middleware', 'must be an array', "Use a list such as ['api']");
@@ -145,14 +153,17 @@ final readonly class DocumentableConfig
             etagStrategy: $etag,
             partUploadUrlTtl: $partTtl,
             sessionTtlHours: self::int($multipart['session_ttl_hours'], 'multipart.session_ttl_hours', 1, 'a positive number of hours'),
-            useNativeChecksum: self::bool($multipart['use_native_checksum'], 'multipart.use_native_checksum'),
             multipartDrivers: $drivers,
             reaperFrequency: self::frequency($c['lifecycle']['reaper_frequency']),
             storageFileGraceHours: self::int($c['lifecycle']['storage_file_grace_hours'], 'lifecycle.storage_file_grace_hours', 0, 'zero or more hours'),
+            syncHashMaxBytes: self::int($c['verification']['sync_hash_max_bytes'], 'verification.sync_hash_max_bytes', 0, 'zero or more bytes'),
+            verificationConnection: self::nullableString($c['verification']['connection'], 'verification.connection'),
+            verificationQueue: self::nullableString($c['verification']['queue'], 'verification.queue'),
             authorizerResolver: self::implementing($c['authorization']['resolver'], AuthorizesDocumentAccess::class, 'authorization.resolver'),
             dedupScopeResolver: self::implementing($c['dedup']['scope_resolver'], ResolvesDedupScope::class, 'dedup.scope_resolver'),
             scanner: self::implementing($c['security']['scanner'], ScansUploadedFile::class, 'security.scanner'),
             allowedDocumentableTypes: $allowed,
+            validators: $validators,
             allowGuestUserId: self::bool($c['security']['allow_guest_user_id'], 'security.allow_guest_user_id'),
             scanErrorPolicy: $scanPolicy,
             urlMaxTtlMinutes: self::int($c['url']['max_ttl_minutes'], 'url.max_ttl_minutes', 1, 'a positive number of minutes'),
@@ -180,12 +191,12 @@ final readonly class DocumentableConfig
             'load_migrations' => true,
             'load_routes' => true,
             'types' => [],
+            'validators' => [],
             'multipart' => [
                 'threshold_bytes' => 10 * 1024 * 1024,
                 'etag_strategy' => 'server-authoritative',
                 'part_upload_url_ttl' => '+1 hour',
                 'session_ttl_hours' => 24,
-                'use_native_checksum' => false,
                 'drivers' => ['s3' => S3MultipartDriver::class],
             ],
             'lifecycle' => [
@@ -200,6 +211,7 @@ final readonly class DocumentableConfig
                 'allow_guest_user_id' => false,
                 'scan_error_policy' => 'reject',
             ],
+            'verification' => ['sync_hash_max_bytes' => 50 * 1024 * 1024, 'connection' => null, 'queue' => null],
             'url' => ['max_ttl_minutes' => 1440],
             'storage_path' => ['generator' => null],
             'disks' => [],
@@ -236,7 +248,7 @@ final readonly class DocumentableConfig
 
     private static function isFixedSection(string $key): bool
     {
-        return in_array($key, ['multipart', 'lifecycle', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit'], true);
+        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit'], true);
     }
 
     /**
@@ -258,6 +270,40 @@ final readonly class DocumentableConfig
         if (! in_array($disk, $knownDisks, true)) {
             throw new InvalidDocumentableConfig($key, "names the disk '{$disk}', which is not defined", 'Add it to config/filesystems.php or point the key at an existing disk');
         }
+    }
+
+    /**
+     * @return array<string, list<class-string<ValidatesUploadedFile>>>
+     */
+    private static function validators(mixed $value): array
+    {
+        if (! is_array($value) || ($value !== [] && array_is_list($value))) {
+            throw new InvalidDocumentableConfig('validators', 'must be a map of document type code to validator classes', "Use ['DRAWING' => [DwgValidator::class]]");
+        }
+
+        $checked = [];
+
+        foreach ($value as $code => $classes) {
+            if (! is_array($classes) || ! array_is_list($classes)) {
+                throw new InvalidDocumentableConfig("validators.{$code}", 'must be a list of validator classes', "Use ['{$code}' => [DwgValidator::class]]");
+            }
+
+            foreach ($classes as $class) {
+                $checked[(string) $code][] = self::implementing($class, ValidatesUploadedFile::class, "validators.{$code}")
+                    ?? throw new InvalidDocumentableConfig("validators.{$code}", 'must be a class name', 'Name a class that implements '.ValidatesUploadedFile::class);
+            }
+        }
+
+        return $checked;
+    }
+
+    private static function nullableString(mixed $value, string $key): ?string
+    {
+        if ($value !== null && (! is_string($value) || $value === '')) {
+            throw new InvalidDocumentableConfig($key, 'must be null or a non-empty string', 'Use null for the application default, or name a queue connection or queue');
+        }
+
+        return $value;
     }
 
     private static function string(mixed $value, string $key, string $fix): string

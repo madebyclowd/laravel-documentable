@@ -70,7 +70,7 @@ class S3MultipartDriverTest extends TestCase
         $this->assertArrayNotHasKey('ChecksumAlgorithm', $captured->toArray());
     }
 
-    public function test_create_adds_native_checksum_algorithm_when_configured(): void
+    public function test_create_never_asks_for_a_provider_checksum_even_if_the_removed_setting_is_present(): void
     {
         $this->setUpDisk();
         config()->set('documentable.multipart.use_native_checksum', true);
@@ -81,13 +81,12 @@ class S3MultipartDriverTest extends TestCase
         $handler->append(function (CommandInterface $command) use (&$captured) {
             $captured = $command;
 
-            return new Result(['UploadId' => 'upload-checksum']);
+            return new Result(['UploadId' => 'upload-1']);
         });
 
-        $driver = $this->makeDriver($handler);
-        $driver->create('s3_driver_test', 'uploads/a.bin', 'a.bin');
+        $this->makeDriver($handler)->create('s3_driver_test', 'uploads/a.bin', 'a.bin');
 
-        $this->assertSame('SHA256', $captured['ChecksumAlgorithm']);
+        $this->assertArrayNotHasKey('ChecksumAlgorithm', $captured->toArray());
     }
 
     public function test_create_applies_aes256_server_side_encryption(): void
@@ -288,33 +287,5 @@ class S3MultipartDriverTest extends TestCase
         $this->expectException(S3Exception::class);
 
         $this->makeDriver($handler)->abort('s3_driver_test', 'uploads/a.bin', 'upload-123');
-    }
-
-    public function test_retrieve_checksum_decodes_base64_sha256_to_hex(): void
-    {
-        $this->setUpDisk();
-        $rawChecksum = hash('sha256', 'hello world', true);
-
-        $handler = new MockHandler;
-        $handler->append(new Result([
-            'ChecksumSHA256' => base64_encode($rawChecksum),
-        ]));
-
-        $driver = $this->makeDriver($handler);
-        $checksum = $driver->retrieveChecksum('s3_driver_test', 'uploads/a.bin');
-
-        $this->assertSame(bin2hex($rawChecksum), $checksum);
-    }
-
-    public function test_retrieve_checksum_returns_null_when_provider_has_none(): void
-    {
-        $this->setUpDisk();
-        $handler = new MockHandler;
-        $handler->append(new Result([]));
-
-        $driver = $this->makeDriver($handler);
-        $checksum = $driver->retrieveChecksum('s3_driver_test', 'uploads/a.bin');
-
-        $this->assertNull($checksum);
     }
 }

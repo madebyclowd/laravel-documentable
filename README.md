@@ -345,8 +345,8 @@ POST /documents/multipart/complete
 ```
 
 `parts` is only read when `etag_strategy = client`; omit it under `server-authoritative`. The server
-assembles the object, verifies integrity (native-checksum fast path or a full re-hash — transparent
-either way), and creates the `Document`. Any failure deletes the assembled object server-side first.
+assembles the object, verifies integrity (it streams the object and hashes it, since no provider can attest a
+full-file SHA-256), and creates the `Document`. Any failure deletes the assembled object server-side first.
 
 **Abort**, if the client gives up partway (closed tab, network drop):
 
@@ -608,7 +608,6 @@ Full annotated file lives at [`config/documentable.php`](config/documentable.php
     'etag_strategy' => 'server-authoritative', // or 'client'
     'part_upload_url_ttl' => '+1 hour',
     'session_ttl_hours' => 24,
-    'use_native_checksum' => false, // leave false: S3 multipart checksums are composite and never equal the file's SHA-256
     'drivers' => ['s3' => S3MultipartDriver::class],
 ],
 'lifecycle' => ['pending_ttl_hours' => 24, 'reaper_frequency' => 'hourly'],

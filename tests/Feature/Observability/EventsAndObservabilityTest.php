@@ -201,45 +201,27 @@ class EventsAndObservabilityTest extends TestCase
         $this->assertSame('actor-99', Document::withTrashed()->find($document->id)->deleted_by);
     }
 
-    public function test_native_checksum_fast_path_used_when_enabled_and_supported(): void
+    public function test_a_multipart_upload_is_verified_against_its_real_bytes(): void
     {
-        config()->set('documentable.multipart.use_native_checksum', true);
-
         $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
 
         $session = $this->service->initiateMultipartUpload($type, 'f.bin', 'user-1');
         FakeMultipartUploadDriver::uploadPart($session->upload_id, 1, 'hello world');
 
-        // Deliberately wrong checksum: proves the driver's checksum is actually what
-        // gets compared against expectedHash — if the code silently fell back to a
-        // real content hash instead, this would match 'hello world' and NOT throw.
-        FakeMultipartUploadDriver::$fakeChecksum = str_repeat('0', 64);
+        $uploaded = $this->service->completeMultipartUpload($session, null, hash('sha256', 'hello world'));
+
+        $this->assertSame(hash('sha256', 'hello world'), $uploaded->object_hash);
+    }
+
+    public function test_a_multipart_upload_with_a_wrong_expected_hash_is_rejected(): void
+    {
+        $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
+
+        $session = $this->service->initiateMultipartUpload($type, 'f.bin', 'user-1');
+        FakeMultipartUploadDriver::uploadPart($session->upload_id, 1, 'hello world');
 
         $this->expectException(ValidationException::class);
 
-        $this->service->completeMultipartUpload(
-            $session,
-            null,
-            hash('sha256', 'hello world') // real content hash != the fake checksum above
-        );
-    }
-
-    public function test_native_checksum_fast_path_falls_back_to_full_hash_when_unsupported(): void
-    {
-        config()->set('documentable.multipart.use_native_checksum', true);
-        FakeMultipartUploadDriver::$fakeChecksum = null; // simulates unsupported provider
-
-        $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
-
-        $session = $this->service->initiateMultipartUpload($type, 'f.bin', 'user-1');
-        FakeMultipartUploadDriver::uploadPart($session->upload_id, 1, 'hello world');
-
-        $uploaded = $this->service->completeMultipartUpload(
-            $session,
-            null,
-            hash('sha256', 'hello world')
-        );
-
-        $this->assertSame(hash('sha256', 'hello world'), $uploaded->object_hash);
+        $this->service->completeMultipartUpload($session, null, hash('sha256', 'something else'));
     }
 }

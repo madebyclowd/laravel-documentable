@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Repositories;
 
 use Illuminate\Database\Eloquent\Collection;
+use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Models\DocumentType;
 
 class DocumentRepository
 {
@@ -106,6 +108,37 @@ class DocumentRepository
         }
 
         return $query->get();
+    }
+
+    /**
+     * Give the slot back to the document a refused one replaced: the newest other usable document of its group,
+     * brought back from the trash when the type keeps no history (a replacement there restarts at version 1, so
+     * the version number cannot identify the predecessor). Does nothing when the group had no other document.
+     */
+    public function restorePreviousLatest(Document $refused, DocumentType $type): ?Document
+    {
+        $previous = Document::withTrashed()
+            ->where('document_group_id', $refused->document_group_id)
+            ->whereKeyNot($refused->id)
+            ->where('status', DocumentStatus::Committed->value)
+            ->orderByDesc('created_at')
+            ->orderByDesc('version')
+            ->first();
+
+        if ($previous === null) {
+            return null;
+        }
+
+        if ($previous->trashed()) {
+            $previous->restore();
+        }
+
+        $previous->update([
+            'is_latest' => true,
+            'latest_marker' => $type->allows_multiple ? $previous->document_group_id : $type->id,
+        ]);
+
+        return $previous;
     }
 
     public function findById(string $id): Document

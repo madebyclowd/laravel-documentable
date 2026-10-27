@@ -22,6 +22,10 @@ class DocumentableConfigTest extends TestCase
 
         $this->assertSame('s3', $config->disk);
         $this->assertSame('string', $config->keyType);
+        $this->assertSame([], $config->validators);
+        $this->assertSame(50 * 1024 * 1024, $config->syncHashMaxBytes);
+        $this->assertNull($config->verificationConnection);
+        $this->assertNull($config->verificationQueue);
         $this->assertTrue($config->loadRoutes);
         $this->assertSame(['api'], $config->middleware);
         $this->assertSame('documents', $config->throttle);
@@ -86,6 +90,13 @@ class DocumentableConfigTest extends TestCase
         return ['int' => ['int'], 'uuid' => ['uuid'], 'ulid' => ['ulid'], 'string' => ['string']];
     }
 
+    public function test_the_removed_native_checksum_setting_is_ignored_not_honoured(): void
+    {
+        $config = DocumentableConfig::fromArray(['multipart' => ['use_native_checksum' => true]], self::DISKS);
+
+        $this->assertFalse(property_exists($config, 'useNativeChecksum'));
+    }
+
     public function test_the_object_is_immutable(): void
     {
         $this->assertTrue((new ReflectionClass(DocumentableConfig::class))->isReadOnly());
@@ -119,6 +130,13 @@ class DocumentableConfigTest extends TestCase
     public static function invalidInputs(): array
     {
         return [
+            'sync hash limit negative' => [['verification' => ['sync_hash_max_bytes' => -1]], 'verification.sync_hash_max_bytes', 'zero or more'],
+            'verification queue empty' => [['verification' => ['queue' => '']], 'verification.queue', 'non-empty string'],
+            'verification connection not a string' => [['verification' => ['connection' => 5]], 'verification.connection', 'non-empty string'],
+            'validators not a map' => [['validators' => 'dwg'], 'validators', 'map'],
+            'validator list not a list' => [['validators' => ['CAD' => 'Foo']], 'validators.CAD', 'list'],
+            'validator entry null' => [['validators' => ['CAD' => [null]]], 'validators.CAD', 'class name'],
+            'validator not implementing the contract' => [['validators' => ['CAD' => [stdClass::class]]], 'validators.CAD', 'ValidatesUploadedFile'],
             'unknown key type' => [['key_type' => 'bigint'], 'key_type', 'int, uuid, ulid, string'],
             'unknown disk' => [['disk' => 'nope'], 'disk', 'config/filesystems.php'],
             'empty disk' => [['disk' => ''], 'disk', 'config/filesystems.php'],

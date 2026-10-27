@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
@@ -18,7 +20,7 @@ class DocumentTypeController extends Controller
     public function index(Request $request): JsonResponse
     {
         $types = DocumentType::whereNull('deleted_at')
-            ->get(['id', 'code', 'name', 'max_size_mb', 'allowed_mimes', 'allows_multiple', 'requires_versioning'])
+            ->get(['id', 'code', 'name', 'max_size_mb', 'allowed_mimes', 'allowed_extensions', 'trust_extension_for_generic_mime', 'allows_multiple', 'requires_versioning'])
             ->filter(fn (DocumentType $type) => $this->authorizer->canUpload($request->user(), $type, null))
             ->values();
 

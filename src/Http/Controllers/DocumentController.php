@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
+use MadeByClowd\Documentable\Exceptions\DocumentNotReady;
 use MadeByClowd\Documentable\Http\Requests\ListDocumentsRequest;
 use MadeByClowd\Documentable\Http\Requests\UploadDocumentRequest;
 use MadeByClowd\Documentable\Http\Requests\UrlRequest;
@@ -105,7 +106,11 @@ class DocumentController extends Controller
             abort(403);
         }
 
-        $url = $this->service->getUrl($document, now()->addMinutes($request->expiresInMinutes()), $request->disposition());
+        try {
+            $url = $this->service->getUrl($document, now()->addMinutes($request->expiresInMinutes()), $request->disposition());
+        } catch (DocumentNotReady $e) {
+            abort(409, $e->getMessage());
+        }
 
         return response()->json(['url' => $url]);
     }

@@ -131,7 +131,7 @@ class BoostDistributionTest extends TestCase
     {
         $text = file_get_contents($this->guideline()).file_get_contents($this->skill());
 
-        foreach (['documents:sync-types', "'throw' => true", 'ShouldQueueAfterCommit', 'allow_guest_user_id', 'enforceMorphMap', 'use_native_checksum'] as $fact) {
+        foreach (['documents:sync-types', "'throw' => true", 'ShouldQueueAfterCommit', 'allow_guest_user_id', 'enforceMorphMap'] as $fact) {
             $this->assertStringContainsString($fact, $text, "Missing: {$fact}");
         }
     }

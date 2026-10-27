@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Contracts;
 
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
@@ -56,15 +58,4 @@ interface MultipartUploadDriver
      *                                          upload any more; the caller treats that as already aborted.
      */
     public function abort(string $disk, string $path, string $uploadId): void;
-
-    /**
-     * Retrieve a provider-computed full-object checksum for the assembled object, if the
-     * backend supports it and config('documentable.multipart.use_native_checksum') is
-     * enabled — an optional fast path that avoids a full re-download-and-hash. Return null
-     * when unsupported/unavailable; the caller always falls back to the full-stream-hash
-     * check in that case, so this is never the only integrity path.
-     *
-     * @return string|null hex-encoded sha256, same format as hash('sha256', ...)
-     */
-    public function retrieveChecksum(string $disk, string $path): ?string;
 }

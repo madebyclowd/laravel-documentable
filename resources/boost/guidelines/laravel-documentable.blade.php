@@ -35,8 +35,7 @@ and pluggable authorization, scanning and storage-path contracts. Every write go
 - Document events fire after the outermost commit. Queued listeners should implement
   `ShouldQueueAfterCommit`; a listener can no longer abort the transaction by throwing.
 - A failed presigned finalize never deletes the object it was given, so add a bucket lifecycle rule for
-  upload prefixes. Leave `use_native_checksum` false: S3 multipart checksums are composite and never equal
-  the file's SHA-256.
+  upload prefixes.
 - Run `php artisan boost:update` after upgrading the package; consuming apps hold snapshots of these files.
 
 See the `laravel-documentable` Agent Skill (installed alongside this guideline) for upload transports,

@@ -106,6 +106,21 @@ final class UploadSessionRepository
     }
 
     /**
+     * Move the session to `uploaded` on the strength of cheap checks only (size and the first bytes). The hash
+     * stays empty, which is what marks the session unverified; the declared hash is kept for the job to compare.
+     *
+     * @throws IllegalUploadSessionTransition
+     */
+    public function markUploadedUnverified(UploadSession $session, int $size, string $mime, ?string $declaredHash): UploadSession
+    {
+        return $this->transition($session, UploadSessionStatus::Uploaded, array_filter([
+            'object_size' => $size,
+            'object_mime' => $mime,
+            'declared_hash' => $declaredHash,
+        ], fn ($value) => $value !== null));
+    }
+
+    /**
      * @throws IllegalUploadSessionTransition
      */
     public function markAttached(UploadSession $session, Model $owner, ?StorageFile $storageFile = null): UploadSession
