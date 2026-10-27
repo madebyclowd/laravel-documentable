@@ -7,9 +7,13 @@ namespace MadeByClowd\Documentable\Tests\Feature\Integrity;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
+use MadeByClowd\Documentable\Integrity\IntegrityRepairer;
+use MadeByClowd\Documentable\Integrity\RepairStep;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Tests\TestCase;
+use Mockery;
 
 class RepairCommandTest extends TestCase
 {
@@ -154,6 +158,46 @@ class RepairCommandTest extends TestCase
 
         $this->artisan('documents:repair', ['--apply' => true])
             ->expectsOutputToContain('cannot be repaired automatically')
+            ->assertExitCode(1);
+    }
+
+    public function test_a_step_that_cannot_finish_is_reported_and_fails_the_command(): void
+    {
+        $this->dropDedupIndex();
+        Storage::disk('test_disk')->put('blobs/keep', 'bytes');
+        Storage::disk('test_disk')->put('blobs/extra', 'bytes');
+        $this->storageFile('hash-1', path: 'blobs/keep', createdAt: '2026-01-01 10:00:00');
+        $extra = $this->storageFile('hash-1', path: 'blobs/extra', createdAt: '2026-01-02 10:00:00');
+
+        // The bucket refuses the delete, as it does with an expired token on a disk with `throw => false`.
+        $disk = Mockery::mock(Storage::disk('test_disk'))->makePartial();
+        $disk->shouldReceive('delete')->andReturn(false);
+        Storage::set('test_disk', $disk);
+
+        $this->artisan('documents:repair', ['--apply' => true])
+            ->expectsOutputToContain('1 step(s) did not complete and stay for the next run')
+            ->expectsOutputToContain("Remove duplicate storage file {$extra->id}")
+            ->assertExitCode(1);
+
+        $this->assertNotNull(StorageFile::find($extra->id));
+    }
+
+    public function test_removing_a_duplicate_that_is_already_gone_counts_as_done(): void
+    {
+        $failed = $this->app->make(IntegrityRepairer::class)->apply([RepairStep::removeStorageFile('missing-id', 'kept-id')]);
+
+        $this->assertSame([], $failed);
+    }
+
+    public function test_a_key_type_problem_is_listed_by_a_dry_run_and_fails_it(): void
+    {
+        $document = $this->latestDocument($this->singleSlotType(), $this->owner());
+        Document::whereKey($document->id)->update(['documentable_id' => 'abc']);
+        config()->set('documentable.key_type', 'int');
+        $this->app->forgetInstance(DocumentableConfig::class);
+
+        $this->artisan('documents:repair', ['--dry-run' => true])
+            ->expectsOutputToContain("does not fit key_type 'int'")
             ->assertExitCode(1);
     }
 }

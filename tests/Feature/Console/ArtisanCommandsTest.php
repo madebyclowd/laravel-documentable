@@ -360,6 +360,34 @@ class ArtisanCommandsTest extends TestCase
         @unlink(config_path('documentable.php'));
     }
 
+    public function test_install_command_asks_for_the_key_type_when_interactive(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--shape' => 'separate-api', '--etag-strategy' => 'server-authoritative', '--types' => 'code-first'])
+            ->expectsChoice(
+                "What type is the primary key of the models that will own documents?\n".
+                "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+                "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+                "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+                '                use the column index, and PostgreSQL needs no casts.',
+                'ulid',
+                ['int', 'uuid', 'ulid', 'string']
+            )
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsConfirmation(
+                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
+                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
+                'document — fine for local development, not fine for production.',
+                'no'
+            )
+            ->assertExitCode(0);
+
+        $this->assertStringContainsString("'key_type' => 'ulid'", file_get_contents(config_path('documentable.php')));
+
+        @unlink(config_path('documentable.php'));
+    }
+
     public function test_install_command_invalid_key_type_option_fails_fast(): void
     {
         $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--key-type' => 'bigint'])
