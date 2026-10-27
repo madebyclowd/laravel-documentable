@@ -61,20 +61,22 @@ return new class extends Migration
 
     private function convertTo(string $keyType): void
     {
-        $postgres = DB::connection()->getDriverName() === 'pgsql';
+        if (DB::connection()->getDriverName() === 'pgsql' && in_array($keyType, ['int', 'uuid'], true)) {
+            // PostgreSQL does not cast a string column to these types on its own, and Laravel 12's `change()` has
+            // no way to pass the USING clause, so the statement is written out.
+            $type = $keyType === 'int' ? 'bigint' : 'uuid';
+            DB::statement("alter table documents alter column documentable_id type {$type} using documentable_id::{$type}");
 
-        Schema::table('documents', function (Blueprint $table) use ($keyType, $postgres) {
+            return;
+        }
+
+        Schema::table('documents', function (Blueprint $table) use ($keyType) {
             $column = match ($keyType) {
                 'int' => $table->unsignedBigInteger('documentable_id'),
                 'uuid' => $table->uuid('documentable_id'),
                 'ulid' => $table->ulid('documentable_id'),
                 default => $table->string('documentable_id'),
             };
-
-            // PostgreSQL does not cast between these types on its own.
-            if ($postgres && in_array($keyType, ['int', 'uuid'], true)) {
-                $column->using('documentable_id::'.($keyType === 'int' ? 'bigint' : 'uuid'));
-            }
 
             $column->nullable()->change();
         });
