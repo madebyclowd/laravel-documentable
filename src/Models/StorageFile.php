@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -9,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * @property string $id
  * @property string $file_hash
+ * @property string|null $content_hash
  * @property string $disk
  * @property string $path
  * @property string $mime_type
@@ -21,6 +24,7 @@ class StorageFile extends Model
 
     protected $fillable = [
         'file_hash',
+        'content_hash',
         'disk',
         'path',
         'mime_type',

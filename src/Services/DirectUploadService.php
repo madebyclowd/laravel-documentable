@@ -12,7 +12,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
-use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
 use MadeByClowd\Documentable\Enums\UploadKind;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Models\Document;
@@ -33,7 +32,6 @@ use RuntimeException;
 final class DirectUploadService
 {
     public function __construct(
-        private readonly ResolvesDedupScope $dedupScopeResolver,
         private readonly GeneratesStoragePath $pathGenerator,
         private readonly ObjectVerifier $verifier,
         private readonly StoredObjectRegistrar $registrar,
@@ -42,6 +40,7 @@ final class DirectUploadService
         private readonly UploadSessionRepository $sessions,
         private readonly ActorResolver $actor,
         private readonly Config $config,
+        private readonly DedupUserResolver $users = new DedupUserResolver,
     ) {}
 
     /**
@@ -61,11 +60,13 @@ final class DirectUploadService
 
         return DB::transaction(function () use ($file, $type, $documentable, $metadata, $documentGroupId, $userId) {
             $hash = $this->hashOf($file);
-            $dedupKey = $this->dedupScopeResolver->scopeKey($hash, $documentable);
+            $user = $this->users->resolve($userId);
 
             $storageFile = $this->registrar->getOrCreateStorageFile(
-                $dedupKey,
-                $type->disk,
+                $hash,
+                $type,
+                $user,
+                $documentable,
                 fn () => $this->storeUploadedFile($file, $type),
                 (string) $file->getMimeType(),
                 $file->getSize(),

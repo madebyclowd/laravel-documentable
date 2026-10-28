@@ -213,16 +213,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Deduplication Scope
+    | Deduplication Scope & Proof-of-Possession Handshake
     |--------------------------------------------------------------------------
     |
-    | Default dedup is global by file hash. Bind your own implementation of
-    | MadeByClowd\Documentable\Contracts\ResolvesDedupScope to scope dedup
-    | (e.g. per tenant) if hash collisions across tenants are a concern.
+    | Default dedup is TypeAndTenantScope (scopes by document type and tenant).
+    | Bind GlobalDedupScope to opt into global content-hash deduplication across
+    | all slots and tenants.
+    |
+    | challenge_ttl: time in seconds a handshake challenge remains valid (default 300).
+    | max_range_bytes: upper bound on byte ranges requested in challenges (default 64 KiB).
+    | throttle: named rate limiter for handshake endpoints (default 'documents-handshake').
     |
     */
     'dedup' => [
         'scope_resolver' => null,
+        'challenge_ttl' => 300,
+        'max_range_bytes' => 64 * 1024,
+        'throttle' => 'documents-handshake',
     ],
 
     /*

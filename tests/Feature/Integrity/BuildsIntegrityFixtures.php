@@ -58,8 +58,12 @@ trait BuildsIntegrityFixtures
 
     protected function storageFile(?string $hash = null, string $disk = 'test_disk', ?string $path = null, ?string $createdAt = null): StorageFile
     {
+        $fileHash = $hash ?? hash('sha256', Str::random());
+        $contentHash = strlen($fileHash) === 64 && ctype_xdigit($fileHash) ? $fileHash : hash('sha256', $fileHash);
+
         $file = StorageFile::create([
-            'file_hash' => $hash ?? hash('sha256', Str::random()),
+            'file_hash' => $fileHash,
+            'content_hash' => $contentHash,
             'disk' => $disk,
             'path' => $path ?? 'blobs/'.Str::uuid(),
             'mime_type' => 'application/pdf',

@@ -6,6 +6,7 @@ namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
+use MadeByClowd\Documentable\Models\DedupChallenge;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Repositories\UploadSessionRepository;
 use MadeByClowd\Documentable\Services\DocumentService;
@@ -55,6 +56,15 @@ class CleanOrphanedDocumentsCommand extends Command
 
         if ($this->option('storage-files')) {
             $this->sweepStorageFiles($service, $hoursOverride);
+        }
+
+        $prunedChallenges = DedupChallenge::where('expires_at', '<=', now())
+            ->orWhereNotNull('consumed_at')
+            ->orWhere('attempts', '>=', 3)
+            ->delete();
+
+        if ($prunedChallenges > 0) {
+            $this->info("Pruned {$prunedChallenges} expired or consumed dedup challenge(s).");
         }
 
         return $failed > 0 ? self::FAILURE : self::SUCCESS;

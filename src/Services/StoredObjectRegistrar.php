@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Services;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
+use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
@@ -28,6 +30,7 @@ final class StoredObjectRegistrar
         private readonly StorageFileRepository $storageFileRepository,
         private readonly ResolvesDedupScope $dedupScopeResolver,
         private readonly ObjectVerifier $verifier,
+        private readonly DedupUserResolver $users = new DedupUserResolver,
     ) {}
 
     /**
@@ -57,14 +60,16 @@ final class StoredObjectRegistrar
      */
     public function getOrCreateStorageFile(
         string $hash,
-        string $disk,
+        DocumentType $type,
+        ?Authenticatable $user,
+        ?Model $owner,
         callable $pathProvider,
         string $mimeType,
         int $sizeBytes,
         array $metadata = [],
         bool $scan = true
     ): StorageFile {
-        $existing = $this->storageFileRepository->findByHash($hash, $disk, lock: true);
+        $existing = $this->storageFileRepository->findReusable($hash, $type, $user, $owner, lock: true);
 
         if ($existing !== null) {
             return $existing;
@@ -73,10 +78,13 @@ final class StoredObjectRegistrar
         $path = $pathProvider();
 
         if ($scan) {
-            $this->deleteOnFailure($disk, $path, fn () => $this->verifier->assertScanClean($disk, $path));
+            $this->deleteOnFailure($type->disk, $path, fn () => $this->verifier->assertScanClean($type->disk, $path));
         }
 
-        $storageFile = $this->storageFileRepository->createOrFirst($hash, $disk, [
+        $dedupKey = $this->dedupScopeResolver->scopeKey($hash, $type, $user, $owner);
+
+        $storageFile = $this->storageFileRepository->createOrFirst($dedupKey, $type->disk, [
+            'content_hash' => $hash,
             'path' => $path,
             'mime_type' => $mimeType,
             'size_bytes' => $sizeBytes,
@@ -84,7 +92,7 @@ final class StoredObjectRegistrar
         ]);
 
         if ($storageFile->path !== $path) {
-            Storage::disk($disk)->delete($path);
+            Storage::disk($type->disk)->delete($path);
         }
 
         return $storageFile;
@@ -103,12 +111,17 @@ final class StoredObjectRegistrar
             return $this->registerUnverifiedObject($session);
         }
 
-        $dedupKey = $this->dedupScopeResolver->scopeKey((string) $session->object_hash, $owner);
-        $existing = $this->storageFileRepository->findByHash($dedupKey, $session->disk, lock: true);
+        $type = $session->documentTypeOrFail();
+        $user = $this->users->resolve($session->user_id);
+        $hash = (string) $session->object_hash;
+
+        $existing = $this->storageFileRepository->findReusable($hash, $type, $user, $owner, lock: true);
 
         $storageFile = $this->getOrCreateStorageFile(
-            $dedupKey,
-            $session->disk,
+            $hash,
+            $type,
+            $user,
+            $owner,
             fn () => $session->path,
             (string) $session->object_mime,
             (int) $session->object_size,
@@ -131,6 +144,7 @@ final class StoredObjectRegistrar
     private function registerUnverifiedObject(UploadSession $session): StorageFile
     {
         return $this->storageFileRepository->createOrFirst(self::PENDING_KEY_PREFIX.$session->id, $session->disk, [
+            'content_hash' => null,
             'path' => $session->path,
             'mime_type' => (string) $session->object_mime,
             'size_bytes' => (int) $session->object_size,
