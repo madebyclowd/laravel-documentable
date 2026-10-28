@@ -63,7 +63,8 @@ final class ObjectRangeReader
         }
 
         try {
-            if (fseek($stream, $offset) !== 0) {
+            // fseek() warns as well as returning -1 on a stream that cannot seek; the return value is the signal.
+            if (@fseek($stream, $offset) !== 0) {
                 throw new RuntimeException("Could not seek to {$offset} in [{$path}] on disk [{$disk}].");
             }
 

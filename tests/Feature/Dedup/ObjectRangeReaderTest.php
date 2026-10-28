@@ -130,6 +130,28 @@ class ObjectRangeReaderTest extends TestCase
         (new ObjectRangeReader)->read('test_disk', 'a.bin', 0, 0);
     }
 
+    public function test_it_fails_when_the_stream_cannot_seek(): void
+    {
+        stream_wrapper_register('unseekable', UnseekableStream::class);
+
+        try {
+            $driver = new LocalFilesystemAdapter(sys_get_temp_dir());
+            Storage::set('unseekable_disk', new class(new Filesystem($driver), $driver, []) extends FilesystemAdapter
+            {
+                public function readStream($path)
+                {
+                    return fopen('unseekable://data', 'r');
+                }
+            });
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('Could not seek');
+            (new ObjectRangeReader)->read('unseekable_disk', 'a.bin', 3, 4);
+        } finally {
+            stream_wrapper_unregister('unseekable');
+        }
+    }
+
     public function test_it_issues_a_ranged_get_on_a_real_s3_compatible_store(): void
     {
         $endpoint = env('RUSTFS_ENDPOINT');
@@ -163,5 +185,41 @@ class ObjectRangeReaderTest extends TestCase
         } finally {
             $disk->delete($path);
         }
+    }
+}
+
+/**
+ * A stream that reads but has no stream_seek(), so fseek() on it fails.
+ */
+class UnseekableStream
+{
+    /** @var resource|null */
+    public $context;
+
+    private int $position = 0;
+
+    public function stream_open(string $path, string $mode, int $options, ?string &$openedPath): bool
+    {
+        return true;
+    }
+
+    public function stream_read(int $count): string
+    {
+        $this->position += $count;
+
+        return str_repeat('x', $count);
+    }
+
+    public function stream_eof(): bool
+    {
+        return $this->position > 100;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    public function stream_stat(): array
+    {
+        return [];
     }
 }
