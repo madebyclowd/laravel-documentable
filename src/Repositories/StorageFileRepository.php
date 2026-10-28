@@ -44,19 +44,13 @@ class StorageFileRepository
     }
 
     /**
-     * The stored file for a dedup key on one disk. Rerouted from package lookups through findReusable().
+     * The stored file for a dedup key on one disk. Called only by findReusable(), which refuses a `pending:` key first.
      *
      * @internal
      */
     public function findByHash(string $hash, string $disk, bool $lock = false): ?StorageFile
     {
-        if (str_starts_with($hash, StoredObjectRegistrar::PENDING_KEY_PREFIX)) {
-            return null;
-        }
-
-        $query = StorageFile::where('file_hash', $hash)
-            ->where('disk', $disk)
-            ->where('file_hash', 'not like', StoredObjectRegistrar::PENDING_KEY_PREFIX.'%');
+        $query = StorageFile::where('file_hash', $hash)->where('disk', $disk);
 
         if ($lock) {
             $query->lockForUpdate();

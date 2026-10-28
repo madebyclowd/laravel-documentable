@@ -157,10 +157,8 @@ class DedupHandshakeController extends Controller
             ]);
         }
 
-        $type = DocumentType::withTrashed()->find($challenge->document_type_id);
-        if ($type === null) {
-            throw $this->invalidProof();
-        }
+        // The foreign key keeps the type row alive; a soft-deleted one is refused by assertTypeActive() below.
+        $type = DocumentType::withTrashed()->findOrFail($challenge->document_type_id);
 
         if (! $this->authorizer->canInitiateUpload($request->user(), $type)) {
             abort(403);

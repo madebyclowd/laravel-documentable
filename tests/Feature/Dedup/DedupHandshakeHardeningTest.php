@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Tests\Feature\Dedup;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -18,7 +21,9 @@ use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
+use MadeByClowd\Documentable\Repositories\StorageFileRepository;
 use MadeByClowd\Documentable\Services\DocumentPurger;
+use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Services\UploadSessionLifecycle;
 use MadeByClowd\Documentable\Tests\Fixtures\AllowAllAuthorizer;
 use MadeByClowd\Documentable\Tests\Fixtures\TenantScopedDedupScope;
@@ -354,5 +359,54 @@ class DedupHandshakeHardeningTest extends TestCase
 
         $response->assertOk();
         $this->assertSame([['offset' => 0, 'length' => 0]], $response->json('ranges'));
+    }
+
+    public function test_a_challenge_knows_its_type_and_stored_file(): void
+    {
+        $file = $this->blob();
+        $challenge = DedupChallenge::findOrFail($this->handshake(1)->json('challenge_id'));
+
+        $this->assertSame($this->type->id, $challenge->documentType->id);
+        $this->assertSame($file->id, $challenge->storageFile->id);
+    }
+
+    public function test_the_service_finds_a_reusable_file_and_ignores_a_pending_key(): void
+    {
+        $file = $this->blob();
+        $service = app(DocumentService::class);
+
+        $this->assertSame($file->id, $service->findReusable(hash('sha256', self::CONTENT), $this->type)?->id);
+
+        $this->app->bind(ResolvesDedupScope::class, fn () => new class implements ResolvesDedupScope
+        {
+            public function scopeKey(string $hash, DocumentType $type, ?Authenticatable $user, ?Model $owner): string
+            {
+                return 'pending:'.$hash;
+            }
+        });
+        $this->assertNull(app(StorageFileRepository::class)->findReusable(hash('sha256', self::CONTENT), $this->type));
+    }
+
+    public function test_a_challenge_consumed_by_a_racing_request_is_refused_and_creates_no_session(): void
+    {
+        $this->blob();
+        $handshake = $this->handshake(1)->json();
+        $proof = RangeProof::computeFromBytes($handshake['nonce'], self::CONTENT, $handshake['ranges']);
+
+        // A second request wins the race: it consumes the challenge after this one has read the row and checked the proof.
+        $raced = false;
+        DB::listen(function ($query) use (&$raced, $handshake) {
+            if (! $raced && str_contains($query->sql, 'from "storage_files"') || ! $raced && str_contains($query->sql, 'from `storage_files`')) {
+                $raced = true;
+                DB::table('dedup_challenges')->where('id', $handshake['challenge_id'])->update(['consumed_at' => now()]);
+            }
+        });
+
+        $this->signIn(1)->postJson('/documents/handshake/answer', ['challenge_id' => $handshake['challenge_id'], 'proof' => $proof])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('proof');
+
+        $this->assertTrue($raced);
+        $this->assertSame(0, UploadSession::count());
     }
 }

@@ -34,26 +34,4 @@ class RangeProofTest extends TestCase
             );
         }
     }
-
-    public function test_it_reproduces_proof_from_stream(): void
-    {
-        $nonce = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
-        $content = 'The quick brown fox jumps over the lazy dog';
-        $ranges = [
-            ['offset' => 4, 'length' => 5],
-            ['offset' => 16, 'length' => 5],
-        ];
-
-        $stream = fopen('php://memory', 'r+');
-        $this->assertIsResource($stream);
-        fwrite($stream, $content);
-        rewind($stream);
-
-        $proofFromStream = RangeProof::computeFromStream($nonce, $stream, $ranges);
-        fclose($stream);
-
-        $expectedProof = RangeProof::computeFromBytes($nonce, $content, $ranges);
-        $this->assertSame($expectedProof, $proofFromStream);
-        $this->assertSame('c0db9c0f4fb07560dc88a67957c2ec7aea1f64bd0e1256c9ac50772176af9c9f', $expectedProof);
-    }
 }

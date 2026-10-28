@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Dedup;
 
-use RuntimeException;
-
 /**
  * Pure, dependency-free reference implementation of the proof-of-possession computation.
  *
@@ -32,43 +30,6 @@ final class RangeProof
 
             $slice = substr($rawBytes, $offset, $length);
             $concatenated .= $slice;
-        }
-
-        return self::computeFromConcatenated($nonce, $concatenated);
-    }
-
-    /**
-     * Compute the proof by reading the specified ranges from a stream resource.
-     *
-     * @param  resource  $stream
-     * @param  list<array{offset: int, length: int}>  $ranges
-     */
-    public static function computeFromStream(string $nonce, mixed $stream, array $ranges): string
-    {
-        if (! is_resource($stream)) {
-            throw new RuntimeException('Expected a valid stream resource.');
-        }
-
-        $concatenated = '';
-
-        foreach ($ranges as $range) {
-            $offset = $range['offset'];
-            $length = $range['length'];
-
-            if ($length <= 0) {
-                continue;
-            }
-
-            if (fseek($stream, $offset) !== 0) {
-                throw new RuntimeException("Failed to seek to offset {$offset} in stream.");
-            }
-
-            $bytes = stream_get_contents($stream, $length);
-            if ($bytes === false) {
-                throw new RuntimeException("Failed to read {$length} bytes from offset {$offset}.");
-            }
-
-            $concatenated .= $bytes;
         }
 
         return self::computeFromConcatenated($nonce, $concatenated);
