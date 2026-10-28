@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
+use MadeByClowd\Documentable\Http\Controllers\DedupHandshakeController;
 use MadeByClowd\Documentable\Http\Controllers\DirectUploadController;
 use MadeByClowd\Documentable\Http\Controllers\DocumentController;
 use MadeByClowd\Documentable\Http\Controllers\DocumentTypeController;
@@ -38,6 +39,11 @@ Route::prefix('documents')
         Route::post('/presigned', [DirectUploadController::class, 'presign']);
         Route::post('/presigned/finalize', [DirectUploadController::class, 'finalize']);
         Route::post('/attach', [DirectUploadController::class, 'attach']);
+
+        Route::post('/handshake', [DedupHandshakeController::class, 'handshake'])
+            ->middleware('throttle:'.config('documentable.dedup.throttle', 'documents-handshake'));
+        Route::post('/handshake/answer', [DedupHandshakeController::class, 'answer'])
+            ->middleware('throttle:'.config('documentable.dedup.throttle', 'documents-handshake'));
 
         Route::post('/multipart/initiate', [MultipartUploadController::class, 'initiate']);
         Route::post('/multipart/part-url', [MultipartUploadController::class, 'partUrl']);

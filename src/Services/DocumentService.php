@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Services;
 
 use DateTimeInterface;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -14,6 +15,7 @@ use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
+use MadeByClowd\Documentable\Repositories\StorageFileRepository;
 use MadeByClowd\Documentable\ValueObjects\AttachOptions;
 use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
 
@@ -30,6 +32,8 @@ use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
  */
 class DocumentService
 {
+    protected StorageFileRepository $storageFiles;
+
     public function __construct(
         protected DocumentRepository $documentRepository,
         protected DirectUploadService $directUploads,
@@ -37,8 +41,11 @@ class DocumentService
         protected UploadSessionLifecycle $sessionLifecycle,
         protected UrlSigner $urlSigner,
         protected DocumentPurger $purger,
-        protected DocumentAttacher $attacher
-    ) {}
+        protected DocumentAttacher $attacher,
+        ?StorageFileRepository $storageFiles = null,
+    ) {
+        $this->storageFiles = $storageFiles ?? app(StorageFileRepository::class);
+    }
 
     /**
      * Upload a file for an owner and attach it in one call.
@@ -124,6 +131,14 @@ class DocumentService
     public function attach(UploadSession $session, Model $owner, AttachOptions $options = new AttachOptions): Document
     {
         return $this->attacher->attach($session, $owner, $options);
+    }
+
+    /**
+     * Find an existing verified storage file eligible for deduplication reuse under the current scope.
+     */
+    public function findReusable(string $hash, DocumentType $type, ?Authenticatable $user = null, ?Model $owner = null): ?StorageFile
+    {
+        return $this->storageFiles->findReusable($hash, $type, $user, $owner);
     }
 
     /**

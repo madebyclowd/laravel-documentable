@@ -78,7 +78,7 @@ class MultipartSessionTest extends TestCase
         $document = $this->service->attach($uploaded, TestModel::create(['name' => 'owner']));
 
         $this->assertSame('hello world', Storage::disk('test_disk')->get($document->storageFile->path));
-        $this->assertSame(hash('sha256', 'hello world'), $document->storageFile->file_hash);
+        $this->assertSame(hash('sha256', 'hello world'), $document->storageFile->content_hash);
         $this->assertTrue($document->metadata['mime_type'] === 'text/plain');
     }
 

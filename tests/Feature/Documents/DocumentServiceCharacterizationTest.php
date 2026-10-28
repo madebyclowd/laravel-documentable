@@ -205,7 +205,7 @@ class DocumentServiceCharacterizationTest extends TestCase
         $document = $this->service->attach($uploaded, $this->owner());
 
         $this->assertSame([['session' => UploadSessionStatus::Attached, 'committed' => true]], $seen);
-        $this->assertSame(hash('sha256', 'hello world'), $document->storageFile->file_hash);
+        $this->assertSame(hash('sha256', 'hello world'), $document->storageFile->content_hash);
         $this->assertSame($session->path, $document->storageFile->path);
     }
 

@@ -155,6 +155,7 @@ class EventsAndObservabilityTest extends TestCase
     {
         config()->set('documentable.audit.enabled', true);
         Auth::shouldReceive('id')->andReturn('actor-42');
+        Auth::shouldReceive('user')->andReturn(null);
 
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
@@ -167,6 +168,7 @@ class EventsAndObservabilityTest extends TestCase
     {
         config()->set('documentable.audit.enabled', false);
         Auth::shouldReceive('id')->andReturn('actor-42');
+        Auth::shouldReceive('user')->andReturn(null);
 
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
@@ -179,6 +181,7 @@ class EventsAndObservabilityTest extends TestCase
     {
         config()->set('documentable.audit.enabled', true);
         Auth::shouldReceive('id')->andReturn(null);
+        Auth::shouldReceive('user')->andReturn(null);
 
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);
@@ -191,6 +194,7 @@ class EventsAndObservabilityTest extends TestCase
     {
         config()->set('documentable.audit.enabled', true);
         Auth::shouldReceive('id')->andReturn('actor-99');
+        Auth::shouldReceive('user')->andReturn(null);
 
         $type = $this->makeType();
         $owner = TestModel::create(['name' => 'owner']);

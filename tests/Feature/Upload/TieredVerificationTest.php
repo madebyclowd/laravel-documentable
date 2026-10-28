@@ -104,7 +104,7 @@ class TieredVerificationTest extends TestCase
         $this->assertTrue($session->isVerified());
         $this->assertSame(hash('sha256', 'hi'), $session->object_hash);
         $this->assertSame(DocumentStatus::Committed, $document->status);
-        $this->assertSame(hash('sha256', 'hi'), $document->storageFile->file_hash);
+        $this->assertSame(hash('sha256', 'hi'), $document->storageFile->content_hash);
     }
 
     // Large files defer the expensive part
@@ -195,7 +195,7 @@ class TieredVerificationTest extends TestCase
 
         $document->refresh();
         $this->assertSame(DocumentStatus::Committed, $document->status);
-        $this->assertSame(hash('sha256', self::BODY), $document->storageFile->file_hash);
+        $this->assertSame(hash('sha256', self::BODY), $document->storageFile->content_hash);
         $this->assertSame('application/pdf', $document->storageFile->mime_type);
         Event::assertDispatched(DocumentProcessed::class, fn (DocumentProcessed $event) => $event->document->id === $document->id);
     }

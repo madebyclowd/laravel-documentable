@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Services;
 
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -39,6 +40,7 @@ final class ProcessingDocumentVerifier
         private readonly DocumentRepository $documents,
         private readonly StorageFileRepository $storageFiles,
         private readonly ResolvesDedupScope $dedupScope,
+        private readonly DedupUserResolver $users = new DedupUserResolver,
     ) {}
 
     /**
@@ -78,13 +80,17 @@ final class ProcessingDocumentVerifier
      */
     private function promote(Document $document, StorageFile $stored, array $facts): void
     {
-        $key = $this->dedupScope->scopeKey($facts['hash'], $document->documentable);
+        $type = $document->documentTypeOrFail();
+        // The key is computed for the user the upload was started under, as it was at attach time, not for
+        // whoever the queue worker happens to be.
+        $user = $this->users->resolve(UploadSession::where('storage_file_id', $stored->id)->value('user_id'));
+        $key = $this->dedupScope->scopeKey($facts['hash'], $type, $user, $document->documentable);
 
         try {
-            $redundantPath = DB::transaction(fn () => $this->commit($document, $stored, $key, $facts));
+            $redundantPath = DB::transaction(fn () => $this->commit($document, $stored, $key, $facts, $user));
         } catch (UniqueConstraintViolationException) {
             // Another verification filed identical bytes under this key first; the second pass finds it.
-            $redundantPath = DB::transaction(fn () => $this->commit($document, $stored, $key, $facts));
+            $redundantPath = DB::transaction(fn () => $this->commit($document, $stored, $key, $facts, $user));
         }
 
         if ($redundantPath !== null) {
@@ -99,7 +105,7 @@ final class ProcessingDocumentVerifier
      *
      * @param  array{hash: string, mime: string, size: int}  $facts
      */
-    private function commit(Document $document, StorageFile $stored, string $key, array $facts): ?string
+    private function commit(Document $document, StorageFile $stored, string $key, array $facts, ?Authenticatable $user): ?string
     {
         $locked = Document::whereKey($document->id)->lockForUpdate()->first();
 
@@ -107,10 +113,16 @@ final class ProcessingDocumentVerifier
             return null;
         }
 
-        $existing = $this->storageFiles->findByHash($key, $stored->disk, lock: true);
+        $type = $document->documentTypeOrFail();
+        $existing = $this->storageFiles->findReusable($facts['hash'], $type, $user, $document->documentable, lock: true);
 
         if ($existing === null) {
-            $stored->forceFill(['file_hash' => $key, 'mime_type' => $facts['mime'], 'size_bytes' => $facts['size']])->save();
+            $stored->forceFill([
+                'file_hash' => $key,
+                'content_hash' => $facts['hash'],
+                'mime_type' => $facts['mime'],
+                'size_bytes' => $facts['size'],
+            ])->save();
             $locked->update(['status' => DocumentStatus::Committed]);
 
             return null;

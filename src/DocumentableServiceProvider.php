@@ -28,8 +28,8 @@ use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Defaults\DefaultStoragePathGenerator;
 use MadeByClowd\Documentable\Defaults\GateDocumentAuthorizer;
-use MadeByClowd\Documentable\Defaults\HashOnlyDedupScope;
 use MadeByClowd\Documentable\Defaults\NullFileScanner;
+use MadeByClowd\Documentable\Defaults\TypeAndTenantScope;
 use MadeByClowd\Documentable\Exceptions\InsecureConfiguration;
 use MadeByClowd\Documentable\Models\DocumentType;
 
@@ -59,7 +59,7 @@ class DocumentableServiceProvider extends ServiceProvider
 
         $this->app->bind(
             ResolvesDedupScope::class,
-            fn ($app) => $app->make(config('documentable.dedup.scope_resolver') ?? HashOnlyDedupScope::class)
+            fn ($app) => $app->make(config('documentable.dedup.scope_resolver') ?? TypeAndTenantScope::class)
         );
 
         $this->app->bind(
@@ -90,6 +90,12 @@ class DocumentableServiceProvider extends ServiceProvider
         $this->app->booted(function () use ($config) {
             if (! RateLimiter::limiter($config->throttle)) {
                 RateLimiter::for($config->throttle, fn (Request $request) => Limit::perMinute(60)->by(
+                    (string) ($request->user()?->getAuthIdentifier() ?? $request->ip())
+                ));
+            }
+
+            if (! RateLimiter::limiter($config->dedupThrottle)) {
+                RateLimiter::for($config->dedupThrottle, fn (Request $request) => Limit::perMinute(60)->by(
                     (string) ($request->user()?->getAuthIdentifier() ?? $request->ip())
                 ));
             }

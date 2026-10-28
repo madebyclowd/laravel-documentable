@@ -8,10 +8,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Events\DocumentDeleted;
 use MadeByClowd\Documentable\Events\DocumentPurged;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
 
@@ -113,7 +115,12 @@ final class DocumentPurger
 
     private function isStorageFileReferenced(StorageFile $storageFile): bool
     {
-        return Document::withTrashed()->where('storage_file_id', $storageFile->id)->exists();
+        // An open session holds the file for a document it is about to create (a handshake session links a file
+        // other documents may all have dropped), so it keeps the file alive like a document does.
+        return Document::withTrashed()->where('storage_file_id', $storageFile->id)->exists()
+            || UploadSession::where('storage_file_id', $storageFile->id)
+                ->whereIn('status', [UploadSessionStatus::Initiated, UploadSessionStatus::Uploaded])
+                ->exists();
     }
 
     /**

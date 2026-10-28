@@ -443,12 +443,12 @@ the package can't enforce them from the browser:
   Compare `file.size` against your app's configured `multipart.threshold_bytes` client-side (expose
   it via a config/meta endpoint, or just hardcode the same number your backend uses) and call
   `/documents/presigned` below it, `/documents/multipart/initiate` at/above it.
-- **No dedup pre-check endpoint exists.** If you want a "skip upload entirely if this exact file
-  already exists" handshake (client sends a hash manifest, server reports which are already stored),
-  you have to build that endpoint yourself in your host app — it's not part of this package's shipped
-  routes. Dedup still happens automatically server-side once the upload lands (same content →
-  reused `StorageFile`, no duplicate object written) — you just don't get to skip the network
-  transfer itself without a custom pre-check.
+- **Proof-of-possession handshake.** To skip re-uploading an existing file securely without exposing
+  a hash oracle, the client can use the `POST /documents/handshake` and `POST /documents/handshake/answer`
+  flow. If the server already holds the bytes under the current tenant scope, it issues a challenge
+  with random byte ranges that the client must prove it holds before an upload session is granted.
+  If the file is not yet stored, the server returns an identical decoy challenge structure so callers
+  cannot infer blob existence.
 - **Responses are not wrapped.** Every shipped endpoint returns the raw JSON body directly
   (`{upload_id, path, disk}`, the `Document` object, etc.) — no `{status: ..., data: ...}` envelope.
   If your app's axios instance has a global response interceptor that unwraps a different shape,
@@ -524,22 +524,73 @@ under `etag_strategy = client`, `ExposeHeaders: ["ETag"]`) from your app's origi
 `php artisan documents:configure-bucket-cors {disk} --origin=https://your-app.example.com` applies
 this for you; `--verify` runs a live presigned-PUT smoke test afterward.
 
-**Scoping dedup per tenant** instead of the default global-by-hash:
+### Deduplication Scoping & Proof of Possession
 
-```php
-class TenantScopedDedupScope implements \MadeByClowd\Documentable\Contracts\ResolvesDedupScope
-{
-    public function scopeKey(string $hash, ?Model $documentable): string
-    {
-        return ($documentable?->tenant_id ?? 'none').':'.$hash;
-    }
-}
-```
+#### The Hash Oracle & The Problem
+In naive content-addressable storage, deduplication is keyed directly to the raw SHA-256 hash across the whole system. This creates a **hash oracle vulnerability**: an adversary who discovers another user's or tenant's file hash (e.g. from a public URL, metadata leak, or known invoice pattern) can attach that file to their own records without possessing the bytes.
 
-```php
-// config/documentable.php
-'dedup' => ['scope_resolver' => TenantScopedDedupScope::class],
-```
+To eliminate this vulnerability, the package enforces two complementary defenses:
+1. **Safe Default Dedup Scoping (`TypeAndTenantScope`):** Storage files are scoped by document type and tenant identifier, preventing cross-tenant and cross-type deduplication by default.
+2. **Proof-of-Possession Handshake:** Callers wishing to skip uploading an existing blob must prove possession of the actual bytes via challenge/response range proof before an upload session is granted.
+
+#### Dedup Scope Resolvers & Scope Trade-offs
+
+The active scope resolver is configured in `config/documentable.php` under `'dedup' => ['scope_resolver' => ...]`.
+
+- **`TypeAndTenantScope` (Default):**
+  Derives a deterministic key `sha256("{$typeId}|{$tenantId}|{$contentHash}")`.
+  - Resolves tenant ID via the `MadeByClowd\Documentable\Contracts\HasDedupTenant` contract on the owner model, or a callback registered in a service provider with `TypeAndTenantScope::resolveTenantUsing(fn (?Model $owner, ?Authenticatable $user, DocumentType $type): ?string => ...)`. With no tenant, the key still includes the document type.
+  - **Trade-off:** Strict isolation between tenants and document types. If Tenant A and Tenant B upload the exact same document, each retains their own `StorageFile` entry. Deduplication only occurs within the same tenant and document type.
+  - The client cannot derive the internal dedup key from the raw content hash alone.
+
+- **`GlobalDedupScope` (Opt-in Global Deduplication):**
+  Uses the raw content hash as the deduplication key across all tenants and types:
+  ```php
+  // config/documentable.php
+  'dedup' => [
+      'scope_resolver' => \MadeByClowd\Documentable\Defaults\GlobalDedupScope::class,
+  ],
+  ```
+  - **Trade-off:** Maximizes storage savings across the entire platform. Duplicate files anywhere in the system share storage.
+  - Pair this with the proof-of-possession handshake to prevent callers from claiming storage files they do not physically hold.
+
+- **`OwnerScopedDedupScope`:**
+  Restricts deduplication strictly to the specific owner model instance (`sha256("{$ownerMorphClass}|{$ownerId}|{$contentHash}")`).
+
+- **Custom Scope Resolver:**
+  Implement `MadeByClowd\Documentable\Contracts\ResolvesDedupScope`:
+  ```php
+  use Illuminate\Contracts\Auth\Authenticatable;
+  use Illuminate\Database\Eloquent\Model;
+  use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
+  use MadeByClowd\Documentable\Models\DocumentType;
+
+  class CustomDedupScope implements ResolvesDedupScope
+  {
+      public function scopeKey(string $hash, DocumentType $type, ?Authenticatable $user, ?Model $owner): string
+      {
+          $tenantId = $owner?->organization_id ?? 'global';
+          return hash('sha256', "{$type->id}|{$tenantId}|{$hash}");
+      }
+  }
+  ```
+
+#### Proof-of-Possession Handshake Endpoints
+
+The package ships two endpoints behind the configured `canInitiateUpload` gate:
+
+1. `POST /documents/handshake`
+   - Body: `{"type": "invoice", "hash": "<sha256-hex>", "size": 1048576}`, plus `documentable_type` and `documentable_id` when the dedup scope depends on the owner (a tenant, say). Send the same owner you will attach to.
+   - Response (hit or miss): `{"challenge_id": "...", "nonce": "...", "ranges": [{"offset": 1024, "length": 4096}, ...]}`
+   - A hit needs the exact stored size. A different `size` is a miss.
+   - *Decoy Challenges:* To prevent timing and enumeration attacks, misses return an identical JSON structure with random ranges. The client cannot infer whether the server holds the file without answering the challenge. Each miss writes one short-lived `dedup_challenges` row, which the rate limiter bounds and `documents:clean-orphaned` prunes.
+
+2. `POST /documents/handshake/answer`
+   - Body: `{"challenge_id": "...", "proof": "<sha256-hex>", "filename": "optional original name"}`
+   - Proof computation: `proof = hash('sha256', $nonce . $rangeBytes1 . $rangeBytes2 ...)`, with `$nonce` the hex string exactly as sent, not decoded (see `RangeProof::computeFromBytes` reference implementation)
+   - The server reads only the challenged ranges from the stored object (one ranged GET on S3-compatible disks), re-checks `canInitiateUpload`, and consumes the challenge atomically. Only the user the challenge was issued to can answer it.
+   - On success: returns an `UploadSession` in `Uploaded` status ready for attachment via `/documents/attach`.
+   - On failure (incorrect proof or decoy challenge): increments attempt counter (3 wrong attempts invalidate the challenge) and returns HTTP 422.
 
 **Listening for events:**
 

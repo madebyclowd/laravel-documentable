@@ -9,6 +9,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
+use MadeByClowd\Documentable\Models\DedupChallenge;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -152,5 +153,46 @@ class LifecycleReaperTest extends TestCase
         $this->artisan('documents:clean-orphaned', ['--hours' => 5])->assertExitCode(0);
 
         $this->assertSame(UploadSessionStatus::Expired, $session->fresh()->status);
+    }
+
+    public function test_it_prunes_expired_consumed_and_dead_challenges(): void
+    {
+        $type = $this->makeType();
+
+        $expired = DedupChallenge::create([
+            'document_type_id' => $type->id,
+            'scope_key' => 'key1',
+            'nonce' => str_repeat('a', 64),
+            'ranges' => [['offset' => 0, 'length' => 10]],
+            'attempts' => 0,
+            'expires_at' => now()->subHour(),
+        ]);
+
+        $consumed = DedupChallenge::create([
+            'document_type_id' => $type->id,
+            'scope_key' => 'key2',
+            'nonce' => str_repeat('b', 64),
+            'ranges' => [['offset' => 0, 'length' => 10]],
+            'attempts' => 1,
+            'expires_at' => now()->addHour(),
+            'consumed_at' => now()->subMinute(),
+        ]);
+
+        $active = DedupChallenge::create([
+            'document_type_id' => $type->id,
+            'scope_key' => 'key3',
+            'nonce' => str_repeat('c', 64),
+            'ranges' => [['offset' => 0, 'length' => 10]],
+            'attempts' => 0,
+            'expires_at' => now()->addMinutes(5),
+        ]);
+
+        $this->artisan('documents:clean-orphaned')
+            ->expectsOutputToContain('Pruned 2 expired or consumed dedup challenge(s).')
+            ->assertExitCode(0);
+
+        $this->assertNull(DedupChallenge::find($expired->id));
+        $this->assertNull(DedupChallenge::find($consumed->id));
+        $this->assertNotNull(DedupChallenge::find($active->id));
     }
 }
