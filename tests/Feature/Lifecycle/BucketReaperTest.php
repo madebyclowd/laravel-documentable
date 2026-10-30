@@ -11,7 +11,8 @@ use Aws\Result;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Enums\UploadKind;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
@@ -41,6 +42,26 @@ class BucketReaperTest extends TestCase
             'secret' => 'secret',
             'request_checksum_calculation' => 'when_required',
         ], $overrides));
+    }
+
+    /**
+     * Collects the messages the real logger writes at a level, without mocking it (a strict Log mock also trips on the
+     * deprecation notices an old SDK logs).
+     *
+     * @return \Closure(): list<string>
+     */
+    private function captureLogged(string $level): \Closure
+    {
+        $messages = [];
+        Event::listen(MessageLogged::class, function (MessageLogged $event) use (&$messages, $level) {
+            if ($event->level === $level) {
+                $messages[] = $event->message;
+            }
+        });
+
+        return function () use (&$messages): array {
+            return $messages;
+        };
     }
 
     public function test_bucket_reaper_refuses_non_s3_disk(): void
@@ -406,13 +427,14 @@ class BucketReaperTest extends TestCase
         $cmd = new Command('DeleteObject', ['Bucket' => 'test-bucket', 'Key' => 'documents/failing.bin']);
         $mock->append(new S3Exception('Delete Failed', $cmd, ['code' => 'AccessDenied']));
 
-        Log::spy();
+        $errors = $this->captureLogged('error');
 
         $this->artisan('documents:clean-orphaned', ['--bucket' => true, '--apply' => true])
             ->expectsOutputToContain('Failed to delete [documents/failing.bin]')
             ->assertExitCode(1);
 
-        Log::shouldHaveReceived('error')->once();
+        $this->assertCount(1, $errors());
+        $this->assertStringContainsString('documents/failing.bin', $errors()[0]);
     }
 
     public function test_bucket_reaper_counts_only_the_objects_it_deleted(): void
@@ -427,11 +449,11 @@ class BucketReaperTest extends TestCase
         ], 'IsTruncated' => false]));
         $mock->append(new Result);
         $mock->append(new S3Exception('denied', new Command('DeleteObject'), ['code' => 'AccessDenied']));
-        Log::spy();
 
         $this->artisan('documents:clean-orphaned', ['--bucket' => true, '--apply' => true])
             ->expectsOutputToContain('Deleted 1 orphaned object(s) (30 bytes).')
             ->assertExitCode(1);
+
     }
 
     public function test_bucket_reaper_waits_a_day_by_default_before_calling_an_object_orphaned(): void

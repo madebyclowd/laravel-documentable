@@ -11,8 +11,9 @@ use Aws\Result;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use GuzzleHttp\Psr7\Response;
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\PendingCommand;
 use MadeByClowd\Documentable\Doctor\DoctorContext;
@@ -406,7 +407,12 @@ class DocumentsDoctorCommandTest extends TestCase
         $cmd = new Command('ListObjectsV2', ['Bucket' => 'test-bucket']);
         $mock->append(new S3Exception('Network error during listObjectsV2', $cmd));
 
-        Log::spy();
+        $warnings = [];
+        Event::listen(MessageLogged::class, function (MessageLogged $event) use (&$warnings) {
+            if ($event->level === 'warning') {
+                $warnings[] = $event->message;
+            }
+        });
 
         $runner = $this->app->makeWith(DoctorRunner::class, ['probes' => [$dummyProbe]]);
         $warnedMessage = null;
@@ -417,9 +423,7 @@ class DocumentsDoctorCommandTest extends TestCase
         $this->assertCount(1, $results);
         $this->assertNotNull($warnedMessage);
         $this->assertStringContainsString('Doctor cleanup could not delete scratch objects', $warnedMessage);
-        Log::shouldHaveReceived('warning')
-            ->withArgs(fn (string $message) => str_contains($message, 'Doctor cleanup could not delete scratch objects'))
-            ->once();
+        $this->assertCount(1, array_filter($warnings, fn (string $m) => str_contains($m, 'Doctor cleanup could not delete scratch objects')));
     }
 
     public function test_doctor_runs_against_real_rustfs(): void
