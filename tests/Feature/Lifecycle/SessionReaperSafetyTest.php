@@ -133,13 +133,20 @@ class SessionReaperSafetyTest extends TestCase
             'status' => UploadSessionStatus::Attached,
         ]);
 
+        $s3Calls = 0;
+        $mock->append(function () use (&$s3Calls) {
+            $s3Calls++;
+
+            return new Result;
+        });
+
         $lifecycle = $this->app->make(UploadSessionLifecycle::class);
         $result = $lifecycle->expire($session);
 
         // Status remains Attached, no S3 HeadObject or DeleteObject was called
         $this->assertSame(UploadSessionStatus::Attached, $result->status);
         $this->assertSame(UploadSessionStatus::Attached, $session->fresh()->status);
-        $this->assertSame(0, $mock->count());
+        $this->assertSame(0, $s3Calls);
     }
 
     /**

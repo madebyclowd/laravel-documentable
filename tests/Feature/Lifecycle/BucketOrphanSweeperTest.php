@@ -236,6 +236,30 @@ class BucketOrphanSweeperTest extends TestCase
         $this->assertSame('test-bucket', $this->commands[0]['Bucket']);
     }
 
+    public function test_a_disk_that_cannot_answer_does_not_inherit_the_previous_disks_state(): void
+    {
+        config()->set('filesystems.disks.s3_second', config('filesystems.disks.'.self::DISK));
+        $this->type('A', 'alpha');
+        $this->type('B', 'beta', 's3_second');
+        $this->answer(new Result(['Status' => 'Enabled']));
+        $this->mock->append(new S3Exception('denied', new Command('GetBucketVersioning'), ['code' => 'AccessDenied']));
+
+        $this->assertSame([self::DISK], app(BucketOrphanSweeper::class)->versionedDisks());
+    }
+
+    public function test_the_bucket_is_asked_about_versioning_once_per_disk(): void
+    {
+        $this->type('A', 'alpha');
+        $this->type('B', 'beta');
+        $this->answer(new Result(['Status' => 'Enabled']));
+        $this->answer(new Result(['Status' => 'Enabled']));
+
+        $disks = app(BucketOrphanSweeper::class)->versionedDisks();
+
+        $this->assertSame([self::DISK], $disks, 'A second ask would list the disk twice.');
+        $this->assertCount(1, $this->commands);
+    }
+
     public function test_a_token_that_cannot_read_the_versioning_state_reports_nothing(): void
     {
         $this->type('A', 'alpha');

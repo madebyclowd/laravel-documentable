@@ -406,11 +406,49 @@ class BucketReaperTest extends TestCase
         $cmd = new Command('DeleteObject', ['Bucket' => 'test-bucket', 'Key' => 'documents/failing.bin']);
         $mock->append(new S3Exception('Delete Failed', $cmd, ['code' => 'AccessDenied']));
 
-        Log::shouldReceive('error')->once();
+        Log::spy();
 
         $this->artisan('documents:clean-orphaned', ['--bucket' => true, '--apply' => true])
             ->expectsOutputToContain('Failed to delete [documents/failing.bin]')
             ->assertExitCode(1);
+
+        Log::shouldHaveReceived('error')->once();
+    }
+
+    public function test_bucket_reaper_counts_only_the_objects_it_deleted(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_bucket_reaper', ['handler' => $mock]);
+        DocumentType::create(['code' => 'DOCS', 'name' => 'Docs', 'max_size_mb' => 10, 'disk' => 's3_bucket_reaper', 'path_prefix' => 'documents']);
+        $old = now()->subDays(5);
+        $mock->append(new Result(['Contents' => [
+            ['Key' => 'documents/a.bin', 'Size' => 10, 'LastModified' => $old],
+            ['Key' => 'documents/b.bin', 'Size' => 20, 'LastModified' => $old],
+        ], 'IsTruncated' => false]));
+        $mock->append(new Result);
+        $mock->append(new S3Exception('denied', new Command('DeleteObject'), ['code' => 'AccessDenied']));
+        Log::spy();
+
+        $this->artisan('documents:clean-orphaned', ['--bucket' => true, '--apply' => true])
+            ->expectsOutputToContain('Deleted 1 orphaned object(s) (30 bytes).')
+            ->assertExitCode(1);
+    }
+
+    public function test_bucket_reaper_waits_a_day_by_default_before_calling_an_object_orphaned(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_bucket_reaper', ['handler' => $mock]);
+        config()->set('documentable.lifecycle', []);
+        DocumentType::create(['code' => 'DOCS', 'name' => 'Docs', 'max_size_mb' => 10, 'disk' => 's3_bucket_reaper', 'path_prefix' => 'documents']);
+        $mock->append(new Result(['Contents' => [
+            ['Key' => 'documents/23-hours.bin', 'Size' => 1, 'LastModified' => now()->subHours(23)],
+            ['Key' => 'documents/25-hours.bin', 'Size' => 1, 'LastModified' => now()->subHours(25)],
+        ], 'IsTruncated' => false]));
+
+        $this->artisan('documents:clean-orphaned', ['--bucket' => true])
+            ->expectsOutputToContain('Found orphan: [documents/25-hours.bin]')
+            ->doesntExpectOutputToContain('documents/23-hours.bin')
+            ->assertExitCode(0);
     }
 
     public function test_bucket_reaper_idempotency(): void

@@ -97,6 +97,26 @@ class DocumentableConfigTest extends TestCase
         return ['int' => ['int'], 'uuid' => ['uuid'], 'ulid' => ['ulid'], 'string' => ['string']];
     }
 
+    #[DataProvider('validPresignEndpoints')]
+    public function test_a_presign_endpoint_is_an_http_or_https_url(string $endpoint): void
+    {
+        $config = DocumentableConfig::fromArray(['disks' => ['s3' => ['presign_endpoint' => $endpoint, 'presign_use_path_style' => true]]], self::DISKS);
+
+        $this->assertSame($endpoint, $config->disks['s3']['presign_endpoint']);
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function validPresignEndpoints(): array
+    {
+        return [
+            'https' => ['https://storage.example.com'],
+            'http with a port' => ['http://localhost:9000'],
+            'upper case scheme' => ['HTTPS://Storage.Example.com'],
+        ];
+    }
+
     public function test_the_removed_native_checksum_setting_is_ignored_not_honoured(): void
     {
         $config = DocumentableConfig::fromArray(['multipart' => ['use_native_checksum' => true]], self::DISKS);
@@ -176,6 +196,9 @@ class DocumentableConfigTest extends TestCase
             'types not an array' => [['types' => 'invoice'], 'types', 'array'],
             'presign endpoint not a url' => [['disks' => ['s3' => ['presign_endpoint' => 'not-a-url']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
             'presign endpoint relative' => [['disks' => ['s3' => ['presign_endpoint' => '/path']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
+            'presign endpoint other scheme' => [['disks' => ['s3' => ['presign_endpoint' => 'ftp://storage.example.com']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
+            'presign endpoint without a scheme' => [['disks' => ['s3' => ['presign_endpoint' => 'storage.example.com']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
+            'presign endpoint not a string' => [['disks' => ['s3' => ['presign_endpoint' => 443]]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
             'presign use path style not boolean' => [['disks' => ['s3' => ['presign_use_path_style' => 'yes']]], 'disks.s3.presign_use_path_style', 'true or false'],
             'multipart object metadata not boolean' => [['multipart' => ['object_metadata' => 'yes']], 'multipart.object_metadata', 'true or false'],
             'multipart content type empty' => [['multipart' => ['content_type' => '']], 'multipart.content_type', 'non-empty string'],
