@@ -42,10 +42,10 @@ final class UploadPartProbe implements Probe
                 'Bucket' => $context->bucket,
                 'Key' => $key,
                 'UploadId' => $uploadId,
-                'MultipartUpload' => ['Parts' => array_map(
+                'MultipartUpload' => ['Parts' => array_values(array_map(
                     fn (array $part) => ['PartNumber' => (int) $part['PartNumber'], 'ETag' => (string) $part['ETag']],
                     $listed['Parts'] ?? []
-                )],
+                ))],
             ]);
             $context->untrackMultipart($uploadId);
 
