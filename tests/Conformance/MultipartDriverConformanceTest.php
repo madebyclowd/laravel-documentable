@@ -145,8 +145,8 @@ abstract class MultipartDriverConformanceTest extends TestCase
                 ['PartNumber' => 1, 'ETag' => $partEtag],
             ]);
             $this->fail('Expected completion on mismatched path to fail.');
-        } catch (\Throwable) {
-            $this->assertTrue(true);
+        } catch (MultipartUploadNotFoundException $e) {
+            $this->assertStringContainsString($pathB, $e->getMessage());
         } finally {
             $session->path = $pathA;
             try {

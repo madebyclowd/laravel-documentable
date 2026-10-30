@@ -11,7 +11,10 @@ use MadeByClowd\Documentable\Services\PrefixNormalizer;
 use MadeByClowd\Documentable\Services\S3ClientDetector;
 
 /**
- * Configures bucket lifecycle rules for multipart abort and doctor scratch expiration.
+ * Defense in depth: the app-level reaper alone is not enough, it must be paired with a bucket-native backstop that
+ * still fires even if the reaper's schedule dies or a deploy drops it. Sets an abort rule for incomplete multipart
+ * uploads and an expiry rule for the doctor's scratch prefix, and keeps every rule it did not create. Not run
+ * automatically: changing bucket-level config should be an explicit, confirmed action.
  */
 class ConfigureBucketLifecycleCommand extends Command
 {

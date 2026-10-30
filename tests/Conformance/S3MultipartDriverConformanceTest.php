@@ -22,19 +22,21 @@ class S3MultipartDriverConformanceTest extends MultipartDriverConformanceTest
     {
         parent::setUp();
 
-        $endpoint = env('RUSTFS_ENDPOINT');
+        // RustFS by default; S3_CONFORMANCE_PROVIDER=R2 runs the same suite against a real Cloudflare R2 bucket.
+        $provider = strtoupper((string) env('S3_CONFORMANCE_PROVIDER', 'RUSTFS'));
+        $endpoint = env($provider.'_ENDPOINT');
         if (! is_string($endpoint) || $endpoint === '' || ! class_exists(S3Client::class)) {
-            $this->markTestSkipped('RUSTFS_* is not configured.');
+            $this->markTestSkipped("{$provider}_* is not configured.");
         }
 
-        config(['filesystems.disks.rustfs_conformance' => [
+        config(['filesystems.disks.s3_conformance' => [
             'driver' => 's3',
-            'key' => env('RUSTFS_ACCESS_KEY_ID'),
-            'secret' => env('RUSTFS_SECRET_ACCESS_KEY'),
-            'region' => env('RUSTFS_REGION', 'us-east-1'),
-            'bucket' => env('RUSTFS_BUCKET'),
+            'key' => env($provider.'_ACCESS_KEY_ID'),
+            'secret' => env($provider.'_SECRET_ACCESS_KEY'),
+            'region' => env($provider.'_REGION', 'us-east-1'),
+            'bucket' => env($provider.'_BUCKET'),
             'endpoint' => $endpoint,
-            'use_path_style_endpoint' => true,
+            'use_path_style_endpoint' => filter_var(env($provider.'_USE_PATH_STYLE', $provider === 'RUSTFS'), FILTER_VALIDATE_BOOLEAN),
             'throw' => true,
         ]]);
 
@@ -43,8 +45,8 @@ class S3MultipartDriverConformanceTest extends MultipartDriverConformanceTest
 
     protected function tearDown(): void
     {
-        if (config()->has('filesystems.disks.rustfs_conformance')) {
-            $disk = Storage::disk('rustfs_conformance');
+        if (config()->has('filesystems.disks.s3_conformance')) {
+            $disk = Storage::disk('s3_conformance');
             foreach ($this->createdPaths as $path) {
                 try {
                     $disk->delete($path);
@@ -66,10 +68,10 @@ class S3MultipartDriverConformanceTest extends MultipartDriverConformanceTest
     {
         $this->createdPaths[] = $path;
 
-        $created = $this->driver->create('rustfs_conformance', $path, $filename);
+        $created = $this->driver->create('s3_conformance', $path, $filename);
 
         $session = new UploadSession;
-        $session->disk = 'rustfs_conformance';
+        $session->disk = 's3_conformance';
         $session->path = $path;
         $session->upload_id = $created['upload_id'];
 
