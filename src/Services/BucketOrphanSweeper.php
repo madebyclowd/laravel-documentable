@@ -89,8 +89,8 @@ final class BucketOrphanSweeper
     }
 
     /**
-     * Every distinct disk and normalized prefix with the S3 client behind it, all checked before any listing
-     * starts.
+     * Every distinct disk and normalized prefix with the S3 client behind it, in disk then prefix order so a sweep
+     * reports the same way on every database engine, all checked before any listing starts.
      *
      * @return list<array{disk: string, prefix: string, client: S3Client}>
      */
@@ -98,7 +98,7 @@ final class BucketOrphanSweeper
     {
         $scopes = [];
 
-        foreach (DocumentType::query()->select(['disk', 'path_prefix'])->distinct()->get() as $type) {
+        foreach (DocumentType::query()->select(['disk', 'path_prefix'])->distinct()->orderBy('disk')->orderBy('path_prefix')->get() as $type) {
             $disk = (string) $type->disk;
 
             $client = S3ClientDetector::client($disk) ?? throw BucketSweepRefused::notAnS3Disk($disk);

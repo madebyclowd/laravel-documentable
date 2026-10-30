@@ -94,6 +94,19 @@ class BucketOrphanSweeperTest extends TestCase
         return array_map(fn (OrphanedObject $o) => $o->key, iterator_to_array(app(BucketOrphanSweeper::class)->orphans($this->cutoff), false));
     }
 
+    public function test_scopes_are_walked_in_disk_then_prefix_order_whatever_the_insertion_order(): void
+    {
+        $this->type('C', 'gamma');
+        $this->type('A', 'alpha');
+        $this->type('B', 'beta');
+        foreach (['alpha/', 'beta/', 'gamma/'] as $prefix) {
+            $this->answer($this->listing([$this->old($prefix.'x.bin')]));
+        }
+
+        $this->assertSame(['alpha/x.bin', 'beta/x.bin', 'gamma/x.bin'], $this->orphanKeys());
+        $this->assertSame(['alpha/', 'beta/', 'gamma/'], array_map(fn ($c) => $c['Prefix'], $this->commands));
+    }
+
     public function test_every_distinct_prefix_is_scanned(): void
     {
         $this->type('A', 'alpha');
@@ -238,9 +251,9 @@ class BucketOrphanSweeperTest extends TestCase
 
     public function test_a_disk_that_cannot_answer_does_not_inherit_the_previous_disks_state(): void
     {
-        config()->set('filesystems.disks.s3_second', config('filesystems.disks.'.self::DISK));
+        config()->set('filesystems.disks.s3_zeta', config('filesystems.disks.'.self::DISK));
+        $this->type('B', 'beta', 's3_zeta');
         $this->type('A', 'alpha');
-        $this->type('B', 'beta', 's3_second');
         $this->answer(new Result(['Status' => 'Enabled']));
         $this->mock->append(new S3Exception('denied', new Command('GetBucketVersioning'), ['code' => 'AccessDenied']));
 
