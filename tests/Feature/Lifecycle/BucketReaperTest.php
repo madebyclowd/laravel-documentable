@@ -169,7 +169,7 @@ class BucketReaperTest extends TestCase
         $mock = new MockHandler;
         $this->setUpDisk('s3_bucket_reaper', ['handler' => $mock]);
 
-        DocumentType::create([
+        $type = DocumentType::create([
             'code' => 'DOCS',
             'name' => 'Docs',
             'max_size_mb' => 10,
@@ -188,7 +188,7 @@ class BucketReaperTest extends TestCase
 
         // 1 referenced in upload_sessions
         UploadSession::create([
-            'document_type_id' => '00000000-0000-0000-0000-000000000000',
+            'document_type_id' => $type->id,
             'disk' => 's3_bucket_reaper',
             'kind' => UploadKind::Single,
             'client_filename' => 'session.bin',
