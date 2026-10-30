@@ -60,7 +60,6 @@ parameters:
 			count: 2
 			path: src/Console/Commands/ConfigureBucketCorsCommand.php
 
-
 		-
 			message: '#^Method MadeByClowd\\Documentable\\Console\\Commands\\InstallCommand\:\:writeConfigArrayValue\(\) has parameter \$values with no value type specified in iterable type array\.$#'
 			identifier: missingType.iterableValue
@@ -126,7 +125,6 @@ parameters:
 			identifier: method.notFound
 			count: 1
 			path: src/Drivers/S3MultipartDriver.php
-
 
 		-
 			message: '#^Method MadeByClowd\\Documentable\\Drivers\\S3MultipartDriver\:\:sseOptions\(\) return type has no value type specified in iterable type array\.$#'
