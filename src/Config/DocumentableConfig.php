@@ -76,6 +76,9 @@ final readonly class DocumentableConfig
         public string $throttle,
         public bool $auditEnabled,
         public bool $auditAccessLog,
+        public bool $multipartObjectMetadata = false,
+        public ?string $multipartContentType = null,
+        public string $doctorScratchPrefix = 'documentable-doctor',
     ) {}
 
     /**
@@ -118,6 +121,30 @@ final readonly class DocumentableConfig
         $partTtl = $multipart['part_upload_url_ttl'];
         if (! is_string($partTtl) || strtotime($partTtl) === false) {
             throw new InvalidDocumentableConfig('multipart.part_upload_url_ttl', 'must be a relative time string PHP can parse', "Use a value such as '+1 hour'");
+        }
+
+        $objectMetadata = self::bool($multipart['object_metadata'] ?? false, 'multipart.object_metadata');
+        $contentType = self::nullableString($multipart['content_type'] ?? null, 'multipart.content_type');
+
+        $doctor = $c['doctor'] ?? [];
+        $scratchPrefix = self::string($doctor['scratch_prefix'] ?? 'documentable-doctor', 'doctor.scratch_prefix', 'Use a non-empty string such as documentable-doctor');
+
+        $disks = self::arrayValue($c['disks'], 'disks');
+        foreach ($disks as $diskName => $diskSettings) {
+            if (! is_array($diskSettings)) {
+                throw new InvalidDocumentableConfig("disks.{$diskName}", 'must be an array of settings', "Use ['server_side_encryption' => 'AES256']");
+            }
+
+            if (isset($diskSettings['presign_endpoint'])) {
+                $endpoint = $diskSettings['presign_endpoint'];
+                if (! is_string($endpoint) || ! filter_var($endpoint, FILTER_VALIDATE_URL) || ! preg_match('#^https?://#i', $endpoint)) {
+                    throw new InvalidDocumentableConfig("disks.{$diskName}.presign_endpoint", 'must be an absolute http or https URL', "Use a URL such as 'http://localhost:9000' or 'https://public.example.com'");
+                }
+            }
+
+            if (isset($diskSettings['presign_use_path_style'])) {
+                self::bool($diskSettings['presign_use_path_style'], "disks.{$diskName}.presign_use_path_style");
+            }
         }
 
         $scanPolicy = $c['security']['scan_error_policy'];
@@ -178,6 +205,9 @@ final readonly class DocumentableConfig
             throttle: self::string($c['throttle'], 'throttle', 'Name the rate limiter the routes are mounted behind, for example documents'),
             auditEnabled: self::bool($c['audit']['enabled'], 'audit.enabled'),
             auditAccessLog: self::bool($c['audit']['access_log'], 'audit.access_log'),
+            multipartObjectMetadata: $objectMetadata,
+            multipartContentType: $contentType,
+            doctorScratchPrefix: $scratchPrefix,
         );
     }
 
@@ -202,6 +232,8 @@ final readonly class DocumentableConfig
                 'part_upload_url_ttl' => '+1 hour',
                 'session_ttl_hours' => 24,
                 'drivers' => ['s3' => S3MultipartDriver::class],
+                'object_metadata' => false,
+                'content_type' => null,
             ],
             'lifecycle' => [
                 'reaper_frequency' => 'hourly',
@@ -227,6 +259,9 @@ final readonly class DocumentableConfig
             'listing' => ['per_page' => 50],
             'throttle' => 'documents',
             'audit' => ['enabled' => false, 'access_log' => false],
+            'doctor' => [
+                'scratch_prefix' => 'documentable-doctor',
+            ],
         ];
     }
 
@@ -256,7 +291,7 @@ final readonly class DocumentableConfig
 
     private static function isFixedSection(string $key): bool
     {
-        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit'], true);
+        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit', 'doctor'], true);
     }
 
     /**

@@ -40,7 +40,8 @@ final class DirectUploadService
         private readonly UploadSessionRepository $sessions,
         private readonly ActorResolver $actor,
         private readonly Config $config,
-        private readonly DedupUserResolver $users = new DedupUserResolver,
+        private readonly DedupUserResolver $users,
+        private readonly Presigner $presigner,
     ) {}
 
     /**
@@ -134,7 +135,7 @@ final class DirectUploadService
 
         $ttl = now()->modify((string) $this->config->get('documentable.multipart.part_upload_url_ttl', '+1 hour'));
 
-        $signed = Storage::disk($type->disk)->temporaryUploadUrl($path, $ttl, ServerSideEncryption::options($type->disk));
+        $signed = $this->presigner->upload($type->disk, $path, $ttl, ServerSideEncryption::options($type->disk));
 
         $session = $this->sessions->create([
             'user_id' => $userId,
@@ -149,7 +150,7 @@ final class DirectUploadService
         return [
             'session' => $session,
             'url' => $signed['url'],
-            'headers' => $signed['headers'] ?? [],
+            'headers' => $signed['headers'],
         ];
     }
 

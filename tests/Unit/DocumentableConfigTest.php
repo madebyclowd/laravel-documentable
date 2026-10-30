@@ -174,6 +174,12 @@ class DocumentableConfigTest extends TestCase
             'allowed types not null or array' => [['security' => ['allowed_documentable_types' => 'App\\Models\\Post']], 'security.allowed_documentable_types', 'null or an array'],
             'boolean flag not a boolean' => [['load_routes' => 'yes'], 'load_routes', 'true or false'],
             'types not an array' => [['types' => 'invoice'], 'types', 'array'],
+            'presign endpoint not a url' => [['disks' => ['s3' => ['presign_endpoint' => 'not-a-url']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
+            'presign endpoint relative' => [['disks' => ['s3' => ['presign_endpoint' => '/path']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
+            'presign use path style not boolean' => [['disks' => ['s3' => ['presign_use_path_style' => 'yes']]], 'disks.s3.presign_use_path_style', 'true or false'],
+            'multipart object metadata not boolean' => [['multipart' => ['object_metadata' => 'yes']], 'multipart.object_metadata', 'true or false'],
+            'multipart content type empty' => [['multipart' => ['content_type' => '']], 'multipart.content_type', 'non-empty string'],
+            'doctor scratch prefix empty' => [['doctor' => ['scratch_prefix' => '']], 'doctor.scratch_prefix', 'non-empty string'],
         ];
     }
 }
