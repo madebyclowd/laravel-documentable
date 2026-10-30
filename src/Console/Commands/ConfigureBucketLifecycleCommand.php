@@ -1,17 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Console\Commands;
 
+use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Storage;
+use MadeByClowd\Documentable\Services\PrefixNormalizer;
+use MadeByClowd\Documentable\Services\S3ClientDetector;
 
 /**
- * Defense in depth: the app-level reaper alone is
- * not the enterprise standard, it must be paired with a bucket-native
- * backstop that still fires even if the reaper's schedule dies or a deploy
- * drops it. Not run automatically — mutating bucket-level config should be
- * an explicit, confirmed action, not a side effect of composer install.
+ * Configures bucket lifecycle rules for multipart abort and doctor scratch expiration.
  */
 class ConfigureBucketLifecycleCommand extends Command
 {
@@ -19,32 +19,66 @@ class ConfigureBucketLifecycleCommand extends Command
         {disk : The filesystem disk to configure}
         {--days=3 : Days after initiation before an incomplete multipart upload is aborted}';
 
-    protected $description = "Configure the bucket's AbortIncompleteMultipartUpload lifecycle rule for a disk.";
+    protected $description = "Configure the bucket's lifecycle rules for a disk (multipart abort and doctor scratch expiration).";
 
     public function handle(): int
     {
-        $disk = $this->argument('disk');
+        $diskArgument = $this->argument('disk');
+        $disk = is_string($diskArgument) ? $diskArgument : '';
         $days = (int) $this->option('days');
 
-        /** @var S3Client $client */
-        $client = Storage::disk($disk)->getClient();
-        $bucket = config("filesystems.disks.{$disk}.bucket");
+        $client = S3ClientDetector::client($disk);
+
+        if (! $client instanceof S3Client) {
+            $this->error("Disk [{$disk}] is not an S3 disk.");
+
+            return self::FAILURE;
+        }
+
+        $bucket = S3ClientDetector::bucket($disk);
+        $scratchPrefix = PrefixNormalizer::normalize((string) config('documentable.doctor.scratch_prefix', 'documentable-doctor'));
+
+        $existingRules = [];
+
+        try {
+            $result = $client->getBucketLifecycleConfiguration(['Bucket' => $bucket]);
+            $existingRules = $result['Rules'] ?? [];
+        } catch (S3Exception $e) {
+            if ($e->getAwsErrorCode() !== 'NoSuchLifecycleConfiguration') {
+                throw $e;
+            }
+        }
+
+        $keptRules = array_values(array_filter(
+            $existingRules,
+            fn (array $rule) => ! str_starts_with((string) ($rule['ID'] ?? ''), 'documentable-')
+        ));
+
+        $newRules = [
+            [
+                'ID' => 'documentable-abort-incomplete-multipart-uploads',
+                'Status' => 'Enabled',
+                'Filter' => ['Prefix' => ''],
+                'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => $days],
+            ],
+            [
+                'ID' => 'documentable-expire-doctor-scratch',
+                'Status' => 'Enabled',
+                'Filter' => ['Prefix' => $scratchPrefix],
+                'Expiration' => ['Days' => 1],
+            ],
+        ];
+
+        $mergedRules = array_merge($keptRules, $newRules);
 
         $client->putBucketLifecycleConfiguration([
             'Bucket' => $bucket,
             'LifecycleConfiguration' => [
-                'Rules' => [
-                    [
-                        'ID' => 'documentable-abort-incomplete-multipart-uploads',
-                        'Status' => 'Enabled',
-                        'Filter' => ['Prefix' => ''],
-                        'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => $days],
-                    ],
-                ],
+                'Rules' => $mergedRules,
             ],
         ]);
 
-        $this->info("Configured AbortIncompleteMultipartUpload ({$days} days) on disk [{$disk}], bucket [{$bucket}].");
+        $this->info("Configured lifecycle rules on disk [{$disk}], bucket [{$bucket}].");
 
         return self::SUCCESS;
     }

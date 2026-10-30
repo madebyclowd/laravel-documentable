@@ -15,6 +15,7 @@ use MadeByClowd\Documentable\Console\Commands\AttachModelCommand;
 use MadeByClowd\Documentable\Console\Commands\CleanOrphanedDocumentsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketCorsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketLifecycleCommand;
+use MadeByClowd\Documentable\Console\Commands\DocumentsDoctorCommand;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Console\Commands\ListDocumentTypesCommand;
 use MadeByClowd\Documentable\Console\Commands\MakeAuthorizerCommand;
@@ -125,6 +126,7 @@ class DocumentableServiceProvider extends ServiceProvider
                 CleanOrphanedDocumentsCommand::class,
                 ConfigureBucketCorsCommand::class,
                 ConfigureBucketLifecycleCommand::class,
+                DocumentsDoctorCommand::class,
                 InstallCommand::class,
                 MakeAuthorizerCommand::class,
                 RepairIntegrityCommand::class,

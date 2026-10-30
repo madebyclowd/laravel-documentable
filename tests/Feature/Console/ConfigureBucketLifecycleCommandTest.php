@@ -1,10 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
 use Aws\CommandInterface;
 use Aws\MockHandler;
 use Aws\Result;
+use Aws\S3\Exception\S3Exception;
 use MadeByClowd\Documentable\Tests\TestCase;
 
 /**
@@ -26,10 +29,13 @@ class ConfigureBucketLifecycleCommandTest extends TestCase
         ]);
     }
 
-    public function test_configures_lifecycle_with_default_days(): void
+    public function test_configures_lifecycle_with_default_days_and_scratch_rule(): void
     {
         $handler = new MockHandler;
         $captured = null;
+
+        // getBucketLifecycleConfiguration returns NoSuchLifecycleConfiguration
+        $handler->append(fn (CommandInterface $command) => new S3Exception('none', $command, ['code' => 'NoSuchLifecycleConfiguration']));
 
         $handler->append(function (CommandInterface $command) use (&$captured) {
             $captured = $command;
@@ -40,20 +46,46 @@ class ConfigureBucketLifecycleCommandTest extends TestCase
         $this->setUpMockedDisk($handler);
 
         $this->artisan('documents:configure-bucket-lifecycle', ['disk' => 's3'])
-            ->expectsOutputToContain('Configured AbortIncompleteMultipartUpload (3 days) on disk [s3], bucket [test-bucket].')
+            ->expectsOutputToContain('Configured lifecycle rules on disk [s3], bucket [test-bucket].')
             ->assertExitCode(0);
 
-        $rule = $captured['LifecycleConfiguration']['Rules'][0];
-        $this->assertSame('test-bucket', $captured['Bucket']);
-        $this->assertSame('documentable-abort-incomplete-multipart-uploads', $rule['ID']);
-        $this->assertSame('Enabled', $rule['Status']);
-        $this->assertSame(3, $rule['AbortIncompleteMultipartUpload']['DaysAfterInitiation']);
+        $rules = $captured['LifecycleConfiguration']['Rules'];
+        $this->assertCount(2, $rules);
+
+        $rule1 = $rules[0];
+        $this->assertSame('documentable-abort-incomplete-multipart-uploads', $rule1['ID']);
+        $this->assertSame('Enabled', $rule1['Status']);
+        $this->assertSame(3, $rule1['AbortIncompleteMultipartUpload']['DaysAfterInitiation']);
+
+        $rule2 = $rules[1];
+        $this->assertSame('documentable-expire-doctor-scratch', $rule2['ID']);
+        $this->assertSame('Enabled', $rule2['Status']);
+        $this->assertSame('documentable-doctor/', $rule2['Filter']['Prefix']);
+        $this->assertSame(1, $rule2['Expiration']['Days']);
     }
 
-    public function test_configures_lifecycle_with_custom_days_option(): void
+    public function test_merges_and_preserves_foreign_rules(): void
     {
         $handler = new MockHandler;
         $captured = null;
+
+        // Returns existing rules including a foreign rule and an old documentable rule
+        $handler->append(new Result([
+            'Rules' => [
+                [
+                    'ID' => 'foreign-app-rule',
+                    'Status' => 'Enabled',
+                    'Filter' => ['Prefix' => 'logs/'],
+                    'Expiration' => ['Days' => 30],
+                ],
+                [
+                    'ID' => 'documentable-abort-incomplete-multipart-uploads',
+                    'Status' => 'Enabled',
+                    'Filter' => ['Prefix' => ''],
+                    'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => 10],
+                ],
+            ],
+        ]));
 
         $handler->append(function (CommandInterface $command) use (&$captured) {
             $captured = $command;
@@ -63,11 +95,21 @@ class ConfigureBucketLifecycleCommandTest extends TestCase
 
         $this->setUpMockedDisk($handler);
 
-        $this->artisan('documents:configure-bucket-lifecycle', ['disk' => 's3', '--days' => 7])
-            ->expectsOutputToContain('Configured AbortIncompleteMultipartUpload (7 days)')
+        $this->artisan('documents:configure-bucket-lifecycle', ['disk' => 's3', '--days' => 5])
             ->assertExitCode(0);
 
-        $rule = $captured['LifecycleConfiguration']['Rules'][0];
-        $this->assertSame(7, $rule['AbortIncompleteMultipartUpload']['DaysAfterInitiation']);
+        $rules = $captured['LifecycleConfiguration']['Rules'];
+        $this->assertCount(3, $rules);
+
+        $ids = array_column($rules, 'ID');
+        $this->assertContains('foreign-app-rule', $ids);
+        $this->assertContains('documentable-abort-incomplete-multipart-uploads', $ids);
+        $this->assertContains('documentable-expire-doctor-scratch', $ids);
+
+        $foreign = collect($rules)->firstWhere('ID', 'foreign-app-rule');
+        $this->assertSame(30, $foreign['Expiration']['Days']);
+
+        $abort = collect($rules)->firstWhere('ID', 'documentable-abort-incomplete-multipart-uploads');
+        $this->assertSame(5, $abort['AbortIncompleteMultipartUpload']['DaysAfterInitiation']);
     }
 }
