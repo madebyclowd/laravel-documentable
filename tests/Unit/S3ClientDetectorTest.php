@@ -49,4 +49,27 @@ class S3ClientDetectorTest extends TestCase
         $this->assertTrue(S3ClientDetector::isS3('mock_s3'));
         $this->assertSame($s3Client, S3ClientDetector::client('mock_s3'));
     }
+
+    public function test_a_disk_with_no_configured_driver_is_not_s3(): void
+    {
+        $this->assertNull(S3ClientDetector::client('no_such_disk'));
+        $this->assertFalse(S3ClientDetector::isS3('no_such_disk'));
+    }
+
+    public function test_an_unexpected_failure_building_the_client_surfaces_instead_of_reading_as_not_s3(): void
+    {
+        $driver = new LocalFilesystemAdapter(sys_get_temp_dir());
+        Storage::set('broken_s3', new class(new Filesystem($driver), $driver, []) extends FilesystemAdapter
+        {
+            public function getClient(): S3Client
+            {
+                throw new \RuntimeException('credentials provider crashed');
+            }
+        });
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('credentials provider crashed');
+
+        S3ClientDetector::client('broken_s3');
+    }
 }

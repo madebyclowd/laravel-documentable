@@ -5,15 +5,22 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Doctor;
 
 use Illuminate\Support\Facades\Http;
+use RuntimeException;
 use Throwable;
 
 /**
- * Checks multipart upload part PUT, part listing, and completion using presigned part URLs.
+ * Checks multipart upload part PUT, part listing, and completion using presigned part URLs. The first part is the
+ * provider minimum and the second is smaller, so the upload also has equal parts except the last, which Cloudflare
+ * R2 requires.
  *
  * @internal
  */
 final class UploadPartProbe implements Probe
 {
+    private const FIRST_PART_BYTES = 5 * 1024 * 1024;
+
+    private const LAST_PART_BYTES = 1024;
+
     public function name(): string
     {
         return 'UploadPart';
@@ -22,81 +29,50 @@ final class UploadPartProbe implements Probe
     public function run(DoctorContext $context): ProbeResult
     {
         $key = $context->scratchPrefix.'upload-part-test.bin';
-        $uploadId = null;
 
         try {
-            $created = $context->internalClient->createMultipartUpload([
-                'Bucket' => $context->bucket,
-                'Key' => $key,
-            ]);
+            $uploadId = $context->openMultipart($key);
 
-            $uploadId = (string) $created['UploadId'];
-            $context->trackMultipart($uploadId, $key);
+            $context->lastPartHeaders = $this->putPart($context, $key, $uploadId, 1, self::FIRST_PART_BYTES);
+            $this->putPart($context, $key, $uploadId, 2, self::LAST_PART_BYTES);
 
-            // Part 1: >= 5 MiB
-            $part1Size = 5 * 1024 * 1024;
-            $part1Body = str_repeat('A', $part1Size);
-            $part1Url = $context->presigner->part($context->disk, $key, $uploadId, 1, now()->addMinutes(10));
-
-            $response1 = Http::withBody($part1Body, 'application/octet-stream')->put($part1Url);
-            if (! $response1->successful()) {
-                throw new \RuntimeException("Presigned upload of part 1 failed with HTTP {$response1->status()}: {$response1->body()}");
-            }
-
-            $context->lastPartHeaders = $response1->headers();
-
-            // Part 2: 1 KiB
-            $part2Body = str_repeat('B', 1024);
-            $part2Url = $context->presigner->part($context->disk, $key, $uploadId, 2, now()->addMinutes(10));
-
-            $response2 = Http::withBody($part2Body, 'application/octet-stream')->put($part2Url);
-            if (! $response2->successful()) {
-                throw new \RuntimeException("Presigned upload of part 2 failed with HTTP {$response2->status()}: {$response2->body()}");
-            }
-
-            $listed = $context->internalClient->listParts([
-                'Bucket' => $context->bucket,
-                'Key' => $key,
-                'UploadId' => $uploadId,
-            ]);
-
-            $parts = [];
-            foreach ($listed['Parts'] ?? [] as $part) {
-                $parts[] = [
-                    'PartNumber' => (int) $part['PartNumber'],
-                    'ETag' => (string) $part['ETag'],
-                ];
-            }
+            $listed = $context->internalClient->listParts(['Bucket' => $context->bucket, 'Key' => $key, 'UploadId' => $uploadId]);
 
             $context->internalClient->completeMultipartUpload([
                 'Bucket' => $context->bucket,
                 'Key' => $key,
                 'UploadId' => $uploadId,
-                'MultipartUpload' => ['Parts' => $parts],
+                'MultipartUpload' => ['Parts' => array_map(
+                    fn (array $part) => ['PartNumber' => (int) $part['PartNumber'], 'ETag' => (string) $part['ETag']],
+                    $listed['Parts'] ?? []
+                )],
             ]);
-
             $context->untrackMultipart($uploadId);
 
             return ProbeResult::pass($this->name(), 'Multipart upload, part listing, and completion succeeded.');
         } catch (Throwable $e) {
-            if ($uploadId !== null) {
-                try {
-                    $context->internalClient->abortMultipartUpload([
-                        'Bucket' => $context->bucket,
-                        'Key' => $key,
-                        'UploadId' => $uploadId,
-                    ]);
-                } catch (Throwable) {
-                    // Ignore cleanup error
-                }
-                $context->untrackMultipart($uploadId);
-            }
-
             return ProbeResult::fail(
                 $this->name(),
                 "UploadPart probe failed: {$e->getMessage()}",
                 'Verify CORS configuration allows PUT requests and bucket policy permits multipart upload actions.'
             );
         }
+    }
+
+    /**
+     * Sends one part through a presigned URL and returns the response headers.
+     *
+     * @return array<string, list<string>>
+     */
+    private function putPart(DoctorContext $context, string $key, string $uploadId, int $partNumber, int $bytes): array
+    {
+        $url = $context->presigner->part($context->disk, $key, $uploadId, $partNumber, now()->addMinutes(10));
+        $response = Http::withBody(str_repeat('A', $bytes), 'application/octet-stream')->put($url);
+
+        if (! $response->successful()) {
+            throw new RuntimeException("Presigned upload of part {$partNumber} failed with HTTP {$response->status()}: {$response->body()}");
+        }
+
+        return $response->headers();
     }
 }

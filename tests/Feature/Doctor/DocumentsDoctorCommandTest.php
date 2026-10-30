@@ -97,6 +97,26 @@ class DocumentsDoctorCommandTest extends TestCase
             ->run();
     }
 
+    public function test_doctor_command_names_the_disk_and_ends_with_the_verdict(): void
+    {
+        $this->runDoctorWithLifecycleRules([self::SCRATCH_EXPIRY, self::BUCKET_WIDE_ABORT])
+            ->expectsOutputToContain('Running diagnostics for disk [s3_doctor_test]...')
+            ->expectsOutputToContain('[PASS] PutObject: Internal S3 client wrote object successfully.')
+            ->expectsOutputToContain('All diagnostics passed (or skipped).')
+            ->assertExitCode(0);
+    }
+
+    public function test_doctor_command_ends_with_a_failure_verdict_and_the_fix_under_it(): void
+    {
+        $this->mockPutObject(fn (CommandInterface $cmd) => throw new S3Exception('denied', $cmd, ['response' => new Response(403), 'code' => 'AccessDenied']));
+
+        $this->artisan('documents:doctor', ['disk' => 's3_doctor_test'])
+            ->expectsOutputToContain('[FAIL] PutObject: Internal PutObject failed:')
+            ->expectsOutputToContain('Fix: Check bucket write permissions (s3:PutObject) for the configured credentials.')
+            ->expectsOutputToContain('One or more doctor probes failed.')
+            ->assertExitCode(1);
+    }
+
     public function test_doctor_command_reports_metadata_failure_with_fix(): void
     {
         $mock = new MockHandler;
@@ -386,9 +406,7 @@ class DocumentsDoctorCommandTest extends TestCase
         $cmd = new Command('ListObjectsV2', ['Bucket' => 'test-bucket']);
         $mock->append(new S3Exception('Network error during listObjectsV2', $cmd));
 
-        Log::shouldReceive('warning')->once()->withArgs(function (string $message) {
-            return str_contains($message, 'Doctor cleanup could not delete scratch objects');
-        });
+        Log::spy();
 
         $runner = $this->app->makeWith(DoctorRunner::class, ['probes' => [$dummyProbe]]);
         $warnedMessage = null;
@@ -399,6 +417,9 @@ class DocumentsDoctorCommandTest extends TestCase
         $this->assertCount(1, $results);
         $this->assertNotNull($warnedMessage);
         $this->assertStringContainsString('Doctor cleanup could not delete scratch objects', $warnedMessage);
+        Log::shouldHaveReceived('warning')
+            ->withArgs(fn (string $message) => str_contains($message, 'Doctor cleanup could not delete scratch objects'))
+            ->once();
     }
 
     public function test_doctor_runs_against_real_rustfs(): void

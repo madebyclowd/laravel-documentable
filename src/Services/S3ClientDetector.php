@@ -6,7 +6,7 @@ namespace MadeByClowd\Documentable\Services;
 
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Storage;
-use Throwable;
+use InvalidArgumentException;
 
 /**
  * Tells whether a configured storage disk is backed by an AWS S3 client, and where its bucket is.
@@ -30,7 +30,8 @@ final class S3ClientDetector
             $client = $filesystem->getClient();
 
             return $client instanceof S3Client ? $client : null;
-        } catch (Throwable) {
+        } catch (InvalidArgumentException) {
+            // Laravel throws this for a disk with no configured driver.
             return null;
         }
     }
