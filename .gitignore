@@ -12,3 +12,4 @@ composer.lock
 /references/
 AGENTS.local.md
 CLAUDE.local.md
+/build/

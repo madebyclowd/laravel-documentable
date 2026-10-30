@@ -1,0 +1,88 @@
+name: mutation-testing
+
+# Line coverage says which lines ran; mutation testing changes the code and checks that a test fails. A pull
+# request is judged on the lines it changes (fast), the 3.x branch and a weekly schedule on the whole of src/
+# (slow), and the full run publishes the score for the README badge.
+on:
+  pull_request:
+    branches: [main, '3.x']
+    paths: ['src/**', 'tests/**', 'infection.json5', '.github/workflows/mutation.yml']
+  push:
+    branches: ['3.x']
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changed-lines:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: Mutation score of the changed lines
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, bcmath, gd, exif, iconv
+          coverage: pcov
+          tools: infection
+          # pcov instrumentation on top of the 5 MiB buffers some tests allocate exceeds the 128M default.
+          ini-values: memory_limit=-1
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction
+
+      # One thread: the tests share a fake-disk directory, and parallel runs give false failures.
+      - name: Run Infection on the lines this pull request changes
+        run: >
+          infection --threads=1 --only-covering-test-cases --no-progress
+          --git-diff-lines --git-diff-base=origin/${{ github.base_ref }}
+          --min-covered-msi=80 --logger-github
+
+  full:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    name: Mutation score of src/
+    timeout-minutes: 360
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, bcmath, gd, exif, iconv
+          coverage: pcov
+          tools: infection
+          ini-values: memory_limit=-1
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction
+
+      # Reports the score to the Stryker dashboard for the README badge when STRYKER_DASHBOARD_API_KEY is set
+      # and the branch matches `logs.stryker.badge` in infection.json5. Without the secret it still runs.
+      - name: Run Infection on src/
+        env:
+          STRYKER_DASHBOARD_API_KEY: ${{ secrets.STRYKER_DASHBOARD_API_KEY }}
+        run: infection --threads=1 --only-covering-test-cases --no-progress --min-covered-msi=70
+
+      - name: Keep the Infection logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infection-logs
+          path: build/infection/
+          if-no-files-found: ignore

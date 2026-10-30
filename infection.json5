@@ -1,0 +1,19 @@
+{
+    "$schema": "https://raw.githubusercontent.com/infection/infection/0.35.8/resources/schema.json",
+    "source": {
+        "directories": ["src"]
+    },
+    "phpUnit": {
+        "configDir": "."
+    },
+    "logs": {
+        "text": "build/infection/infection.log",
+        "summary": "build/infection/summary.log",
+        "stryker": {
+            "badge": "/^3\\.x$/"
+        }
+    },
+    "mutators": {
+        "@default": true
+    }
+}
