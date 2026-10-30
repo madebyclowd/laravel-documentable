@@ -30,9 +30,7 @@ final class BucketOrphanSweeper
      */
     public function orphans(DateTimeInterface $olderThan): Generator
     {
-        foreach ($this->scopes() as ['disk' => $disk, 'prefix' => $prefix]) {
-            $client = S3ClientDetector::client($disk) ?? throw BucketSweepRefused::notAnS3Disk($disk);
-
+        foreach ($this->scopes() as ['disk' => $disk, 'prefix' => $prefix, 'client' => $client]) {
             foreach ($this->oldObjects($client, S3ClientDetector::bucket($disk), $prefix, $olderThan) as $page) {
                 $referenced = $this->referencedPaths($disk, array_column($page, 'Key'));
 
@@ -56,9 +54,10 @@ final class BucketOrphanSweeper
     }
 
     /**
-     * Every distinct disk and normalized prefix, all checked before any listing starts.
+     * Every distinct disk and normalized prefix with the S3 client behind it, all checked before any listing
+     * starts.
      *
-     * @return list<array{disk: string, prefix: string}>
+     * @return list<array{disk: string, prefix: string, client: S3Client}>
      */
     private function scopes(): array
     {
@@ -67,12 +66,10 @@ final class BucketOrphanSweeper
         foreach (DocumentType::query()->select(['disk', 'path_prefix'])->distinct()->get() as $type) {
             $disk = (string) $type->disk;
 
-            if (! S3ClientDetector::isS3($disk)) {
-                throw BucketSweepRefused::notAnS3Disk($disk);
-            }
+            $client = S3ClientDetector::client($disk) ?? throw BucketSweepRefused::notAnS3Disk($disk);
 
             try {
-                $scopes[] = ['disk' => $disk, 'prefix' => PrefixNormalizer::normalize((string) $type->path_prefix)];
+                $scopes[] = ['disk' => $disk, 'prefix' => PrefixNormalizer::normalize((string) $type->path_prefix), 'client' => $client];
             } catch (InvalidArgumentException $e) {
                 throw BucketSweepRefused::unsafePrefix((string) $type->path_prefix, $disk, $e->getMessage());
             }

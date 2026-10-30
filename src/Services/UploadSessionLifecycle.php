@@ -97,42 +97,45 @@ final class UploadSessionLifecycle
     }
 
     /**
-     * Deletes the stored object if it exists.
-     * On S3, runs a native HeadObject so 404/NoSuchKey counts as already gone and is not an error.
-     * If the delete throws, the exception bubbles up, rolling back the transaction and leaving the row open.
+     * Deletes the object a never-attached session may have left. A failure bubbles up, rolling back the transaction
+     * so the row stays open for the next run.
      */
     private function discardOrphanedObject(UploadSession $session): void
     {
         $client = S3ClientDetector::client($session->disk);
 
-        if ($client instanceof S3Client) {
-            $bucket = S3ClientDetector::bucket($session->disk);
-            $exists = false;
-
-            try {
-                $client->headObject([
-                    'Bucket' => $bucket,
-                    'Key' => $session->path,
-                ]);
-                $exists = true;
-            } catch (Throwable $e) {
-                if (S3ExceptionMapper::isNotFoundOrGone($e)) {
-                    $exists = false;
-                } else {
-                    throw $e;
-                }
-            }
-
-            if ($exists) {
-                $client->deleteObject([
-                    'Bucket' => $bucket,
-                    'Key' => $session->path,
-                ]);
-            }
+        if ($client === null) {
+            $this->deleteFromDisk($session);
 
             return;
         }
 
+        $this->deleteFromBucket($client, $session);
+    }
+
+    /**
+     * Native HeadObject first, so a 404 counts as already gone. `Storage::exists()` would answer false for any
+     * error on a disk with `throw` off, hiding a real failure.
+     */
+    private function deleteFromBucket(S3Client $client, UploadSession $session): void
+    {
+        $object = ['Bucket' => S3ClientDetector::bucket($session->disk), 'Key' => $session->path];
+
+        try {
+            $client->headObject($object);
+        } catch (Throwable $e) {
+            if (S3ExceptionMapper::isNotFoundOrGone($e)) {
+                return;
+            }
+
+            throw $e;
+        }
+
+        $client->deleteObject($object);
+    }
+
+    private function deleteFromDisk(UploadSession $session): void
+    {
         $disk = Storage::disk($session->disk);
 
         if ($disk->exists($session->path)) {

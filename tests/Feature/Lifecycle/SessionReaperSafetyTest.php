@@ -17,7 +17,9 @@ use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\UploadSessionLifecycle;
+use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class SessionReaperSafetyTest extends TestCase
 {
@@ -138,6 +140,48 @@ class SessionReaperSafetyTest extends TestCase
         $this->assertSame(UploadSessionStatus::Attached, $result->status);
         $this->assertSame(UploadSessionStatus::Attached, $session->fresh()->status);
         $this->assertSame(0, $mock->count());
+    }
+
+    /**
+     * @return array<string, array{UploadKind, ?string, ?string, bool}>
+     */
+    public static function providerUploadCases(): array
+    {
+        return [
+            'open multipart upload is aborted' => [UploadKind::Multipart, 'upload-1', null, true],
+            'assembled multipart upload is not aborted' => [UploadKind::Multipart, 'upload-1', 'a-hash', false],
+            'multipart without a provider id has nothing to abort' => [UploadKind::Multipart, null, null, false],
+            'single PUT never aborts a provider upload' => [UploadKind::Single, 'upload-1', null, false],
+        ];
+    }
+
+    #[DataProvider('providerUploadCases')]
+    public function test_only_an_open_multipart_upload_is_aborted_on_the_provider(UploadKind $kind, ?string $uploadId, ?string $objectHash, bool $aborted): void
+    {
+        FakeMultipartUploadDriver::reset();
+        config()->set('documentable.multipart.drivers.local', FakeMultipartUploadDriver::class);
+        config()->set('filesystems.disks.fake_local', ['driver' => 'local', 'root' => storage_path('framework/testing/reaper')]);
+
+        $type = DocumentType::create(['code' => 'DOC', 'name' => 'Doc', 'max_size_mb' => 10, 'disk' => 'fake_local', 'path_prefix' => 'uploads']);
+        $session = UploadSession::create([
+            'document_type_id' => $type->id,
+            'disk' => 'fake_local',
+            'kind' => $kind,
+            'client_filename' => 'f.bin',
+            'path' => 'uploads/f.bin',
+            'upload_id' => $uploadId,
+            'object_hash' => $objectHash,
+            'status' => UploadSessionStatus::Initiated,
+            'expires_at' => now()->subHour(),
+        ]);
+        FakeMultipartUploadDriver::$sessions['upload-1'] = ['path' => 'uploads/f.bin', 'parts' => []];
+
+        $this->app->make(UploadSessionLifecycle::class)->expire($session);
+
+        $this->assertSame(UploadSessionStatus::Expired, $session->fresh()->status);
+        $this->assertSame(! $aborted, isset(FakeMultipartUploadDriver::$sessions['upload-1']));
+
+        FakeMultipartUploadDriver::reset();
     }
 
     public function test_session_reaper_idempotency(): void

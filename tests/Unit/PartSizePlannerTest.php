@@ -89,4 +89,36 @@ class PartSizePlannerTest extends TestCase
         $this->assertSame(2, $planner->partCount(10 * self::ONE_MIB));
         $this->assertSame(3, $planner->partCount(11 * self::ONE_MIB));
     }
+
+    public function test_it_rounds_a_fractional_part_size_up_never_down(): void
+    {
+        $planner = new PartSizePlanner;
+
+        // 10000 parts of exactly 5 MiB hold 52,428,800,000 bytes; one byte more needs 5 MiB + 1 byte, i.e. 6 MiB.
+        $this->assertSame(6 * self::ONE_MIB, $planner->partSize(10000 * self::FIVE_MIB + 1));
+        // Exactly 7 MiB per part needs no rounding.
+        $this->assertSame(7 * self::ONE_MIB, $planner->partSize(10000 * 7 * self::ONE_MIB));
+    }
+
+    public function test_part_count_rejects_non_positive_sizes(): void
+    {
+        $planner = new PartSizePlanner;
+
+        foreach ([0, -1] as $size) {
+            try {
+                $planner->partCount($size);
+                $this->fail("partCount({$size}) must throw.");
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString('greater than zero', $e->getMessage());
+            }
+        }
+    }
+
+    public function test_it_explains_why_an_oversized_object_is_refused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('requires more than 10000 parts at the 5 GiB cap');
+
+        (new PartSizePlanner)->partSize(10000 * self::FIVE_GIB + 1);
+    }
 }

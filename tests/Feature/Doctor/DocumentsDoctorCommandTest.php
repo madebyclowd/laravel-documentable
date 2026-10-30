@@ -205,6 +205,67 @@ class DocumentsDoctorCommandTest extends TestCase
             ->assertExitCode(1);
     }
 
+    private const SCRATCH_EXPIRY = ['ID' => 'scratch', 'Status' => 'Enabled', 'Filter' => ['Prefix' => 'documentable-doctor/'], 'Expiration' => ['Days' => 1]];
+
+    private const BUCKET_WIDE_ABORT = ['ID' => 'abort', 'Status' => 'Enabled', 'Filter' => ['Prefix' => ''], 'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => 3]];
+
+    public function test_lifecycle_probe_names_exactly_what_is_missing(): void
+    {
+        $this->runDoctorWithLifecycleRules([])
+            ->expectsOutputToContain('The bucket has no lifecycle rule to: abort incomplete multipart uploads and expire the doctor scratch prefix.')
+            ->assertExitCode(1);
+    }
+
+    public function test_lifecycle_probe_ignores_disabled_rules(): void
+    {
+        $this->runDoctorWithLifecycleRules([
+            ['Status' => 'Disabled'] + self::SCRATCH_EXPIRY,
+            ['Status' => 'Disabled'] + self::BUCKET_WIDE_ABORT,
+        ])
+            ->expectsOutputToContain('[FAIL] LifecycleRules')
+            ->assertExitCode(1);
+    }
+
+    public function test_lifecycle_probe_requires_the_abort_rule_to_cover_the_whole_bucket(): void
+    {
+        $this->runDoctorWithLifecycleRules([
+            self::SCRATCH_EXPIRY,
+            ['Filter' => ['Prefix' => 'tmp/']] + self::BUCKET_WIDE_ABORT,
+        ])
+            ->expectsOutputToContain('no lifecycle rule to: abort incomplete multipart uploads.')
+            ->assertExitCode(1);
+    }
+
+    public function test_lifecycle_probe_requires_the_expiry_rule_to_cover_the_scratch_prefix(): void
+    {
+        $this->runDoctorWithLifecycleRules([
+            self::BUCKET_WIDE_ABORT,
+            ['Filter' => ['Prefix' => 'unrelated/']] + self::SCRATCH_EXPIRY,
+        ])
+            ->expectsOutputToContain('no lifecycle rule to: expire the doctor scratch prefix.')
+            ->assertExitCode(1);
+    }
+
+    public function test_lifecycle_probe_does_not_accept_a_rule_of_the_wrong_kind(): void
+    {
+        // A bucket-wide expiration is not an abort-incomplete-multipart rule.
+        $this->runDoctorWithLifecycleRules([
+            ['ID' => 'expire-all', 'Status' => 'Enabled', 'Filter' => ['Prefix' => ''], 'Expiration' => ['Days' => 30]],
+        ])
+            ->expectsOutputToContain('no lifecycle rule to: abort incomplete multipart uploads.')
+            ->assertExitCode(1);
+    }
+
+    public function test_lifecycle_probe_reads_the_legacy_and_the_and_filter_prefix_forms(): void
+    {
+        $this->runDoctorWithLifecycleRules([
+            ['ID' => 'legacy-abort', 'Status' => 'Enabled', 'Prefix' => '', 'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => 3]],
+            ['ID' => 'and-expiry', 'Status' => 'Enabled', 'Filter' => ['And' => ['Prefix' => 'documentable-doctor/']], 'Expiration' => ['Days' => 1]],
+        ])
+            ->expectsOutputToContain('[PASS] LifecycleRules')
+            ->assertExitCode(0);
+    }
+
     public function test_doctor_passes_lifecycle_probe_with_both_rules_present(): void
     {
         $this->runDoctorWithLifecycleRules([

@@ -6,10 +6,13 @@ namespace MadeByClowd\Documentable\Tests\Unit;
 
 use Aws\Command;
 use Aws\S3\Exception\S3Exception;
+use GuzzleHttp\Psr7\Response;
 use MadeByClowd\Documentable\Exceptions\MultipartPartTooSmallException;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Services\S3ExceptionMapper;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 class S3ExceptionMapperTest extends TestCase
 {
@@ -47,13 +50,70 @@ class S3ExceptionMapperTest extends TestCase
         $this->assertSame($s3Exception, $mapped);
     }
 
-    public function test_it_identifies_already_gone_errors(): void
+    private static function s3Error(?string $code, ?int $status): S3Exception
     {
-        $command = new Command('HeadObject');
+        $context = ['code' => $code];
 
-        $this->assertTrue(S3ExceptionMapper::isNotFoundOrGone(new S3Exception('404', $command, ['code' => 'NotFound', 'status_code' => 404])));
-        $this->assertTrue(S3ExceptionMapper::isNotFoundOrGone(new S3Exception('NoSuchKey', $command, ['code' => 'NoSuchKey'])));
-        $this->assertTrue(S3ExceptionMapper::isNotFoundOrGone(new S3Exception('NoSuchUpload', $command, ['code' => 'NoSuchUpload'])));
-        $this->assertFalse(S3ExceptionMapper::isNotFoundOrGone(new S3Exception('AccessDenied', $command, ['code' => 'AccessDenied', 'status_code' => 403])));
+        if ($status !== null) {
+            $context['response'] = new Response($status);
+        }
+
+        return new S3Exception('error', new Command('HeadObject'), $context);
+    }
+
+    /**
+     * @return array<string, array{?string, ?int, bool}>
+     */
+    public static function goneCases(): array
+    {
+        return [
+            'NotFound code' => ['NotFound', null, true],
+            'NoSuchKey code' => ['NoSuchKey', null, true],
+            'NoSuchUpload code' => ['NoSuchUpload', null, true],
+            'bare 404 status' => ['SomethingElse', 404, true],
+            'access denied' => ['AccessDenied', 403, false],
+            'server error' => ['InternalError', 500, false],
+            'no code, ok status' => [null, 200, false],
+        ];
+    }
+
+    #[DataProvider('goneCases')]
+    public function test_it_identifies_already_gone_errors(?string $code, ?int $status, bool $expected): void
+    {
+        $this->assertSame($expected, S3ExceptionMapper::isNotFoundOrGone(self::s3Error($code, $status)));
+    }
+
+    /**
+     * @return array<string, array{?string, ?int, bool}>
+     */
+    public static function deniedCases(): array
+    {
+        return [
+            'AccessDenied code' => ['AccessDenied', null, true],
+            'NotImplemented code' => ['NotImplemented', null, true],
+            'MethodNotAllowed code' => ['MethodNotAllowed', null, true],
+            'bare 403 status' => ['Other', 403, true],
+            'bare 405 status' => ['Other', 405, true],
+            'bare 501 status' => ['Other', 501, true],
+            'not found' => ['NoSuchKey', 404, false],
+            'server error' => ['InternalError', 500, false],
+            'neighbouring 402' => ['Other', 402, false],
+            'neighbouring 406' => ['Other', 406, false],
+            'neighbouring 502' => ['Other', 502, false],
+        ];
+    }
+
+    #[DataProvider('deniedCases')]
+    public function test_it_identifies_denied_or_unsupported_errors(?string $code, ?int $status, bool $expected): void
+    {
+        $this->assertSame($expected, S3ExceptionMapper::isAccessDeniedOrNotImplemented(self::s3Error($code, $status)));
+    }
+
+    public function test_only_s3_exceptions_are_classified(): void
+    {
+        $plain = new RuntimeException('AccessDenied');
+
+        $this->assertFalse(S3ExceptionMapper::isNotFoundOrGone($plain));
+        $this->assertFalse(S3ExceptionMapper::isAccessDeniedOrNotImplemented($plain));
     }
 }

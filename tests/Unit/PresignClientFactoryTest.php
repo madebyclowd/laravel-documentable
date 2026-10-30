@@ -82,4 +82,44 @@ class PresignClientFactoryTest extends TestCase
 
         $this->assertStringStartsWith('https://public.example.com/bucket-presign/test.txt', $url);
     }
+
+    private function presignDisk(array $diskConfig, array $documentable = []): S3Client
+    {
+        config()->set('filesystems.disks.presign_probe', ['driver' => 's3', 'bucket' => 'my-bucket', 'key' => 'k', 'secret' => 's'] + $diskConfig);
+        config()->set('documentable.disks.presign_probe', ['presign_endpoint' => 'https://public.example.com'] + $documentable);
+
+        return (new PresignClientFactory)->forDisk('presign_probe');
+    }
+
+    public function test_it_forwards_a_session_token_only_when_the_disk_has_one(): void
+    {
+        $withToken = $this->presignDisk(['token' => 'session-token']);
+        $withoutToken = $this->presignDisk([]);
+
+        $this->assertSame('session-token', $withToken->getCredentials()->wait()->getSecurityToken());
+        $this->assertNull($withoutToken->getCredentials()->wait()->getSecurityToken());
+    }
+
+    public function test_it_defaults_the_region_when_the_disk_has_none(): void
+    {
+        $this->assertSame('us-east-1', $this->presignDisk([])->getRegion());
+        $this->assertSame('eu-west-1', $this->presignDisk(['region' => 'eu-west-1'])->getRegion());
+    }
+
+    public function test_presign_use_path_style_overrides_the_disks_own_setting_in_both_directions(): void
+    {
+        $disk = ['use_path_style_endpoint' => true];
+
+        $overriddenOff = $this->presignDisk($disk, ['presign_use_path_style' => false]);
+        $overriddenOn = $this->presignDisk(['use_path_style_endpoint' => false], ['presign_use_path_style' => true]);
+        $inherited = $this->presignDisk($disk);
+
+        $url = fn (S3Client $client) => (string) $client->createPresignedRequest(
+            $client->getCommand('GetObject', ['Bucket' => 'my-bucket', 'Key' => 'k']), '+5 minutes'
+        )->getUri();
+
+        $this->assertStringStartsWith('https://my-bucket.public.example.com/', $url($overriddenOff));
+        $this->assertStringStartsWith('https://public.example.com/my-bucket/', $url($overriddenOn));
+        $this->assertStringStartsWith('https://public.example.com/my-bucket/', $url($inherited));
+    }
 }
