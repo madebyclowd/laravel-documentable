@@ -441,4 +441,27 @@ class HttpControllersTest extends TestCase
         $response->assertStatus(422);
         $response->assertJsonValidationErrors(['documentable_id']);
     }
+
+    public function test_multipart_initiate_exposes_part_size(): void
+    {
+        $type = $this->makeType(['code' => 'BIG_PART', 'name' => 'Big Part']);
+        $this->signIn(1);
+
+        $initiateWithoutSize = $this->postJson('/documents/multipart/initiate', [
+            'filename' => 'no-size.bin',
+            'document_type_id' => $type->id,
+        ])->assertCreated()->json();
+
+        $this->assertArrayHasKey('part_size', $initiateWithoutSize);
+        $this->assertNull($initiateWithoutSize['part_size']);
+
+        $initiateWithSize = $this->postJson('/documents/multipart/initiate', [
+            'filename' => 'with-size.bin',
+            'document_type_id' => $type->id,
+            'declared_size' => 10 * 1024 * 1024,
+        ])->assertCreated()->json();
+
+        $this->assertArrayHasKey('part_size', $initiateWithSize);
+        $this->assertSame(5 * 1024 * 1024, $initiateWithSize['part_size']);
+    }
 }

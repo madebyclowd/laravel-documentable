@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Contracts;
 
+use MadeByClowd\Documentable\Exceptions\MultipartPartTooSmallException;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
+use MadeByClowd\Documentable\Models\UploadSession;
 
 /**
  * Isolates provider-specific multipart upload API calls out of DocumentService.
@@ -26,6 +28,8 @@ use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
  * retry that itself errors. A driver for a non-S3-shaped backend (a future GCS/Azure driver)
  * must document its own retry semantics explicitly if they differ, rather than silently
  * inheriting this guarantee.
+ *
+ * @api
  */
 interface MultipartUploadDriver
 {
@@ -34,12 +38,17 @@ interface MultipartUploadDriver
      */
     public function create(string $disk, string $path, string $filename): array;
 
-    public function presignPartUpload(string $disk, string $path, string $uploadId, int $partNumber): string;
+    /**
+     * @throws MultipartUploadNotFoundException
+     */
+    public function presignPartUpload(UploadSession $session, int $partNumber): string;
 
     /**
      * @return array<int, array{PartNumber: int, ETag: string}>
+     *
+     * @throws MultipartUploadNotFoundException
      */
-    public function listParts(string $disk, string $path, string $uploadId): array;
+    public function listParts(UploadSession $session): array;
 
     /**
      * Assemble the uploaded parts into the final object. Re-uploading the same PartNumber
@@ -48,8 +57,11 @@ interface MultipartUploadDriver
      * landed may always retry that part number without first checking listParts().
      *
      * @param  array<int, array{PartNumber: int, ETag: string}>  $parts
+     *
+     * @throws MultipartUploadNotFoundException
+     * @throws MultipartPartTooSmallException
      */
-    public function complete(string $disk, string $path, string $uploadId, array $parts): void;
+    public function complete(UploadSession $session, array $parts): void;
 
     /**
      * Abort the provider-side upload and free its stored parts.
@@ -57,5 +69,5 @@ interface MultipartUploadDriver
      * @throws MultipartUploadNotFoundException when the provider has no such
      *                                          upload any more; the caller treats that as already aborted.
      */
-    public function abort(string $disk, string $path, string $uploadId): void;
+    public function abort(UploadSession $session): void;
 }

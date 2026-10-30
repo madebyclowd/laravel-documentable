@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
+use MadeByClowd\Documentable\Models\UploadSession;
 
 /**
  * Upload sessions replace `multipart_uploads`. A session still in flight there cannot continue under the new
@@ -61,7 +62,12 @@ return new class extends Migration
 
             /** @var MultipartUploadDriver $driver */
             $driver = app($class);
-            $driver->abort($type->disk, $row->path, $row->upload_id);
+            $session = new UploadSession([
+                'disk' => $type->disk,
+                'path' => $row->path,
+                'upload_id' => $row->upload_id,
+            ]);
+            $driver->abort($session);
         } catch (Throwable $e) {
             Log::warning("Documentable could not abort legacy multipart upload [{$row->upload_id}] while dropping multipart_uploads: {$e->getMessage()}");
         }

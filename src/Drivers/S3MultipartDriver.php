@@ -8,7 +8,10 @@ use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
-use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
+use MadeByClowd\Documentable\Models\UploadSession;
+use MadeByClowd\Documentable\Services\Presigner;
+use MadeByClowd\Documentable\Services\S3ClientDetector;
+use MadeByClowd\Documentable\Services\S3ExceptionMapper;
 use MadeByClowd\Documentable\Services\ServerSideEncryption;
 
 /**
@@ -18,105 +21,110 @@ use MadeByClowd\Documentable\Services\ServerSideEncryption;
  */
 class S3MultipartDriver implements MultipartUploadDriver
 {
+    public function __construct(private readonly Presigner $presigner) {}
+
     public function create(string $disk, string $path, string $filename): array
     {
-        $params = array_merge([
+        $params = [
             'Bucket' => $this->bucket($disk),
             'Key' => $path,
-            'ContentType' => 'application/octet-stream',
-            'Metadata' => [
-                'original_filename' => $filename,
-            ],
-        ], $this->sseOptions($disk));
+        ];
+
+        if (config('documentable.multipart.object_metadata', false)) {
+            $params['Metadata'] = [
+                'original_filename' => rawurlencode($filename),
+            ];
+        }
+
+        if ($contentType = config('documentable.multipart.content_type')) {
+            $params['ContentType'] = $contentType;
+        }
+
+        $params = array_merge($params, $this->sseOptions($disk));
 
         $result = $this->client($disk)->createMultipartUpload($params);
 
         return ['upload_id' => $result['UploadId']];
     }
 
-    public function presignPartUpload(string $disk, string $path, string $uploadId, int $partNumber): string
+    public function presignPartUpload(UploadSession $session, int $partNumber): string
     {
-        $client = $this->client($disk);
+        $ttl = now()->modify((string) config('documentable.multipart.part_upload_url_ttl', '+1 hour'));
 
-        $command = $client->getCommand('UploadPart', [
-            'Bucket' => $this->bucket($disk),
-            'Key' => $path,
-            'UploadId' => $uploadId,
-            'PartNumber' => $partNumber,
-        ]);
-
-        $ttl = config('documentable.multipart.part_upload_url_ttl', '+1 hour');
-
-        $uri = $client->createPresignedRequest($command, $ttl)->getUri();
-
-        if ($publicBase = config("filesystems.disks.{$disk}.temporary_url")) {
-            $parsed = parse_url($publicBase);
-            $uri = $uri->withScheme($parsed['scheme'])
-                ->withHost($parsed['host'])
-                ->withPort($parsed['port'] ?? null);
+        try {
+            return $this->presigner->part($session->disk, $session->path, (string) $session->upload_id, $partNumber, $ttl);
+        } catch (S3Exception $e) {
+            throw S3ExceptionMapper::mapMultipart($e, $session->path, (string) $session->upload_id);
         }
-
-        return (string) $uri;
     }
 
-    public function listParts(string $disk, string $path, string $uploadId): array
+    public function listParts(UploadSession $session): array
     {
-        $client = $this->client($disk);
-        $bucket = $this->bucket($disk);
+        $client = $this->client($session->disk);
+        $bucket = $this->bucket($session->disk);
+        $uploadId = (string) $session->upload_id;
 
         $parts = [];
         $nextPartMarker = null;
 
-        do {
-            $params = [
-                'Bucket' => $bucket,
-                'Key' => $path,
-                'UploadId' => $uploadId,
-            ];
-
-            if ($nextPartMarker) {
-                $params['PartNumberMarker'] = $nextPartMarker;
-            }
-
-            $result = $client->listParts($params);
-
-            foreach ($result['Parts'] ?? [] as $part) {
-                $parts[] = [
-                    'PartNumber' => $part['PartNumber'],
-                    'ETag' => $part['ETag'],
+        try {
+            do {
+                $params = [
+                    'Bucket' => $bucket,
+                    'Key' => $session->path,
+                    'UploadId' => $uploadId,
                 ];
-            }
 
-            $nextPartMarker = $result['NextPartNumberMarker'] ?? null;
-        } while ($result['IsTruncated'] ?? false);
+                if ($nextPartMarker) {
+                    $params['PartNumberMarker'] = $nextPartMarker;
+                }
+
+                $result = $client->listParts($params);
+
+                foreach ($result['Parts'] ?? [] as $part) {
+                    $parts[] = [
+                        'PartNumber' => $part['PartNumber'],
+                        'ETag' => $part['ETag'],
+                    ];
+                }
+
+                $nextPartMarker = $result['NextPartNumberMarker'] ?? null;
+            } while ($result['IsTruncated'] ?? false);
+        } catch (S3Exception $e) {
+            throw S3ExceptionMapper::mapMultipart($e, $session->path, $uploadId);
+        }
 
         return $parts;
     }
 
-    public function complete(string $disk, string $path, string $uploadId, array $parts): void
+    public function complete(UploadSession $session, array $parts): void
     {
-        $this->client($disk)->completeMultipartUpload([
-            'Bucket' => $this->bucket($disk),
-            'Key' => $path,
-            'UploadId' => $uploadId,
-            'MultipartUpload' => ['Parts' => array_values($parts)],
-        ]);
+        $uploadId = (string) $session->upload_id;
+
+        try {
+            $this->client($session->disk)->completeMultipartUpload([
+                'Bucket' => $this->bucket($session->disk),
+                'Key' => $session->path,
+                'UploadId' => $uploadId,
+                'MultipartUpload' => ['Parts' => array_values($parts)],
+            ]);
+        } catch (S3Exception $e) {
+            throw S3ExceptionMapper::mapMultipart($e, $session->path, $uploadId);
+        }
     }
 
-    public function abort(string $disk, string $path, string $uploadId): void
+    public function abort(UploadSession $session): void
     {
+        $uploadId = (string) $session->upload_id;
+
         try {
-            $this->client($disk)->abortMultipartUpload([
-                'Bucket' => $this->bucket($disk),
-                'Key' => $path,
+            $this->client($session->disk)->abortMultipartUpload([
+                'Bucket' => $this->bucket($session->disk),
+                'Key' => $session->path,
                 'UploadId' => $uploadId,
             ]);
         } catch (S3Exception $e) {
-            if ($e->getAwsErrorCode() === 'NoSuchUpload') {
-                throw MultipartUploadNotFoundException::forUpload($path, $uploadId, $e);
-            }
-
-            throw $e;
+            throw S3ExceptionMapper::mapMultipart($e, $session->path, $uploadId);
         }
     }
 
@@ -130,12 +138,12 @@ class S3MultipartDriver implements MultipartUploadDriver
 
     protected function bucket(string $disk): string
     {
-        return (string) config("filesystems.disks.{$disk}.bucket");
+        return S3ClientDetector::bucket($disk);
     }
 
     /**
      * Explicit SSE, passed through rather than relying on the bucket's
-     * default encryption setting (security-risks.md #2).
+     * default encryption setting.
      */
     protected function sseOptions(string $disk): array
     {
