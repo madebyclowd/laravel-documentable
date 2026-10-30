@@ -8,10 +8,7 @@
     },
     "logs": {
         "text": "build/infection/infection.log",
-        "summary": "build/infection/summary.log",
-        "stryker": {
-            "badge": "/^3\\.x$/"
-        }
+        "summary": "build/infection/summary.log"
     },
     "mutators": {
         "@default": true
