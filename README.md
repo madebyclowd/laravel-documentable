@@ -618,9 +618,10 @@ set `$afterCommit` too, so the queue never picks up work before the row is visib
 | `documents:sync-types [--prune]` | Upsert `config('documentable.types')` into `document_types`. |
 | `documents:list` | Table of registered types with usage counts. |
 | `documents:verify [--repair]` | Detect (and optionally fix) `latest_marker`/`is_latest` drift. |
-| `documents:clean-orphaned [--hours=N] [--storage-files]` | Reaper — purges expired pending documents, aborts stale multipart sessions (a session the provider no longer knows is simply removed; a failing one is logged, kept for the next run and makes the command exit non-zero). `--storage-files` also retries deleting stored files no document references, older than `lifecycle.storage_file_grace_hours` (24). Auto-scheduled without the flag. |
-| `documents:configure-bucket-lifecycle {disk} [--days=3]` | Optional bucket-native `AbortIncompleteMultipartUpload` backstop. |
+| `documents:clean-orphaned [--hours=N] [--storage-files] [--bucket] [--apply]` | Reaper — purges expired pending documents, aborts stale multipart sessions (a session the provider no longer knows is simply removed; a failing one is logged, kept for the next run and makes the command exit non-zero). `--storage-files` retries deleting unreferenced stored files. `--bucket` sweeps orphaned objects directly in the S3 bucket under DocumentType prefixes (dry run by default, `--apply` to delete). Auto-scheduled without flags. |
+| `documents:configure-bucket-lifecycle {disk} [--days=3]` | Configure bucket lifecycle rules (multipart abort and doctor scratch expiration), preserving foreign rules. |
 | `documents:configure-bucket-cors {disk} --origin=... [--verify]` | Apply/verify the bucket CORS policy direct-PUT and multipart part uploads need. |
+| `documents:doctor {disk}` | Diagnostic tool running 11 sequential probes against the bucket and S3 client configuration to verify permissions and compatibility. |
 
 ## AI agent context (Laravel Boost)
 

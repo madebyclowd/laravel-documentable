@@ -60,23 +60,6 @@ parameters:
 			count: 2
 			path: src/Console/Commands/ConfigureBucketCorsCommand.php
 
-		-
-			message: '#^Call to an undefined method Illuminate\\Filesystem\\FilesystemAdapter\:\:getClient\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: src/Console/Commands/ConfigureBucketLifecycleCommand.php
-
-		-
-			message: '#^Parameter \#1 \$name of static method Illuminate\\Filesystem\\FilesystemManager\:\:disk\(\) expects string\|UnitEnum\|null, array\|bool\|float\|int\|string\|null given\.$#'
-			identifier: argument.type
-			count: 1
-			path: src/Console/Commands/ConfigureBucketLifecycleCommand.php
-
-		-
-			message: '#^Part \$disk \(array\|bool\|float\|int\|string\|null\) of encapsed string cannot be cast to string\.$#'
-			identifier: encapsedStringPart.nonString
-			count: 2
-			path: src/Console/Commands/ConfigureBucketLifecycleCommand.php
 
 		-
 			message: '#^Method MadeByClowd\\Documentable\\Console\\Commands\\InstallCommand\:\:writeConfigArrayValue\(\) has parameter \$values with no value type specified in iterable type array\.$#'
@@ -144,17 +127,6 @@ parameters:
 			count: 1
 			path: src/Drivers/S3MultipartDriver.php
 
-		-
-			message: '#^Cannot access offset ''host'' on array\{scheme\?\: string, host\?\: string, port\?\: int\<0, 65535\>, user\?\: string, pass\?\: string, path\?\: string, query\?\: string, fragment\?\: string\}\|false\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 1
-			path: src/Drivers/S3MultipartDriver.php
-
-		-
-			message: '#^Cannot access offset ''scheme'' on array\{scheme\?\: string, host\?\: string, port\?\: int\<0, 65535\>, user\?\: string, pass\?\: string, path\?\: string, query\?\: string, fragment\?\: string\}\|false\.$#'
-			identifier: offsetAccess.nonOffsetAccessible
-			count: 1
-			path: src/Drivers/S3MultipartDriver.php
 
 		-
 			message: '#^Method MadeByClowd\\Documentable\\Drivers\\S3MultipartDriver\:\:sseOptions\(\) return type has no value type specified in iterable type array\.$#'

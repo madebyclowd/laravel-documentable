@@ -282,6 +282,15 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+      rustfs:
+        image: rustfs/rustfs:1.0.3
+        env:
+          RUSTFS_VOLUMES: /data
+          RUSTFS_ADDRESS: 0.0.0.0:9000
+          RUSTFS_ACCESS_KEY: rustfsadmin
+          RUSTFS_SECRET_KEY: rustfsadmin
+        ports:
+          - 9000:9000
 
     env:
       DB_CONNECTION: ${{ matrix.db }}
@@ -289,6 +298,11 @@ jobs:
       DB_DATABASE: documentable_test
       DB_USERNAME: ${{ matrix.db == 'pgsql' && 'postgres' || 'root' }}
       DB_PASSWORD: ${{ matrix.db == 'pgsql' && 'postgres' || '' }}
+      RUSTFS_ENDPOINT: http://127.0.0.1:9000
+      RUSTFS_BUCKET: documentable-test
+      RUSTFS_ACCESS_KEY_ID: rustfsadmin
+      RUSTFS_SECRET_ACCESS_KEY: rustfsadmin
+      RUSTFS_REGION: us-east-1
 
     steps:
       - name: Checkout code
@@ -321,6 +335,42 @@ jobs:
         run: |
           composer require "laravel/framework:${{ matrix.laravel }}" "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
           composer update --${{ matrix.stability }} --prefer-dist --no-interaction
+
+      - name: Create RustFS test bucket
+        run: |
+          php -r '
+            require "vendor/autoload.php";
+            $client = new Aws\S3\S3Client([
+                "version" => "latest",
+                "region" => "us-east-1",
+                "endpoint" => "http://127.0.0.1:9000",
+                "use_path_style_endpoint" => true,
+                "credentials" => [
+                    "key" => "rustfsadmin",
+                    "secret" => "rustfsadmin",
+                ],
+            ]);
+
+            $attempts = 0;
+            while ($attempts < 30) {
+                try {
+                    $client->createBucket(["Bucket" => "documentable-test"]);
+                    echo "Bucket documentable-test created.\n";
+                    exit(0);
+                } catch (\Aws\S3\Exception\S3Exception $e) {
+                    if ($e->getAwsErrorCode() === "BucketAlreadyOwnedByYou" || $e->getAwsErrorCode() === "BucketAlreadyExists") {
+                        echo "Bucket documentable-test already exists.\n";
+                        exit(0);
+                    }
+                } catch (\Throwable $e) {
+                    // Retry on connection error while RustFS boots
+                }
+                $attempts++;
+                sleep(1);
+            }
+            echo "Could not connect to RustFS or create bucket after 30 attempts.\n";
+            exit(1);
+          '
 
       - name: Execute tests
         run: vendor/bin/phpunit ${{ (matrix.php == '8.4' && matrix.laravel == '13.*' && matrix.db == 'sqlite') && '--coverage-clover=coverage.xml' || '' }}
