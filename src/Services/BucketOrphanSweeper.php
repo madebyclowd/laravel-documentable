@@ -13,6 +13,7 @@ use MadeByClowd\Documentable\Exceptions\BucketSweepRefused;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
+use Throwable;
 
 /**
  * Finds objects in the bucket that the database no longer knows about, such as what a rolled-back request or a
@@ -41,6 +42,40 @@ final class BucketOrphanSweeper
                 }
             }
         }
+    }
+
+    /**
+     * The disks whose bucket keeps old versions of a deleted object (versioning enabled or suspended), where a
+     * plain delete only adds a delete marker and frees no storage. Best effort: a token that may not read the
+     * bucket's settings reports nothing rather than failing the sweep.
+     *
+     * @return list<string>
+     *
+     * @throws BucketSweepRefused when a disk or prefix cannot be swept safely
+     */
+    public function versionedDisks(): array
+    {
+        $versioned = [];
+        $asked = [];
+
+        foreach ($this->scopes() as ['disk' => $disk, 'client' => $client]) {
+            if (isset($asked[$disk])) {
+                continue;
+            }
+            $asked[$disk] = true;
+
+            try {
+                $status = $client->getBucketVersioning(['Bucket' => S3ClientDetector::bucket($disk)])['Status'] ?? null;
+            } catch (Throwable) {
+                continue;
+            }
+
+            if (in_array($status, ['Enabled', 'Suspended'], true)) {
+                $versioned[] = $disk;
+            }
+        }
+
+        return $versioned;
     }
 
     public function delete(OrphanedObject $orphan): void

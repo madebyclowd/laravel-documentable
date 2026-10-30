@@ -106,6 +106,30 @@ class PresignClientFactoryTest extends TestCase
         $this->assertSame('eu-west-1', $this->presignDisk(['region' => 'eu-west-1'])->getRegion());
     }
 
+    public function test_it_signs_virtual_hosted_style_unless_a_path_style_setting_says_otherwise(): void
+    {
+        $client = $this->presignDisk([]);
+
+        $url = (string) $client->createPresignedRequest($client->getCommand('GetObject', ['Bucket' => 'my-bucket', 'Key' => 'k']), '+5 minutes')->getUri();
+
+        $this->assertStringStartsWith('https://my-bucket.public.example.com/', $url);
+    }
+
+    public function test_it_takes_credentials_from_an_explicit_credentials_array_on_the_disk(): void
+    {
+        config()->set('filesystems.disks.presign_probe', [
+            'driver' => 's3',
+            'bucket' => 'my-bucket',
+            'credentials' => ['key' => 'array-key', 'secret' => 'array-secret'],
+        ]);
+        config()->set('documentable.disks.presign_probe.presign_endpoint', 'https://public.example.com');
+
+        $credentials = (new PresignClientFactory)->forDisk('presign_probe')->getCredentials()->wait();
+
+        $this->assertSame('array-key', $credentials->getAccessKeyId());
+        $this->assertSame('array-secret', $credentials->getSecretKey());
+    }
+
     public function test_presign_use_path_style_overrides_the_disks_own_setting_in_both_directions(): void
     {
         $disk = ['use_path_style_endpoint' => true];

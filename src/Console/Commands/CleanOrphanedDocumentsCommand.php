@@ -116,6 +116,10 @@ class CleanOrphanedDocumentsCommand extends Command
         $failed = 0;
 
         try {
+            foreach ($sweeper->versionedDisks() as $disk) {
+                $this->warn("Disk [{$disk}] has bucket versioning on: deleting an object only adds a delete marker and frees no storage. Add a lifecycle rule with NoncurrentVersionExpiration to reclaim it.");
+            }
+
             foreach ($sweeper->orphans($cutoff) as $orphan) {
                 $found++;
                 $bytes += $orphan->size;

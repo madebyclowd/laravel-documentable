@@ -75,7 +75,7 @@ class DocumentsDoctorCommandTest extends TestCase
 
         $this->artisan('documents:doctor', ['disk' => 's3_doctor_test'])
             ->expectsOutputToContain('[FAIL] ChecksumHeaders')
-            ->expectsOutputToContain("'request_checksum_calculation' => 'when_required'")
+            ->expectsOutputToContain("Add 'request_checksum_calculation' => 'when_required' and 'response_checksum_validation' => 'when_required' to the disk in config/filesystems.php.")
             ->assertExitCode(1);
     }
 
@@ -254,6 +254,16 @@ class DocumentsDoctorCommandTest extends TestCase
         ])
             ->expectsOutputToContain('no lifecycle rule to: abort incomplete multipart uploads.')
             ->assertExitCode(1);
+    }
+
+    public function test_lifecycle_probe_treats_a_rule_without_a_prefix_as_covering_the_whole_bucket(): void
+    {
+        $this->runDoctorWithLifecycleRules([
+            ['ID' => 'abort-all', 'Status' => 'Enabled', 'Filter' => [], 'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => 3]],
+            ['ID' => 'expire-all', 'Status' => 'Enabled', 'Expiration' => ['Days' => 30]],
+        ])
+            ->expectsOutputToContain('[PASS] LifecycleRules')
+            ->assertExitCode(0);
     }
 
     public function test_lifecycle_probe_reads_the_legacy_and_the_and_filter_prefix_forms(): void

@@ -24,8 +24,15 @@ class BucketReaperTest extends TestCase
 {
     use RefreshDatabase;
 
-    protected function setUpDisk(string $disk = 's3_bucket_reaper', array $overrides = []): void
+    /**
+     * @param  ?string  $versioning  what GetBucketVersioning answers first: 'Enabled', 'Suspended' or null (never versioned)
+     */
+    protected function setUpDisk(string $disk = 's3_bucket_reaper', array $overrides = [], ?string $versioning = null): void
     {
+        if (isset($overrides['handler'])) {
+            $overrides['handler']->append(new Result(array_filter(['Status' => $versioning])));
+        }
+
         config()->set("filesystems.disks.{$disk}", array_merge([
             'driver' => 's3',
             'bucket' => 'test-bucket',
@@ -161,6 +168,30 @@ class BucketReaperTest extends TestCase
 
         $this->artisan('documents:clean-orphaned', ['--bucket' => true])
             ->expectsOutputToContain('Found 1 orphaned object(s) (100 bytes).')
+            ->assertExitCode(0);
+    }
+
+    public function test_bucket_sweep_warns_that_deleting_from_a_versioned_bucket_frees_nothing(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_bucket_reaper', ['handler' => $mock], 'Enabled');
+        DocumentType::create(['code' => 'DOCS', 'name' => 'Docs', 'max_size_mb' => 10, 'disk' => 's3_bucket_reaper', 'path_prefix' => 'documents']);
+        $mock->append(new Result(['Contents' => [], 'IsTruncated' => false]));
+
+        $this->artisan('documents:clean-orphaned', ['--bucket' => true])
+            ->expectsOutputToContain('Disk [s3_bucket_reaper] has bucket versioning on: deleting an object only adds a delete marker and frees no storage. Add a lifecycle rule with NoncurrentVersionExpiration to reclaim it.')
+            ->assertExitCode(0);
+    }
+
+    public function test_bucket_sweep_says_nothing_about_versioning_on_an_unversioned_bucket(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_bucket_reaper', ['handler' => $mock]);
+        DocumentType::create(['code' => 'DOCS', 'name' => 'Docs', 'max_size_mb' => 10, 'disk' => 's3_bucket_reaper', 'path_prefix' => 'documents']);
+        $mock->append(new Result(['Contents' => [], 'IsTruncated' => false]));
+
+        $this->artisan('documents:clean-orphaned', ['--bucket' => true])
+            ->doesntExpectOutputToContain('versioning')
             ->assertExitCode(0);
     }
 

@@ -67,8 +67,8 @@ final class UploadSessionLifecycle
 
             $locked->forceFill(['status' => $to])->save();
 
-            if ($locked->storage_file_id !== null && $locked->storageFile !== null) {
-                $this->purger->removeStorageFileIfUnreferenced($locked->storageFile);
+            if ($storageFile = $locked->storageFile) {
+                $this->purger->removeStorageFileIfUnreferenced($storageFile);
             }
 
             if ($locked->kind === UploadKind::Multipart) {

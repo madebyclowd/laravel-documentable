@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Tests\Feature\Lifecycle;
 
+use Aws\Command;
 use Aws\CommandInterface;
 use Aws\MockHandler;
 use Aws\Result;
+use Aws\S3\Exception\S3Exception;
 use DateTimeImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use MadeByClowd\Documentable\Enums\UploadKind;
@@ -205,6 +207,41 @@ class BucketOrphanSweeperTest extends TestCase
         $this->expectExceptionMessage('Disk [plain_local] is not an S3 disk.');
 
         $this->orphanKeys();
+    }
+
+    /**
+     * @return array<string, array{?string, list<string>}>
+     */
+    public static function versioningStates(): array
+    {
+        return [
+            'enabled' => ['Enabled', [self::DISK]],
+            'suspended keeps old versions too' => ['Suspended', [self::DISK]],
+            'never versioned' => [null, []],
+        ];
+    }
+
+    /**
+     * @param  list<string>  $expected
+     */
+    #[DataProvider('versioningStates')]
+    public function test_it_reports_the_disks_whose_bucket_keeps_old_versions(?string $status, array $expected): void
+    {
+        $this->type('A', 'alpha');
+        $this->type('B', 'beta');
+        $this->answer(new Result(array_filter(['Status' => $status])));
+
+        $this->assertSame($expected, app(BucketOrphanSweeper::class)->versionedDisks());
+        $this->assertCount(1, $this->commands, 'Two prefixes on one disk ask the bucket once.');
+        $this->assertSame('test-bucket', $this->commands[0]['Bucket']);
+    }
+
+    public function test_a_token_that_cannot_read_the_versioning_state_reports_nothing(): void
+    {
+        $this->type('A', 'alpha');
+        $this->mock->append(new S3Exception('denied', new Command('GetBucketVersioning'), ['code' => 'AccessDenied']));
+
+        $this->assertSame([], app(BucketOrphanSweeper::class)->versionedDisks());
     }
 
     public function test_delete_removes_exactly_the_orphans_key_from_its_bucket(): void

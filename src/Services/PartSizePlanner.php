@@ -51,12 +51,6 @@ final class PartSizePlanner
      */
     public function partCount(int $totalBytes): int
     {
-        if ($totalBytes <= 0) {
-            throw new InvalidArgumentException("Total bytes must be greater than zero, got {$totalBytes}.");
-        }
-
-        $partSize = $this->partSize($totalBytes);
-
-        return (int) ceil($totalBytes / $partSize);
+        return (int) ceil($totalBytes / $this->partSize($totalBytes));
     }
 }
