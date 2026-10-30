@@ -162,9 +162,11 @@ return [
     | hashes and scans it, then marks it `committed` or `rejected`. A
     | `processing` document cannot be downloaded or deduplicated against. Needs
     | a queue worker; with the `sync` queue driver the job runs in the request.
-    | Reading is fast (a 1 GiB object hashed in about a second from storage on
-    | the same network), so the limit protects the request time, not the CPU:
-    | 50 MiB leaves a wide margin at 10 MB/s. Set 0 to always verify in a job.
+    | The read is bound by bandwidth to storage, not by the CPU: a 1 GiB object
+    | hashes in about a second from storage on the same network, but a 50 MiB
+    | object took 27 to 39 seconds to hash over the public internet from a
+    | development machine. Size the limit to the link between your servers and
+    | the bucket. Set 0 to always verify in a job.
     |
     | connection / queue: where the job runs. null uses the application default.
     |

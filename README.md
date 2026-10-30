@@ -406,12 +406,49 @@ relying on it.
 | Maximum parts | 10,000 | 10,000 | 10,000 | 10,000 | 10,000 |
 | All parts except the last must be the same size | no | **yes (verified)**: use one fixed part size | no | no | no |
 | Upload id length | short | **343 characters (verified)** | short | unverified | unverified |
+| `UploadPart` with `x-amz-checksum-sha256` | unverified | **rejected, `NotImplemented` (verified)**; `x-amz-checksum-crc32` is accepted | accepted (verified on RustFS) | unverified | unverified |
+| Single `PutObject` with `x-amz-checksum-sha256`: the provider rejects a body that does not match | unverified | **yes, `BadDigest` (verified)**, also through a presigned URL that signs the header | yes (verified on RustFS) | unverified | unverified |
+| `HeadObject` with `ChecksumMode=ENABLED` returns the stored SHA-256 | unverified | **yes (verified)**; `GetObjectAttributes` is `NotImplemented` | yes (verified on RustFS) | unverified | unverified |
+| Accepts the AWS SDK's default checksum headers on `PutObject` (aws-sdk-php 3.402) | yes | **yes (verified)** | yes (verified on RustFS) | unverified | unverified |
 | Browser needs `ExposeHeaders: ETag` in CORS (`etag_strategy = client`) | yes | **yes (verified works)** | yes | yes | yes |
 | Unfinished uploads expire on their own | only with a lifecycle rule | only with a lifecycle rule | only with a lifecycle rule | only with a lifecycle rule | unverified |
+
+`php artisan documents:doctor {disk}` checks the rows you depend on against your own bucket before you deploy. The
+package presigns with `request_checksum_calculation` set to `when_required` whatever the disk's own setting, so a
+provider that rejects the SDK's default checksum headers still accepts its URLs.
 
 Upload ids longer than 255 characters need the `2026_10_24_000006` and `000007` migrations from this
 release (`php artisan migrate`); they widen `multipart_uploads.path`, `multipart_uploads.upload_id` and
 `storage_files.path` to `text` and are safe to run on a table you already widened yourself.
+
+### Behind a proxy or on a public domain — `presign_endpoint`
+
+Every URL the browser uses (downloads, single PUTs and multipart part PUTs) is signed locally by a separate S3
+client, so signing costs no network call. Give the disk a public endpoint when the browser reaches storage at a
+different address than your servers do:
+
+```php
+// config/documentable.php
+'disks' => [
+    's3' => [
+        'presign_endpoint' => 'https://storage.example.com',   // what the browser connects to
+        'presign_use_path_style' => false,                      // optional; defaults to the disk's own setting
+    ],
+],
+```
+
+The signature covers that host, so it stays valid without the proxy having to forward the original `Host` header.
+Server-side reads, hashing and deletes keep using the disk's own endpoint. Without `presign_endpoint` the disk's
+own client signs.
+
+Multipart uploads use one fixed part size for every part but the last (Cloudflare R2 requires it). When the client
+declares the file size at initiate, the response carries `part_size`; `PartSizePlanner` computes it as
+`max(5 MiB, ceil(size / 10,000))` rounded up to a whole MiB. `CreateMultipartUpload` sends no filename metadata and
+no forced `Content-Type`; set `multipart.object_metadata` or `multipart.content_type` if you want them.
+
+`php artisan documents:clean-orphaned --bucket` lists objects under your document types' path prefixes that no
+stored file or live upload session points at (dry run; add `--apply` to delete). On a bucket with versioning on, a
+delete only adds a delete marker, so it warns you to add a `NoncurrentVersionExpiration` lifecycle rule.
 
 ### Same two flows without the shipped routes — direct service calls
 
