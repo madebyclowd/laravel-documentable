@@ -191,6 +191,18 @@ class SessionReaperSafetyTest extends TestCase
         FakeMultipartUploadDriver::reset();
     }
 
+    public function test_session_reaper_keeps_the_session_open_when_the_object_cannot_even_be_inspected(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_reaper_disk', ['handler' => $mock]);
+        $session = $this->makeExpiredSession('s3_reaper_disk', 'uploads/file.bin');
+        $mock->append(new S3Exception('denied', new Command('HeadObject'), ['code' => 'AccessDenied', 'response' => new Response(403)]));
+
+        $this->artisan('documents:clean-orphaned')->assertExitCode(1);
+
+        $this->assertSame(UploadSessionStatus::Initiated, $session->fresh()->status);
+    }
+
     public function test_session_reaper_idempotency(): void
     {
         $mock = new MockHandler;

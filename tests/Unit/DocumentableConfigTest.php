@@ -194,6 +194,7 @@ class DocumentableConfigTest extends TestCase
             'allowed types not null or array' => [['security' => ['allowed_documentable_types' => 'App\\Models\\Post']], 'security.allowed_documentable_types', 'null or an array'],
             'boolean flag not a boolean' => [['load_routes' => 'yes'], 'load_routes', 'true or false'],
             'types not an array' => [['types' => 'invoice'], 'types', 'array'],
+            'disk settings not an array' => [['disks' => ['s3' => 'AES256']], 'disks.s3', 'array of settings'],
             'presign endpoint not a url' => [['disks' => ['s3' => ['presign_endpoint' => 'not-a-url']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
             'presign endpoint relative' => [['disks' => ['s3' => ['presign_endpoint' => '/path']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],
             'presign endpoint other scheme' => [['disks' => ['s3' => ['presign_endpoint' => 'ftp://storage.example.com']]], 'disks.s3.presign_endpoint', 'absolute http or https URL'],

@@ -74,12 +74,4 @@ final class PresignClientFactory
 
         return $this->clients[$disk] = new S3Client($clientConfig);
     }
-
-    /**
-     * Clears cached clients.
-     */
-    public function flush(): void
-    {
-        $this->clients = [];
-    }
 }

@@ -64,6 +64,26 @@ class ConfigureBucketLifecycleCommandTest extends TestCase
         $this->assertSame(1, $rule2['Expiration']['Days']);
     }
 
+    public function test_refuses_a_disk_that_is_not_s3(): void
+    {
+        config()->set('filesystems.disks.plain_local', ['driver' => 'local', 'root' => sys_get_temp_dir()]);
+
+        $this->artisan('documents:configure-bucket-lifecycle', ['disk' => 'plain_local'])
+            ->expectsOutputToContain('Disk [plain_local] is not an S3 disk.')
+            ->assertExitCode(1);
+    }
+
+    public function test_an_error_reading_the_existing_rules_stops_the_command_before_anything_is_written(): void
+    {
+        $handler = new MockHandler;
+        $handler->append(fn (CommandInterface $command) => new S3Exception('denied', $command, ['code' => 'AccessDenied']));
+        $this->setUpMockedDisk($handler);
+
+        $this->expectException(S3Exception::class);
+
+        $this->artisan('documents:configure-bucket-lifecycle', ['disk' => 's3'])->run();
+    }
+
     public function test_merges_and_preserves_foreign_rules(): void
     {
         $handler = new MockHandler;

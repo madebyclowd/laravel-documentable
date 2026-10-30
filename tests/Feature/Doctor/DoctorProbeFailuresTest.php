@@ -318,6 +318,19 @@ class DoctorProbeFailuresTest extends TestCase
         $this->assertStringContainsString('could not check', strtolower($result->message));
     }
 
+    public function test_etag_probe_reports_a_rejected_small_part_upload(): void
+    {
+        $this->script(['CreateMultipartUpload' => new Result(['UploadId' => 'mp-1'])]);
+        Http::fake(['*' => Http::response('Forbidden', 403)]);
+        $context = $this->context();
+
+        $result = $this->runProbe(new ExposedEtagHeaderProbe, $context);
+
+        $this->assertSame(ProbeStatus::Fail, $result->status);
+        $this->assertStringContainsString('The part upload returned HTTP 403', $result->message);
+        $this->assertArrayHasKey('mp-1', $context->openedMultipartUploads);
+    }
+
     public function test_presigned_get_probe_reports_a_missing_object(): void
     {
         $this->script([]);

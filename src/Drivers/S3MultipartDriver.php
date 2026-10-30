@@ -51,11 +51,7 @@ class S3MultipartDriver implements MultipartUploadDriver
     {
         $ttl = now()->modify((string) config('documentable.multipart.part_upload_url_ttl', '+1 hour'));
 
-        try {
-            return $this->presigner->part($session->disk, $session->path, (string) $session->upload_id, $partNumber, $ttl);
-        } catch (S3Exception $e) {
-            throw S3ExceptionMapper::mapMultipart($e, $session->path, (string) $session->upload_id);
-        }
+        return $this->presigner->part($session->disk, $session->path, (string) $session->upload_id, $partNumber, $ttl);
     }
 
     public function listParts(UploadSession $session): array

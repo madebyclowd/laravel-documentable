@@ -383,6 +383,95 @@ class DocumentsDoctorCommandTest extends TestCase
         $this->assertSame('scratch/leftover.txt', $deletedKeys[0]['Key']);
     }
 
+    private function passingProbe(): Probe
+    {
+        return new class implements Probe
+        {
+            public function name(): string
+            {
+                return 'Dummy';
+            }
+
+            public function run(DoctorContext $context): ProbeResult
+            {
+                return ProbeResult::pass($this->name(), 'Passed');
+            }
+        };
+    }
+
+    /**
+     * Answers cleanup commands by name; a Throwable is thrown, a callable is called, a Result is returned.
+     *
+     * @param  array<string, mixed>  $byCommand
+     */
+    private function routeCleanup(MockHandler $mock, array $byCommand): void
+    {
+        for ($i = 0; $i < 10; $i++) {
+            $mock->append(function (CommandInterface $cmd) use ($byCommand) {
+                $answer = $byCommand[$cmd->getName()] ?? new Result;
+                if ($answer instanceof \Throwable) {
+                    throw $answer;
+                }
+
+                return is_callable($answer) ? $answer($cmd) : $answer;
+            });
+        }
+    }
+
+    public function test_doctor_runner_aborts_uploads_it_finds_listed_under_the_scratch_prefix(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_doctor_test', ['handler' => $mock]);
+        $aborted = null;
+        $this->routeCleanup($mock, [
+            'ListMultipartUploads' => new Result(['Uploads' => [['Key' => 'documentable-doctor/x/orphan.bin', 'UploadId' => 'mp-9']]]),
+            'AbortMultipartUpload' => function (CommandInterface $cmd) use (&$aborted) {
+                $aborted = [$cmd['Key'], $cmd['UploadId']];
+
+                return new Result;
+            },
+        ]);
+
+        $this->app->makeWith(DoctorRunner::class, ['probes' => [$this->passingProbe()]])->run('s3_doctor_test');
+
+        $this->assertSame(['documentable-doctor/x/orphan.bin', 'mp-9'], $aborted);
+    }
+
+    public function test_doctor_runner_keeps_cleaning_when_an_abort_fails(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_doctor_test', ['handler' => $mock]);
+        $deleted = null;
+        $this->routeCleanup($mock, [
+            'ListMultipartUploads' => new Result(['Uploads' => [['Key' => 'documentable-doctor/x/orphan.bin', 'UploadId' => 'mp-9']]]),
+            'AbortMultipartUpload' => new S3Exception('denied', new Command('AbortMultipartUpload'), ['code' => 'AccessDenied']),
+            'ListObjectsV2' => new Result(['Contents' => [['Key' => 'documentable-doctor/x/leftover.txt']]]),
+            'DeleteObjects' => function (CommandInterface $cmd) use (&$deleted) {
+                $deleted = $cmd['Delete']['Objects'][0]['Key'];
+
+                return new Result;
+            },
+        ]);
+        $failing = new class implements Probe
+        {
+            public function name(): string
+            {
+                return 'Failing';
+            }
+
+            public function run(DoctorContext $context): ProbeResult
+            {
+                $context->trackMultipart('tracked-1', $context->scratchPrefix.'t.bin');
+
+                return ProbeResult::pass($this->name(), 'Passed');
+            }
+        };
+
+        $this->app->makeWith(DoctorRunner::class, ['probes' => [$failing]])->run('s3_doctor_test');
+
+        $this->assertSame('documentable-doctor/x/leftover.txt', $deleted, 'A failed abort must not stop the objects from being deleted.');
+    }
+
     public function test_doctor_runner_warns_if_cleanup_fails(): void
     {
         $mock = new MockHandler;

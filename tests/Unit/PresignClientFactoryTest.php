@@ -106,6 +106,16 @@ class PresignClientFactoryTest extends TestCase
         $this->assertSame('eu-west-1', $this->presignDisk(['region' => 'eu-west-1'])->getRegion());
     }
 
+    public function test_it_refuses_a_disk_that_has_no_s3_client(): void
+    {
+        config()->set('filesystems.disks.plain_local', ['driver' => 'local', 'root' => sys_get_temp_dir()]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Disk [plain_local] does not provide an S3 client.');
+
+        (new PresignClientFactory)->forDisk('plain_local');
+    }
+
     public function test_it_signs_virtual_hosted_style_unless_a_path_style_setting_says_otherwise(): void
     {
         $client = $this->presignDisk([]);
