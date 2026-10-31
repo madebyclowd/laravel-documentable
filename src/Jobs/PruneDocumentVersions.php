@@ -11,6 +11,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use MadeByClowd\Documentable\Services\VersionPruner;
 use MadeByClowd\Documentable\Services\VersionRetention;
+use RuntimeException;
 
 /**
  * Prunes old document versions beyond the type's versions_kept and versions_retain_days policies.
@@ -22,23 +23,19 @@ final class PruneDocumentVersions implements ShouldQueue, ShouldQueueAfterCommit
 
     public int $tries = 5;
 
+    public int $backoff = 60;
+
     public function __construct(public readonly string $documentGroupId) {}
 
     /**
-     * @return list<int>
+     * Stops at the first version whose stored object cannot be deleted; the queue retries the whole job after
+     * the backoff and the versions already pruned are no longer selected.
      */
-    public function backoff(): array
-    {
-        return [10, 30, 60, 120];
-    }
-
     public function handle(VersionRetention $retention, VersionPruner $pruner): void
     {
         foreach ($retention->forGroup($this->documentGroupId) as $document) {
             if (! $pruner->prune($document)) {
-                $this->release($this->backoff()[$this->attempts() - 1] ?? 120);
-
-                return;
+                throw new RuntimeException("Could not delete the stored object of document version [{$document->id}].");
             }
         }
     }

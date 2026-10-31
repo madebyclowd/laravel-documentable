@@ -6,6 +6,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Lifecycle;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -199,6 +200,22 @@ class VersionLifecycleApiTest extends TestCase
 
         $uuidCount = $this->service->deleteGroup((string) Str::uuid());
         $this->assertSame(0, $uuidCount);
+    }
+
+    public function test_delete_group_and_restore_record_and_clear_who_deleted(): void
+    {
+        config()->set('documentable.audit.enabled', true);
+        Auth::shouldReceive('id')->andReturn('actor-7');
+        Auth::shouldReceive('user')->andReturn(null);
+
+        $type = $this->makeType();
+        $v1 = $this->uploadVersion($type, 'v1');
+
+        $this->service->deleteGroup($v1->document_group_id);
+        $this->assertSame('actor-7', Document::withTrashed()->find($v1->id)->deleted_by);
+
+        $this->service->restore(Document::withTrashed()->find($v1->id));
+        $this->assertNull(Document::find($v1->id)->deleted_by);
     }
 
     // --- promote() tests ---

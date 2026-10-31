@@ -116,10 +116,6 @@ final class DocumentPurger
                 ->lockForUpdate()
                 ->get();
 
-            if ($documents->isEmpty()) {
-                return 0;
-            }
-
             $count = 0;
             $actorId = $this->actor->idForAudit();
 

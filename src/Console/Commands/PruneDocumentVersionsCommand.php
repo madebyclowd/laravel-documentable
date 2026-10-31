@@ -53,7 +53,7 @@ class PruneDocumentVersionsCommand extends Command
                     $doc->document_type_id,
                     $doc->document_group_id,
                     $doc->version,
-                    $doc->created_at?->toIso8601String() ?? '',
+                    (string) $doc->created_at,
                 ])
             );
             $this->info("Dry run complete: {$toPrune->count()} document version(s) would be pruned.");

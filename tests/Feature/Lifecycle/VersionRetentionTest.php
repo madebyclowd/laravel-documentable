@@ -208,6 +208,36 @@ class VersionRetentionTest extends TestCase
         $this->assertCount(0, $retention->forGroup($v1->document_group_id));
     }
 
+    public function test_a_held_version_does_not_stop_older_ones_from_being_pruned(): void
+    {
+        Queue::fake([PruneDocumentVersions::class]);
+
+        $type = $this->makeType(['versions_kept' => 1]);
+        $v1 = $this->uploadVersion($type, 'v1');
+        $v2 = $this->uploadVersion($type, 'v2', $v1->document_group_id);
+        $v3 = $this->uploadVersion($type, 'v3', $v1->document_group_id);
+
+        config()->set('documentable.retention.hold', [$v2->id]);
+
+        $toPrune = $this->app->make(VersionRetention::class)->forGroup($v1->document_group_id);
+
+        $this->assertSame([$v1->id], $toPrune->pluck('id')->all());
+    }
+
+    public function test_the_age_is_measured_from_the_given_moment(): void
+    {
+        Queue::fake([PruneDocumentVersions::class]);
+
+        $type = $this->makeType(['versions_retain_days' => 10]);
+        $v1 = $this->uploadVersion($type, 'v1', null, Carbon::parse('2026-01-01'));
+        $this->uploadVersion($type, 'v2', $v1->document_group_id);
+
+        $retention = $this->app->make(VersionRetention::class);
+
+        $this->assertCount(0, $retention->forGroup($v1->document_group_id, Carbon::parse('2026-01-05')));
+        $this->assertCount(1, $retention->forGroup($v1->document_group_id, Carbon::parse('2026-01-12')));
+    }
+
     public function test_info_panah_merah_regression_keep_3_upload_5_leaves_3_4_5(): void
     {
         $type = $this->makeType(['versions_kept' => 3, 'versions_retain_days' => null]);
@@ -290,11 +320,40 @@ class VersionRetentionTest extends TestCase
         $this->failDeletesWith('throw');
 
         $job = new PruneDocumentVersions($v1->document_group_id);
-        $this->app->call([$job, 'handle']);
 
-        // Version stays in database
+        try {
+            $this->app->call([$job, 'handle']);
+            $this->fail('The job must fail so the queue retries it.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString($v1->id, $e->getMessage());
+        }
+
         $this->assertDatabaseHas('documents', ['id' => $v1->id]);
         Event::assertNotDispatched(DocumentVersionPruned::class);
+    }
+
+    public function test_job_retries_with_a_backoff(): void
+    {
+        $job = new PruneDocumentVersions((string) Str::uuid());
+
+        $this->assertSame(5, $job->tries);
+        $this->assertSame(60, $job->backoff);
+    }
+
+    public function test_dry_run_lists_the_versions_it_would_prune(): void
+    {
+        Queue::fake([PruneDocumentVersions::class]);
+
+        $type = $this->makeType(['versions_kept' => 1]);
+        $v1 = $this->uploadVersion($type, 'v1', null, Carbon::parse('2026-01-02 03:04:05'));
+        $this->uploadVersion($type, 'v2', $v1->document_group_id);
+
+        $this->artisan('documents:prune-versions', ['--dry-run' => true])
+            ->expectsTable(
+                ['ID', 'Type', 'Group', 'Version', 'Created At'],
+                [[$v1->id, $type->id, $v1->document_group_id, 1, '2026-01-02 03:04:05']]
+            )
+            ->assertExitCode(0);
     }
 
     public function test_prune_versions_command_dry_run_deletes_nothing(): void
@@ -345,6 +404,7 @@ class VersionRetentionTest extends TestCase
 
         $this->artisan('documents:prune-versions', ['--type' => $type->id])
             ->expectsOutputToContain('No document versions eligible for pruning.')
+            ->doesntExpectOutputToContain('Successfully pruned')
             ->assertExitCode(0);
     }
 

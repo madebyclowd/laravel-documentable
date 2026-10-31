@@ -190,10 +190,12 @@ class DeleteLatestPolicyTest extends TestCase
         $v1 = $this->uploadVersion($type, 'v1');
         $v2 = $this->uploadVersion($type, 'v2', $v1->document_group_id);
 
-        $this->expectException(CannotDeleteLatestVersion::class);
-
         try {
             $this->service->delete($v2);
+            $this->fail('Deleting the latest version of a blocked type must throw.');
+        } catch (CannotDeleteLatestVersion $e) {
+            $this->assertSame($v2->id, $e->document->id);
+            $this->assertStringContainsString($v2->id, $e->getMessage());
         } finally {
             // Assert nothing was changed
             $this->assertNotSoftDeleted('documents', ['id' => $v2->id]);

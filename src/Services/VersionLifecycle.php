@@ -48,16 +48,13 @@ final class VersionLifecycle
      * Find the highest remaining non-trashed version in the group eligible for promotion.
      * Only committed documents are eligible.
      */
-    public function findPromotionCandidate(string $groupId, ?string $excludeId = null): ?Document
+    public function findPromotionCandidate(string $groupId, string $excludeId): ?Document
     {
-        $query = Document::where('document_group_id', $groupId)
-            ->where('status', DocumentStatus::Committed->value);
-
-        if ($excludeId !== null) {
-            $query->whereKeyNot($excludeId);
-        }
-
-        return $query->orderByDesc('version')->first();
+        return Document::where('document_group_id', $groupId)
+            ->where('status', DocumentStatus::Committed->value)
+            ->whereKeyNot($excludeId)
+            ->orderByDesc('version')
+            ->first();
     }
 
     /**
@@ -86,8 +83,6 @@ final class VersionLifecycle
 
             if ($this->canTakeSlot($document, $type)) {
                 $this->setLatest($document, $type);
-            } else {
-                $this->clearLatest($document);
             }
 
             return $document;
