@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MadeByClowd\Documentable\Tests\Fixtures;
+namespace MadeByClowd\Documentable\Testing;
 
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -10,13 +10,13 @@ use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Exceptions\MultipartPartTooSmallException;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Models\UploadSession;
+use Throwable;
 
 /**
- * Simulates a provider's multipart API against a faked local disk, so the
- * DocumentService orchestration (ownership checks, etag_strategy branching,
- * part reconciliation, integrity verification) can be exercised without a
- * real S3-compatible bucket. Tests drive "client part upload" via
- * uploadPart(), which is what a real client's presigned PUT would do.
+ * Simulates a provider's multipart API against a faked storage disk, so
+ * multipart orchestration can be tested without a real S3 bucket.
+ *
+ * @api
  */
 class FakeMultipartUploadDriver implements MultipartUploadDriver
 {
@@ -33,6 +33,14 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
      * When true, `complete()` throws MultipartPartTooSmallException if a non-last part is smaller than 5 MiB.
      */
     public static bool $unequalParts = false;
+
+    /**
+     * Upload ids whose abort() throws the given exception, to simulate a provider that no longer knows the
+     * upload or is unreachable.
+     *
+     * @var array<string, Throwable>
+     */
+    public static array $abortErrors = [];
 
     public function create(string $disk, string $path, string $filename): array
     {
@@ -112,14 +120,6 @@ class FakeMultipartUploadDriver implements MultipartUploadDriver
 
         unset(static::$sessions[$uploadId]);
     }
-
-    /**
-     * Upload ids whose abort() throws the given exception, to simulate a provider that no longer knows the
-     * upload or is unreachable.
-     *
-     * @var array<string, \Throwable>
-     */
-    public static array $abortErrors = [];
 
     public function abort(UploadSession $session): void
     {

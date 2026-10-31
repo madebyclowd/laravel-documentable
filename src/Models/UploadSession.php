@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 use LogicException;
+use MadeByClowd\Documentable\Database\Factories\UploadSessionFactory;
 use MadeByClowd\Documentable\Enums\UploadKind;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 
@@ -40,7 +42,13 @@ use MadeByClowd\Documentable\Enums\UploadSessionStatus;
  */
 class UploadSession extends Model
 {
-    use HasUlids;
+    /** @use HasFactory<UploadSessionFactory> */
+    use HasFactory, HasUlids;
+
+    protected static function newFactory(): UploadSessionFactory
+    {
+        return UploadSessionFactory::new();
+    }
 
     protected $fillable = [
         'user_id',

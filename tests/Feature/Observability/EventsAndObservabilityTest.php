@@ -20,7 +20,7 @@ use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Services\DocumentService;
-use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
+use MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
 

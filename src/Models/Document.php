@@ -8,12 +8,14 @@ use DateTimeInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use LogicException;
+use MadeByClowd\Documentable\Database\Factories\DocumentFactory;
 use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\ValueObjects\UrlOptions;
@@ -44,7 +46,13 @@ use MadeByClowd\Documentable\ValueObjects\UrlOptions;
  */
 class Document extends Model
 {
-    use HasUuids, SoftDeletes;
+    /** @use HasFactory<DocumentFactory> */
+    use HasFactory, HasUuids, SoftDeletes;
+
+    protected static function newFactory(): DocumentFactory
+    {
+        return DocumentFactory::new();
+    }
 
     protected $fillable = [
         'storage_file_id',

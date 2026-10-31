@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use MadeByClowd\Documentable\Database\Factories\StorageFileFactory;
 
 /**
  * @property string $id
@@ -20,7 +22,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class StorageFile extends Model
 {
-    use HasUuids;
+    /** @use HasFactory<StorageFileFactory> */
+    use HasFactory, HasUuids;
+
+    protected static function newFactory(): StorageFileFactory
+    {
+        return StorageFileFactory::new();
+    }
 
     protected $fillable = [
         'file_hash',

@@ -528,6 +528,22 @@ $users = User::withDocumentOfType('avatar')->get();
 
 Both helpers respect string `key_type` configurations and integer primary key owners.
 
+### Reading contents and streams
+
+Read stored bytes safely without bypassing the service or directly accessing storage disks:
+
+```php
+// Open a readable stream (PHP resource)
+$stream = $documentService->readStream($document);
+$firstChunk = fread($stream, 8192);
+fclose($stream);
+
+// Read entire contents into a string with a memory limit guard (default 10MB)
+$contents = $documentService->readContents($document, maxBytes: 5 * 1024 * 1024);
+```
+
+Both methods refuse non-committed documents (`DocumentNotReady`), throw `DocumentTooLargeToRead` when exceeding the byte limit, and record an access log entry with action `read` when `documentable.audit.access_log` is enabled.
+
 ### DocumentResource & DocumentCollection
 
 Use `DocumentResource` to serialize documents with `id`, `filename`, `size`, `mime`, `version`, and `type`.
@@ -666,6 +682,22 @@ $attachment2 = $service->upload($file, $type, $invoice);
 // Add a new version *to that specific slot*:
 $service->upload($newFile, $type, $invoice, documentGroupId: $attachment2->document_group_id);
 ```
+
+**Attaching an existing stored file (deduplication seam).**
+
+```php
+use MadeByClowd\Documentable\ValueObjects\AttachOptions;
+
+$newDoc = $service->attachStorageFile(
+    $storageFile,
+    $type,
+    $owner,
+    'client_name.pdf',
+    new AttachOptions(metadata: ['source' => 'import'])
+);
+```
+
+The caller is responsible for having proven the right to reuse the file (the deduplication handshake does this). This is the supported seam replacing subclassing.
 
 **Detached upload, reassociated once the real owner exists.**
 
@@ -829,6 +861,63 @@ older version shows the guideline under a new heading after the update.
 Without Boost, read the files in `vendor/madebyclowd/laravel-documentable/resources/boost/` and copy the
 skill to wherever your AI tool expects it (Claude Code: `.claude/skills/laravel-documentable/SKILL.md` for
 a project, or `~/.claude/skills/` for personal use across projects).
+
+## Testing your app
+
+The package provides testing tools so application tests can exercise document workflows without real S3 buckets or external network calls:
+
+```php
+use Illuminate\Http\UploadedFile;
+use MadeByClowd\Documentable\Documentable;
+use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Models\DocumentType;
+use MadeByClowd\Documentable\Services\DocumentService;
+
+public function test_user_can_upload_invoice(): void
+{
+    // Fake storage disks, the multipart driver, and package domain events
+    $fake = Documentable::fake();
+
+    $type = DocumentType::factory()->create([
+        'code' => 'INVOICE',
+        'disk' => 's3',
+    ]);
+    $user = User::factory()->create();
+
+    $service = app(DocumentService::class);
+    $document = $service->upload(
+        UploadedFile::fake()->create('invoice.pdf', 100, 'application/pdf'),
+        $type,
+        $user
+    );
+
+    // Assert that the upload was completed and attached
+    $fake->assertAttached(fn (Document $doc) => $doc->id === $document->id);
+}
+```
+
+`Documentable::fake()` fakes storage disks, the multipart driver, and package events (your own listeners for those events do not run, listeners for other events do); it does not fake `DocumentService` itself. All validation, database writes, and versioning logic run for real against the faked disk.
+
+### Model factories
+
+The package provides model factories for setting up valid test state under `Model::shouldBeStrict()`:
+
+- `Document::factory()`: states `committed()` (default), `processing()`, `rejected()`, `latest()`, and `superseded()`.
+- `DocumentType::factory()`: sets all database columns required for strict mode.
+- `StorageFile::factory()`: creates realistic SHA-256 hashes and consistent sizes.
+- `UploadSession::factory()`: states for each lifecycle stage (`initiated()`, `uploaded()`, `attached()`, `expired()`, `aborted()`).
+
+### Test assertions
+
+`DocumentableFake` provides assertions built on observable facts:
+
+```php
+$fake->assertUploaded(fn (UploadSession $session) => ...);         // An upload session in status 'uploaded' exists
+$fake->assertMultipartInitiated(fn (UploadSession $session) => ...); // A multipart upload was started
+$fake->assertAttached(fn (Document $doc) => ...);    // A DocumentUploaded event was dispatched
+$fake->assertPurged(fn (Document $doc) => ...);      // A DocumentPurged event was dispatched
+$fake->assertNothingUploaded();                      // No upload sessions and no documents exist
+```
 
 ## Configuration
 

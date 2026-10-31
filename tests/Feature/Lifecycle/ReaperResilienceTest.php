@@ -12,7 +12,7 @@ use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
-use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
+use MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\TestCase;
 use RuntimeException;
 

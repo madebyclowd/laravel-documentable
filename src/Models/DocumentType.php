@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use MadeByClowd\Documentable\Database\Factories\DocumentTypeFactory;
 use MadeByClowd\Documentable\Enums\OnDeleteLatest;
 
 /**
@@ -28,7 +30,13 @@ use MadeByClowd\Documentable\Enums\OnDeleteLatest;
  */
 class DocumentType extends Model
 {
-    use HasUuids, SoftDeletes;
+    /** @use HasFactory<DocumentTypeFactory> */
+    use HasFactory, HasUuids, SoftDeletes;
+
+    protected static function newFactory(): DocumentTypeFactory
+    {
+        return DocumentTypeFactory::new();
+    }
 
     protected $attributes = [
         'on_delete_latest' => 'promote',

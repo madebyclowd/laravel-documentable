@@ -15,7 +15,7 @@ return new class extends Migration
 
             // String, not a fixed-type FK — same portability reasoning as documentable_id.
             $table->string('actor_id')->nullable();
-            $table->string('action'); // 'view' | 'download'
+            $table->string('action'); // 'view' | 'download' | 'read'
             $table->string('ip_address')->nullable();
 
             $table->timestamp('created_at');
