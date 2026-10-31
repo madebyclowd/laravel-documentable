@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Console\Commands;
 use Illuminate\Console\Command;
 use MadeByClowd\Documentable\Integrity\IntegrityInspector;
 use MadeByClowd\Documentable\Integrity\IntegrityReport;
+use MadeByClowd\Documentable\Upgrade\CodeScanner;
 
 /**
  * Read-only preflight for the schema constraints. Run it before `php artisan migrate` on an existing install:
@@ -14,12 +15,16 @@ use MadeByClowd\Documentable\Integrity\IntegrityReport;
  */
 class UpgradeCheckCommand extends Command
 {
-    protected $signature = 'documents:upgrade-check';
+    protected $signature = 'documents:upgrade-check {--code : Run static code scan for v2 API usage} {--path= : Base path to scan}';
 
     protected $description = 'Report data that would block the integrity constraints (writes nothing).';
 
-    public function handle(IntegrityInspector $inspector): int
+    public function handle(IntegrityInspector $inspector, CodeScanner $scanner): int
     {
+        if ($this->option('code')) {
+            return $this->handleCodeScan($scanner);
+        }
+
         $report = $inspector->inspect();
 
         $this->renderBlockingFindings($report);
@@ -34,6 +39,27 @@ class UpgradeCheckCommand extends Command
 
         if ($report->hasRepairableFindings()) {
             $this->line('Review the fixes with `php artisan documents:repair --dry-run`, then apply them with `--apply`.');
+        }
+
+        return self::FAILURE;
+    }
+
+    private function handleCodeScan(CodeScanner $scanner): int
+    {
+        $pathOption = $this->option('path');
+        $basePath = is_string($pathOption) && $pathOption !== '' ? $pathOption : base_path();
+        $findings = $scanner->scan($basePath);
+
+        if ($findings === []) {
+            $this->info('No v2 API found.');
+
+            return self::SUCCESS;
+        }
+
+        foreach ($findings as $finding) {
+            $this->line("{$finding->file}:{$finding->line}  {$finding->message}");
+            $this->line("  use: {$finding->replacement}");
+            $this->line("  see UPGRADE.md{$finding->anchor}");
         }
 
         return self::FAILURE;
