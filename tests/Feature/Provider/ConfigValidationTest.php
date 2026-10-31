@@ -40,4 +40,15 @@ class ConfigValidationTest extends TestCase
 
         (new DocumentableServiceProvider($this->app))->boot();
     }
+
+    public function test_booting_with_invalid_retention_hold_throws(): void
+    {
+        $this->app['config']->set('documentable.retention.hold', 'not-an-array');
+        $this->app->forgetInstance(DocumentableConfig::class);
+
+        $this->expectException(InvalidDocumentableConfig::class);
+        $this->expectExceptionMessage('documentable.retention.hold');
+
+        (new DocumentableServiceProvider($this->app))->boot();
+    }
 }
