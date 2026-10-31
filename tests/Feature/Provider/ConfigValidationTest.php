@@ -51,4 +51,15 @@ class ConfigValidationTest extends TestCase
 
         (new DocumentableServiceProvider($this->app))->boot();
     }
+
+    public function test_booting_with_invalid_url_modifier_throws(): void
+    {
+        $this->app['config']->set('documentable.url.modifier', 'not-a-modifier-class');
+        $this->app->forgetInstance(DocumentableConfig::class);
+
+        $this->expectException(InvalidDocumentableConfig::class);
+        $this->expectExceptionMessage('documentable.url.modifier');
+
+        (new DocumentableServiceProvider($this->app))->boot();
+    }
 }

@@ -18,6 +18,7 @@ use MadeByClowd\Documentable\Repositories\DocumentRepository;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
 use MadeByClowd\Documentable\ValueObjects\AttachOptions;
 use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
+use MadeByClowd\Documentable\ValueObjects\UrlOptions;
 
 /**
  * The public entry point for storing, reading and removing documents. Each method delegates to a focused
@@ -148,9 +149,16 @@ class DocumentService
     /**
      * Generate a presigned URL for the document.
      */
-    public function getUrl(Document $document, DateTimeInterface $expiration, string $disposition = 'inline'): string
+    public function getUrl(Document $document, DateTimeInterface|UrlOptions|null $options = null, string $disposition = 'inline'): string
     {
-        return $this->urlSigner->sign($document, $expiration, $disposition);
+        $resolvedDisposition = $disposition === 'attachment' ? 'attachment' : 'inline';
+        $resolved = match (true) {
+            $options instanceof UrlOptions => $options,
+            $options instanceof DateTimeInterface => new UrlOptions(ttl: $options, disposition: $resolvedDisposition),
+            default => new UrlOptions(disposition: $resolvedDisposition),
+        };
+
+        return $this->urlSigner->sign($document, $resolved);
     }
 
     /**

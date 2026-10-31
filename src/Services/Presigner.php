@@ -23,13 +23,16 @@ final class Presigner
      *
      * @throws DiskDoesNotSupportTemporaryUrlsException
      */
-    public function download(string $disk, string $path, DateTimeInterface $expiry, string $contentDisposition): string
+    public function download(string $disk, string $path, DateTimeInterface $expiry, string $contentDisposition, ?string $contentType = null): string
     {
+        $options = ['ResponseContentDisposition' => $contentDisposition];
+        if ($contentType !== null) {
+            $options['ResponseContentType'] = $contentType;
+        }
+
         if (! S3ClientDetector::isS3($disk)) {
             try {
-                return Storage::disk($disk)->temporaryUrl($path, $expiry, [
-                    'ResponseContentDisposition' => $contentDisposition,
-                ]);
+                return Storage::disk($disk)->temporaryUrl($path, $expiry, $options);
             } catch (RuntimeException $e) {
                 throw DiskDoesNotSupportTemporaryUrlsException::forDisk($disk, $e);
             }
@@ -38,11 +41,12 @@ final class Presigner
         $client = $this->factory->forDisk($disk);
         $bucket = S3ClientDetector::bucket($disk);
 
-        $command = $client->getCommand('GetObject', [
+        $commandArgs = array_merge([
             'Bucket' => $bucket,
             'Key' => $path,
-            'ResponseContentDisposition' => $contentDisposition,
-        ]);
+        ], $options);
+
+        $command = $client->getCommand('GetObject', $commandArgs);
 
         return (string) $client->createPresignedRequest($command, $expiry)->getUri();
     }

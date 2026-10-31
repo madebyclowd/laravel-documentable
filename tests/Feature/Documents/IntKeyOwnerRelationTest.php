@@ -137,5 +137,16 @@ class IntKeyOwnerRelationTest extends TestCase
         $this->assertCount(1, $owner->fresh()->documents);
         $this->assertSame(['owner-a'], StringKeyTestModel::whereHas('documents')->get()->modelKeys());
         $this->assertSame(1, StringKeyTestModel::with('documents')->find('owner-a')->documents->count());
+        $this->assertNotNull($owner->documentOfType('DOC')->first());
+        $this->assertCount(1, $owner->documentsOfType('DOC')->get());
+    }
+
+    public function test_document_of_type_helpers_work_for_int_key_owner(): void
+    {
+        $owner = TestModel::create(['name' => 'int-owner']);
+        $this->attach($owner);
+
+        $this->assertNotNull($owner->documentOfType('DOC')->first());
+        $this->assertCount(1, $owner->documentsOfType('DOC')->get());
     }
 }

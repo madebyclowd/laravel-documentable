@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Services;
 
-use DateTimeInterface;
 use LogicException;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
 use MadeByClowd\Documentable\Exceptions\DocumentNotReady;
 use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\ValueObjects\UrlOptions;
 
 /**
  * Signs time-limited download URLs and builds the `Content-Disposition` value that goes with them.
@@ -27,8 +28,13 @@ final class UrlSigner
      * @throws DocumentNotReady when the document is still being verified, or was refused
      * @throws DiskDoesNotSupportTemporaryUrlsException when the document's disk cannot sign temporary URLs
      */
-    public function sign(Document $document, DateTimeInterface $expiration, string $disposition = 'inline'): string
+    public function sign(Document $document, UrlOptions $options): string
     {
+        $modifierClass = app(DocumentableConfig::class)->urlModifier;
+        if ($modifierClass !== null) {
+            $options = app($modifierClass)->modify($options, $document);
+        }
+
         $storageFile = $document->storageFile ?? throw new LogicException("Document {$document->id} has no storage file to sign a URL for.");
 
         if ($document->status !== DocumentStatus::Committed) {
@@ -38,11 +44,12 @@ final class UrlSigner
         $url = $this->presigner->download(
             $storageFile->disk,
             $storageFile->path,
-            $expiration,
-            self::contentDisposition($disposition, $document->client_filename)
+            $options->expiration(),
+            self::contentDisposition($options->disposition, $options->filename ?? $document->client_filename),
+            $options->contentType
         );
 
-        $this->accessLogger->log($document, $disposition === 'attachment' ? 'download' : 'view');
+        $this->accessLogger->log($document, $options->disposition === 'attachment' ? 'download' : 'view');
 
         return $url;
     }

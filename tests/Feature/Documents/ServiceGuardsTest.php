@@ -11,6 +11,7 @@ use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Services\ObjectVerifier;
 use MadeByClowd\Documentable\Services\UrlSigner;
 use MadeByClowd\Documentable\Tests\TestCase;
+use MadeByClowd\Documentable\ValueObjects\UrlOptions;
 use RuntimeException;
 
 /**
@@ -41,7 +42,7 @@ class ServiceGuardsTest extends TestCase
         $this->expectException(LogicException::class);
         $this->expectExceptionMessage('Document doc-1 has no storage file to sign a URL for.');
 
-        $this->app->make(UrlSigner::class)->sign($document, now()->addMinute());
+        $this->app->make(UrlSigner::class)->sign($document, new UrlOptions(ttl: now()->addMinute()));
     }
 
     public function test_sanitizing_a_filename_is_stable_for_empty_input(): void
