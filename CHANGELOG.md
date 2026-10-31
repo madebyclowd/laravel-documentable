@@ -7,6 +7,22 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.8] - 2026-10-31
+
+### Added
+- Public seams and testing tools:
+  - Read API: `DocumentService::readStream()` returning PHP stream resources with `DocumentNotReady` / `LogicException` guards and access logging, and `DocumentService::readContents()` with memory limit guard and `DocumentTooLargeToRead` exception.
+  - Public seams: `DocumentService::attachStorageFile()` seam for attaching existing storage files using `AttachOptions` as the supported replacement for subclassing.
+  - Model factories: `DocumentFactory`, `DocumentTypeFactory`, `StorageFileFactory`, and `UploadSessionFactory` with strict-mode compatibility and lifecycle states.
+  - Testing tools: `Documentable::fake()` faking storage disks, the multipart upload driver, and package domain events, returning `DocumentableFake` with observable assertions (`assertUploaded`, `assertMultipartInitiated`, `assertAttached`, `assertPurged`, `assertNothingUploaded`).
+  - Moved `FakeMultipartUploadDriver` to public testing surface (`MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver`).
+- Read-side ergonomics and download endpoints:
+  - Model API: Document accessors for filename, size, mime, and extension, a lazy temporaryUrl() helper delegating to DocumentService::getUrl(), and query scopes for latest(), committed(), and ofType().
+  - Documentable trait helpers: documentOfType() MorphOne relation and documentsOfType() MorphMany relation respecting owner key types with eager-loading support.
+  - URLs: UrlOptions value object with inline content-type allowlist, disposition validation, TTL clamping, ModifiesUrlOptions hook contract, and container-resolved modifier config.
+  - Download routes: GET /documents/{document}/download and /view redirecting to presigned URLs with Cache-Control: no-store and access log integration.
+  - Resources: DocumentResource and DocumentCollection with opt-in ->withUrl() support.
+
 ## [3.0.0-alpha.7] - 2026-10-31
 
 ### Changed
@@ -280,3 +296,5 @@ Initial release.
 [3.0.0-alpha.6]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.5...v3.0.0-alpha.6
 
 [3.0.0-alpha.7]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.6...v3.0.0-alpha.7
+
+[3.0.0-alpha.8]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.7...v3.0.0-alpha.8
