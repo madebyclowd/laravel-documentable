@@ -7,6 +7,23 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.7] - 2026-10-31
+
+### Changed
+- Deleting the latest version of a document group now promotes the highest remaining committed version to latest,
+  instead of leaving the group with no latest (and the next upload starting a new group at v1). Set the document
+  type's `on_delete_latest` to `none` for the old behavior, or `block` to refuse the delete while older versions exist
+  (`CannotDeleteLatestVersion`). `document_types.max_versions_to_keep`, which nothing read, is renamed `versions_kept`
+  and now works; the migration carries existing values over.
+
+### Added
+- `DocumentService::restore()`, `deleteGroup()` and `promote()` manage versions, and `DocumentVersionPromoted` fires
+  when a version becomes latest. Document types can prune old versions with `versions_kept` and `versions_retain_days`:
+  a non-latest version is deleted only when it is beyond the count and older than the age, and a missing setting
+  leaves that axis alone. The `PruneDocumentVersions` job runs after the upload commits and dispatches
+  `DocumentVersionPruned`. `documents:prune-versions {--type=} {--dry-run}` runs the same selection on demand, and
+  `documentable.retention.hold` lists document or group ids that are never pruned.
+
 ## [3.0.0-alpha.6] - 2026-10-31
 
 ### Changed
@@ -261,3 +278,5 @@ Initial release.
 [3.0.0-alpha.5]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.4...v3.0.0-alpha.5
 
 [3.0.0-alpha.6]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.5...v3.0.0-alpha.6
+
+[3.0.0-alpha.7]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.6...v3.0.0-alpha.7
