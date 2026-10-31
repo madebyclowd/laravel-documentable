@@ -58,8 +58,10 @@ final class Documentable
 
         foreach ($disks as $disk) {
             Storage::fake($disk);
-            config()->set('documentable.multipart.drivers.'.config("filesystems.disks.{$disk}.driver"), FakeMultipartUploadDriver::class);
+            config()->set("filesystems.disks.{$disk}.driver", 'local');
         }
+
+        config()->set('documentable.multipart.drivers.local', FakeMultipartUploadDriver::class);
 
         FakeMultipartUploadDriver::reset();
 

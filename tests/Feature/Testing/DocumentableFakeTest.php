@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Testing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Documentable;
 use MadeByClowd\Documentable\Events\DocumentUploaded;
@@ -209,5 +210,61 @@ class DocumentableFakeTest extends TestCase
 
         $this->assertFalse($packageEventFired, 'Listener for DocumentUploaded should not have fired under fake.');
         $this->assertTrue($customEventFired, 'Listener for custom event should have fired.');
+    }
+
+    public function test_failures_say_what_was_expected_and_what_exists(): void
+    {
+        $fake = Documentable::fake();
+
+        $this->assertFailsWith('none exists. There are 0 session(s) in total.', fn () => $fake->assertUploaded());
+        $this->assertFailsWith('[MultipartUploadInitiated] event to have been dispatched, but none was.', fn () => $fake->assertMultipartInitiated());
+
+        UploadSession::factory()->uploaded()->create();
+        $this->assertFailsWith('none of the 1 uploaded session(s) matched', fn () => $fake->assertUploaded(fn () => false));
+        $this->assertFailsWith('found 1 upload session(s) and 0 document(s)', fn () => $fake->assertNothingUploaded());
+
+        $session = app(DocumentService::class)->initiateMultipartUpload($this->type, 'multi.pdf', 'user-1');
+        $this->assertFailsWith('[MultipartUploadInitiated] event matching the callback, but none of the 1 dispatched event(s) matched', fn () => $fake->assertMultipartInitiated(fn () => false));
+        $fake->assertMultipartInitiated(fn (UploadSession $initiated) => $initiated->id === $session->id);
+    }
+
+    public function test_fake_covers_the_configured_disk_the_type_disks_and_the_configured_types(): void
+    {
+        config()->set('filesystems.disks.archive', ['driver' => 'local', 'root' => '/nonexistent/archive']);
+        config()->set('filesystems.disks.exports', ['driver' => 'local', 'root' => '/nonexistent/exports']);
+        config()->set('documentable.disk', 'exports');
+        DocumentType::create(['code' => 'ARCHIVED', 'name' => 'Archived', 'max_size_mb' => 1, 'disk' => 'archive', 'path_prefix' => 'a']);
+
+        Documentable::fake();
+
+        foreach (['archive', 'exports'] as $disk) {
+            Storage::disk($disk)->put('probe.txt', 'x');
+            Storage::disk($disk)->assertExists('probe.txt');
+        }
+    }
+
+    public function test_fake_starts_the_in_memory_driver_empty_and_registers_it_for_the_driver_of_each_disk(): void
+    {
+        FakeMultipartUploadDriver::$sessions['left-over'] = ['path' => 'x', 'parts' => []];
+
+        config()->set('filesystems.disks.s3.driver', 's3');
+
+        Documentable::fake(['s3']);
+
+        $this->assertSame([], FakeMultipartUploadDriver::$sessions);
+        $this->assertInstanceOf(FakeMultipartUploadDriver::class, app(MultipartDriverResolver::class)->forDisk('s3'));
+    }
+
+    private function assertFailsWith(string $needle, \Closure $act): void
+    {
+        try {
+            $act();
+        } catch (ExpectationFailedException $e) {
+            $this->assertStringContainsString($needle, $e->getMessage());
+
+            return;
+        }
+
+        $this->fail("Expected a failure containing [{$needle}].");
     }
 }

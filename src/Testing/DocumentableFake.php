@@ -34,7 +34,7 @@ final class DocumentableFake
             throw new ExpectationFailedException('Expected an upload session in status [uploaded], but none exists. There are '.UploadSession::query()->count().' session(s) in total.');
         }
 
-        if ($callback !== null && ! $sessions->contains(fn (UploadSession $session) => (bool) $callback($session))) {
+        if ($callback !== null && ! $sessions->contains(fn (UploadSession $session) => $callback($session))) {
             throw new ExpectationFailedException("Expected an uploaded session matching the callback, but none of the {$sessions->count()} uploaded session(s) matched.");
         }
 
@@ -102,7 +102,7 @@ final class DocumentableFake
             throw new ExpectationFailedException("Expected a [{$name}] event to have been dispatched, but none was.");
         }
 
-        if ($matches !== null && ! $dispatched->contains(fn (array $arguments) => (bool) $matches($arguments[0]))) {
+        if ($matches !== null && ! $dispatched->contains(fn (array $arguments) => $matches($arguments[0]))) {
             throw new ExpectationFailedException("Expected a [{$name}] event matching the callback, but none of the {$dispatched->count()} dispatched event(s) matched.");
         }
 
