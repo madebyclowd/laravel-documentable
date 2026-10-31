@@ -7,6 +7,20 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.6] - 2026-10-31
+
+### Changed
+- `MultipartUploadDriver` is now `@api` and takes the `UploadSession` for every call after `create()`. Provider errors map to `MultipartUploadNotFoundException` and the new `MultipartPartTooSmallException`. `MultipartDriverConformanceTest` lets a driver package prove it honors the contract, and `PartSizePlanner` plus a `part_size` field in the initiate response give clients the constant part size Cloudflare R2 requires.
+- Download, single-PUT and multipart part URLs are now signed locally by a separate client against the optional `documentable.disks.{disk}.presign_endpoint`, instead of rewriting `temporary_url` after signing, so they stay valid behind a proxy that does not forward the original `Host`. `CreateMultipartUpload` no longer sends filename metadata (opt in with `multipart.object_metadata`, URL-encoded) or forces a `Content-Type` (opt in with `multipart.content_type`).
+
+### Fixed
+- `documents:configure-bucket-lifecycle` keeps the bucket's other lifecycle rules instead of replacing them all, and adds an expiration rule for the doctor's scratch prefix.
+- An expired single-PUT upload session now deletes its object before it is marked expired, so a failed delete leaves the session open for the next run instead of an expired row that still has an object.
+
+### Added
+- `php artisan documents:clean-orphaned --bucket` lists objects under your document types' path prefixes that no stored file or live upload session points at (dry run; `--apply` deletes). It warns when the bucket has versioning on, where a delete only adds a delete marker.
+- `php artisan documents:doctor {disk}` checks a bucket before you deploy: presigned PUT and GET, multipart create with and without metadata, `UploadPart`, the `ETag` header, ranged reads, delete, lifecycle rules, and whether the provider rejects the AWS SDK default checksum headers. Each failure prints its fix, and `documents:install` offers to run it.
+
 ## [3.0.0-alpha.5] - 2026-10-28
 
 ### Security
@@ -245,3 +259,5 @@ Initial release.
 [3.0.0-alpha.4]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.3...v3.0.0-alpha.4
 
 [3.0.0-alpha.5]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.4...v3.0.0-alpha.5
+
+[3.0.0-alpha.6]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.5...v3.0.0-alpha.6
