@@ -7,6 +7,14 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.9] - 2026-10-31
+
+### Added
+- Update Laravel Boost guideline and skill for v3 architecture and provide a dedicated v3 upgrade skill with scanner patterns.
+- Restructure README for v3: quick start, upload sessions, authorization contract, versions and retention lifecycle, and upgrade guide links.
+- Add static code scan mode `documents:upgrade-check --code` to inspect applications for removed or renamed v2 APIs prior to upgrading.
+- Add comprehensive 3.x upgrade guide with preflight checks, migration lock tables, and API replacements.
+
 ## [3.0.0-alpha.8] - 2026-10-31
 
 ### Added
@@ -298,3 +306,5 @@ Initial release.
 [3.0.0-alpha.7]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.6...v3.0.0-alpha.7
 
 [3.0.0-alpha.8]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.7...v3.0.0-alpha.8
+
+[3.0.0-alpha.9]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.8...v3.0.0-alpha.9
