@@ -2,7 +2,7 @@
     "$schema": "https://raw.githubusercontent.com/infection/infection/0.35.8/resources/schema.json",
     "source": {
         "directories": ["src"],
-        "excludes": ["Database/Factories"]
+        "excludes": ["Database/Factories", "Testing/FakeMultipartUploadDriver.php"]
     },
     "phpUnit": {
         "configDir": "."

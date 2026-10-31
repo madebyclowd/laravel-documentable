@@ -59,7 +59,7 @@ final class DocumentReader
      * @throws LogicException
      * @throws RuntimeException
      */
-    public function readContents(Document $document, int $maxBytes = 10485760): string
+    public function readContents(Document $document, int $maxBytes): string
     {
         $storageFile = $this->readable($document);
 

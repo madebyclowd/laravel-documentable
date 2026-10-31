@@ -185,17 +185,17 @@ class DocumentReadApiTest extends TestCase
 
     public function test_content_exactly_at_the_limit_is_read_and_one_byte_over_is_refused(): void
     {
-        $doc = $this->service->upload(UploadedFile::fake()->createWithContent('a.txt', 'abcd'), $this->type, $this->owner);
+        $doc = $this->service->upload(UploadedFile::fake()->createWithContent('a.txt', 'abcdefgh'), $this->type, $this->owner);
 
-        $this->assertSame('abcd', $this->service->readContents($doc, 4));
+        $this->assertSame('abcdefgh', $this->service->readContents($doc, 8));
 
         $doc->storageFile->update(['size_bytes' => 1]);
 
         try {
             $this->service->readContents($doc->fresh(), 3);
-            $this->fail('Four bytes against a limit of three must be refused.');
+            $this->fail('Eight bytes against a limit of three must be refused.');
         } catch (DocumentTooLargeToRead $e) {
-            $this->assertSame(4, $e->size);
+            $this->assertSame(4, $e->size, 'The read stops one byte past the limit instead of loading the whole object.');
             $this->assertSame(3, $e->limit);
             $this->assertStringContainsString($doc->id, $e->getMessage());
         }
@@ -216,6 +216,8 @@ class DocumentReadApiTest extends TestCase
         } catch (RuntimeException $e) {
             $this->assertStringContainsString("[{$storageFile->path}] on disk [{$storageFile->disk}]", $e->getMessage());
             $this->assertStringContainsString('bucket unreachable', $e->getMessage());
+            $this->assertSame(0, $e->getCode());
+            $this->assertSame('bucket unreachable', $e->getPrevious()?->getMessage());
         }
     }
 }
