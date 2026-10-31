@@ -19,10 +19,6 @@ final class CodeScanner
     /** @var list<Rule>|null */
     private ?array $rules = null;
 
-    public function __construct(
-        private readonly ?string $packageMigrationsPath = null,
-    ) {}
-
     /**
      * @return list<Finding>
      */
@@ -78,10 +74,7 @@ final class CodeScanner
      */
     private function scanFile(string $filePath, string $relativePath, array &$findings): void
     {
-        $content = file_get_contents($filePath);
-        if ($content === false) {
-            return;
-        }
+        $content = (string) file_get_contents($filePath);
 
         if (str_starts_with($relativePath, 'database/migrations/')) {
             $this->checkPackageMigrationDivergence($relativePath, $content, $findings);
@@ -143,20 +136,12 @@ final class CodeScanner
         }
 
         $suffix = $matches['suffix'];
-        $packageMigrationsDir = $this->packageMigrationsPath ?? (dirname(__DIR__, 2).'/database/migrations');
-        if (! is_dir($packageMigrationsDir)) {
+        $packageFiles = glob(dirname(__DIR__, 2).'/database/migrations/*_'.$suffix) ?: [];
+        if ($packageFiles === []) {
             return;
         }
 
-        $packageFiles = glob($packageMigrationsDir.'/*_'.$suffix);
-        if ($packageFiles === false || $packageFiles === [] || ! is_file($packageFiles[0])) {
-            return;
-        }
-
-        $packageContent = file_get_contents($packageFiles[0]);
-        if ($packageContent === false) {
-            return;
-        }
+        $packageContent = (string) file_get_contents($packageFiles[0]);
 
         $normalize = fn (string $s): string => str_replace(["\r\n", "\r"], "\n", trim($s));
 

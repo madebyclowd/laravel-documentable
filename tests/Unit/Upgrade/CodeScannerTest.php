@@ -196,13 +196,32 @@ class CodeScannerTest extends TestCase
 
     public function test_flags_package_migration_divergence_only_when_different(): void
     {
-        $scanner = new CodeScanner;
-        $findings = $scanner->scan($this->fixturesPath.'/package-migration-diverges');
+        $packageDir = dirname(__DIR__, 3).'/database/migrations';
+        $tempDir = sys_get_temp_dir().'/upgrade_scan_migrations_'.uniqid();
+        mkdir($tempDir.'/database/migrations', 0777, true);
+
+        $identical = '2026_07_05_000002_create_storage_files_table.php';
+        $changed = '2026_07_05_000001_create_document_types_table.php';
+        $crlfCopy = '2026_07_05_000003_create_documents_table.php';
+
+        file_put_contents($tempDir.'/database/migrations/'.$identical, file_get_contents($packageDir.'/'.$identical));
+        file_put_contents($tempDir.'/database/migrations/'.$changed, file_get_contents($packageDir.'/'.$changed)."\n// edited by the app\n");
+        file_put_contents($tempDir.'/database/migrations/'.$crlfCopy, str_replace("\n", "\r\n", (string) file_get_contents($packageDir.'/'.$crlfCopy)));
+        file_put_contents($tempDir.'/database/migrations/2026_01_01_000001_create_orders_table.php', "<?php\n");
+        file_put_contents($tempDir.'/database/migrations/not_a_dated_migration.php', "<?php\n");
+
+        try {
+            $findings = (new CodeScanner)->scan($tempDir);
+        } finally {
+            array_map('unlink', glob($tempDir.'/database/migrations/*.php') ?: []);
+            rmdir($tempDir.'/database/migrations');
+            rmdir($tempDir.'/database');
+            rmdir($tempDir);
+        }
 
         $this->assertCount(1, $findings);
-
         $this->assertSame('package-migration-diverges', $findings[0]->rule);
-        $this->assertSame('database/migrations/2026_07_05_000001_create_document_types_table.php', $findings[0]->file);
+        $this->assertSame('database/migrations/'.$changed, $findings[0]->file);
         $this->assertSame(1, $findings[0]->line);
         $this->assertSame('Re-publish the package migration, or keep your copy and confirm the divergence is intended.', $findings[0]->replacement);
         $this->assertSame('#package-migrations', $findings[0]->anchor);
