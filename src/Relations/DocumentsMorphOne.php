@@ -10,7 +10,7 @@ use MadeByClowd\Documentable\Models\Document;
 
 /**
  * `documents.documentable_id` is a string column so one table can serve owners with int, uuid and ulid keys.
- * This relation sends the owner key as a string everywhere it meets `documentable_id`, matching `DocumentsMorphMany`.
+ * This relation sends the owner key as a string when it looks documents up, matching `DocumentsMorphMany`.
  *
  * @internal Returned by `Documentable::documentOfType()`; do not instantiate or extend it.
  *
@@ -27,13 +27,5 @@ final class DocumentsMorphOne extends MorphOne
         $key = parent::getParentKey();
 
         return $key === null ? null : (string) $key;
-    }
-
-    /** {@inheritDoc} */
-    public function addEagerConstraints(array $models)
-    {
-        $this->getRelationQuery()
-            ->whereIn($this->foreignKey, array_map('strval', $this->getKeys($models, $this->localKey)))
-            ->where($this->morphType, $this->morphClass);
     }
 }

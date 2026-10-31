@@ -200,4 +200,22 @@ class DocumentReadApiTest extends TestCase
             $this->assertStringContainsString($doc->id, $e->getMessage());
         }
     }
+
+    public function test_a_disk_that_throws_while_opening_is_reported_with_its_disk_and_path(): void
+    {
+        $doc = $this->service->upload(UploadedFile::fake()->createWithContent('a.txt', 'abc'), $this->type, $this->owner);
+        $storageFile = $doc->storageFileOrFail();
+
+        $disk = \Mockery::mock(Storage::disk($storageFile->disk))->makePartial();
+        $disk->shouldReceive('readStream')->andThrow(new RuntimeException('bucket unreachable'));
+        Storage::set($storageFile->disk, $disk);
+
+        try {
+            $this->service->readStream($doc);
+            $this->fail('A disk failure must surface.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString("[{$storageFile->path}] on disk [{$storageFile->disk}]", $e->getMessage());
+            $this->assertStringContainsString('bucket unreachable', $e->getMessage());
+        }
+    }
 }

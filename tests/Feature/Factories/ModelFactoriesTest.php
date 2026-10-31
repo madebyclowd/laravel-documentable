@@ -59,6 +59,8 @@ class ModelFactoriesTest extends TestCase
         $rejectedDoc = Document::factory()->rejected()->create();
         $this->assertSame(DocumentStatus::Rejected, $rejectedDoc->status);
 
+        $this->assertSame(DocumentStatus::Committed, Document::factory()->rejected()->committed()->create()->status, 'committed() undoes an earlier state.');
+
         $supersededDoc = Document::factory()->superseded()->create();
         $this->assertFalse($supersededDoc->is_latest);
         $this->assertNull($supersededDoc->latest_marker);

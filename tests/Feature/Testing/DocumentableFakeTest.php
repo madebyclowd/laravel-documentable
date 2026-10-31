@@ -233,11 +233,13 @@ class DocumentableFakeTest extends TestCase
         config()->set('filesystems.disks.archive', ['driver' => 'local', 'root' => '/nonexistent/archive']);
         config()->set('filesystems.disks.exports', ['driver' => 'local', 'root' => '/nonexistent/exports']);
         config()->set('documentable.disk', 'exports');
+        config()->set('filesystems.disks.cold', ['driver' => 'local', 'root' => '/nonexistent/cold']);
+        config()->set('documentable.types', ['COLD' => ['disk' => 'cold']]);
         DocumentType::create(['code' => 'ARCHIVED', 'name' => 'Archived', 'max_size_mb' => 1, 'disk' => 'archive', 'path_prefix' => 'a']);
 
         Documentable::fake();
 
-        foreach (['archive', 'exports'] as $disk) {
+        foreach (['archive', 'exports', 'cold'] as $disk) {
             Storage::disk($disk)->put('probe.txt', 'x');
             Storage::disk($disk)->assertExists('probe.txt');
         }

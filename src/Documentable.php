@@ -19,7 +19,6 @@ use MadeByClowd\Documentable\Events\MultipartUploadInitiated;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Testing\DocumentableFake;
 use MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver;
-use Throwable;
 
 /**
  * Public entry point for testing documentable operations in applications.
@@ -38,13 +37,7 @@ final class Documentable
         if ($disks === null) {
             $disks = [(string) config('documentable.disk', 'local')];
 
-            try {
-                /** @var list<string> $dbDisks */
-                $dbDisks = DocumentType::query()->distinct()->pluck('disk')->all();
-                $disks = array_merge($disks, $dbDisks);
-            } catch (Throwable) {
-                // No documentable tables yet (a test that never migrated): fake only the configured disks.
-            }
+            $disks = array_merge($disks, DocumentType::query()->distinct()->pluck('disk')->map(fn ($disk) => (string) $disk)->all());
 
             $configuredTypes = (array) config('documentable.types', []);
             foreach ($configuredTypes as $typeDef) {
