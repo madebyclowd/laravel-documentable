@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use MadeByClowd\Documentable\Enums\OnDeleteLatest;
 
 /**
  * @property string $id
@@ -21,11 +22,17 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $path_prefix
  * @property bool $requires_versioning
  * @property bool $allows_multiple
- * @property int|null $max_versions_to_keep
+ * @property int|null $versions_kept
+ * @property int|null $versions_retain_days
+ * @property OnDeleteLatest $on_delete_latest
  */
 class DocumentType extends Model
 {
     use HasUuids, SoftDeletes;
+
+    protected $attributes = [
+        'on_delete_latest' => 'promote',
+    ];
 
     protected $fillable = [
         'code',
@@ -38,7 +45,9 @@ class DocumentType extends Model
         'path_prefix',
         'requires_versioning',
         'allows_multiple',
-        'max_versions_to_keep',
+        'versions_kept',
+        'versions_retain_days',
+        'on_delete_latest',
     ];
 
     protected $casts = [
@@ -48,7 +57,9 @@ class DocumentType extends Model
         'max_size_mb' => 'integer',
         'requires_versioning' => 'boolean',
         'allows_multiple' => 'boolean',
-        'max_versions_to_keep' => 'integer',
+        'versions_kept' => 'integer',
+        'versions_retain_days' => 'integer',
+        'on_delete_latest' => OnDeleteLatest::class,
     ];
 
     public function documents(): HasMany

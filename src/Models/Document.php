@@ -27,6 +27,9 @@ use MadeByClowd\Documentable\Enums\DocumentStatus;
  * @property string|null $latest_marker
  * @property DocumentStatus $status
  * @property Carbon|null $expires_at
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
+ * @property Carbon|null $deleted_at
  * @property string|null $created_by
  * @property string|null $deleted_by
  */

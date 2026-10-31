@@ -8,10 +8,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use MadeByClowd\Documentable\Enums\OnDeleteLatest;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Events\DocumentDeleted;
 use MadeByClowd\Documentable\Events\DocumentPurged;
+use MadeByClowd\Documentable\Events\DocumentVersionPromoted;
+use MadeByClowd\Documentable\Exceptions\CannotDeleteLatestVersion;
 use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Repositories\DocumentRepository;
@@ -25,34 +30,110 @@ use MadeByClowd\Documentable\Repositories\StorageFileRepository;
  */
 final class DocumentPurger
 {
+    private readonly VersionLifecycle $lifecycle;
+
     public function __construct(
         private readonly DocumentRepository $documentRepository,
         private readonly StorageFileRepository $storageFileRepository,
         private readonly ActorResolver $actor,
-    ) {}
+        ?VersionLifecycle $lifecycle = null,
+    ) {
+        $this->lifecycle = $lifecycle ?? app(VersionLifecycle::class);
+    }
 
     /**
-     * Soft-delete a document. If it's currently the latest of its group, the
-     * latest_marker unique-column must be cleared in the same operation —
-     * otherwise a soft-deleted row would keep "occupying" the unique slot and
-     * block a future upload from becoming latest for that group.
+     * Soft-delete a document. When it is the latest of its group, the type's `on_delete_latest` policy decides what
+     * happens to the slot: `promote` hands it to the highest remaining committed version, `none` leaves the group
+     * without a latest, `block` refuses while older versions exist. Either way the marker is cleared in the same
+     * transaction, otherwise the soft-deleted row would keep occupying the unique slot.
+     *
+     * @throws CannotDeleteLatestVersion when the policy is block and older non-trashed versions exist
      */
     public function delete(Document $document): bool
     {
         return DB::transaction(function () use ($document) {
-            $document->update([
-                'latest_marker' => null,
-                'is_latest' => false,
-                'deleted_by' => $this->actor->idForAudit(),
-            ]);
+            Document::where('document_group_id', $document->document_group_id)->lockForUpdate()->get();
+
+            $document->refresh();
+
+            $wasLatest = $document->is_latest;
+            $type = $document->documentTypeOrFail();
+            $policy = $type->on_delete_latest;
+
+            if ($wasLatest && $policy === OnDeleteLatest::Block && $this->hasOtherVersions($document)) {
+                throw new CannotDeleteLatestVersion($document);
+            }
+
+            $this->lifecycle->clearLatest($document);
+            $document->update(['deleted_by' => $this->actor->idForAudit()]);
 
             $deleted = $this->documentRepository->delete($document);
 
-            if ($deleted) {
-                Event::dispatch(new DocumentDeleted($document));
+            if (! $deleted) {
+                return false;
             }
 
-            return $deleted;
+            Event::dispatch(new DocumentDeleted($document));
+
+            if ($wasLatest && $policy === OnDeleteLatest::Promote) {
+                $this->promoteNext($document, $type);
+            }
+
+            return true;
+        });
+    }
+
+    private function hasOtherVersions(Document $document): bool
+    {
+        return Document::where('document_group_id', $document->document_group_id)
+            ->whereKeyNot($document->id)
+            ->exists();
+    }
+
+    private function promoteNext(Document $deleted, DocumentType $type): void
+    {
+        $candidate = $this->lifecycle->findPromotionCandidate($deleted->document_group_id, $deleted->id);
+
+        if ($candidate === null) {
+            return;
+        }
+
+        $this->lifecycle->setLatest($candidate, $type);
+        Event::dispatch(new DocumentVersionPromoted($deleted, $candidate));
+    }
+
+    /**
+     * Soft-delete every active version of a group in one transaction without promotion.
+     */
+    public function deleteGroup(string $groupId): int
+    {
+        if (! Str::isUuid($groupId)) {
+            return 0;
+        }
+
+        return DB::transaction(function () use ($groupId) {
+            $documents = Document::where('document_group_id', $groupId)
+                ->lockForUpdate()
+                ->get();
+
+            if ($documents->isEmpty()) {
+                return 0;
+            }
+
+            $count = 0;
+            $actorId = $this->actor->idForAudit();
+
+            foreach ($documents as $document) {
+                $this->lifecycle->clearLatest($document);
+                $document->update(['deleted_by' => $actorId]);
+
+                if ($this->documentRepository->delete($document)) {
+                    $count++;
+                    Event::dispatch(new DocumentDeleted($document));
+                }
+            }
+
+            return $count;
         });
     }
 
