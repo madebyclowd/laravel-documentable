@@ -437,6 +437,26 @@ class DocumentsDoctorCommandTest extends TestCase
         $this->assertSame(['documentable-doctor/x/orphan.bin', 'mp-9'], $aborted);
     }
 
+    public function test_doctor_runner_still_deletes_objects_when_listing_uploads_is_unsupported(): void
+    {
+        $mock = new MockHandler;
+        $this->setUpDisk('s3_doctor_test', ['handler' => $mock]);
+        $deleted = null;
+        $this->routeCleanup($mock, [
+            'ListMultipartUploads' => new S3Exception('not implemented', new Command('ListMultipartUploads'), ['code' => 'NotImplemented']),
+            'ListObjectsV2' => new Result(['Contents' => [['Key' => 'documentable-doctor/x/leftover.txt']]]),
+            'DeleteObjects' => function (CommandInterface $cmd) use (&$deleted) {
+                $deleted = $cmd['Delete']['Objects'][0]['Key'];
+
+                return new Result;
+            },
+        ]);
+
+        $this->app->makeWith(DoctorRunner::class, ['probes' => [$this->passingProbe()]])->run('s3_doctor_test');
+
+        $this->assertSame('documentable-doctor/x/leftover.txt', $deleted);
+    }
+
     public function test_doctor_runner_keeps_cleaning_when_an_abort_fails(): void
     {
         $mock = new MockHandler;
