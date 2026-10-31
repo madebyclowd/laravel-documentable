@@ -9,6 +9,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Enums\DocumentStatus;
+use MadeByClowd\Documentable\Http\Requests\UrlRequest;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
 use MadeByClowd\Documentable\Models\DocumentType;
@@ -116,15 +117,46 @@ class DownloadRoutesTest extends TestCase
         $this->get("/documents/{$doc->id}/view")->assertNotFound();
     }
 
-    public function test_expires_in_minutes_query_parameter_is_ignored(): void
+    public function test_the_download_route_ignores_expires_in_minutes_and_uses_the_default_lifetime(): void
     {
+        $this->travelTo(now()->startOfSecond());
+        $expiry = $this->captureExpiry();
         $doc = $this->createDocument();
 
-        // Pass a query parameter that should be ignored
         $response = $this->get("/documents/{$doc->id}/download?expires_in_minutes=1000");
 
         $response->assertStatus(302);
         $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        $this->assertSame(now()->addMinutes(UrlRequest::DEFAULT_TTL_MINUTES)->getTimestamp(), $expiry()->getTimestamp());
+    }
+
+    public function test_the_json_url_route_still_honours_expires_in_minutes(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $expiry = $this->captureExpiry();
+        $doc = $this->createDocument();
+
+        $this->getJson("/documents/{$doc->id}/url?expires_in_minutes=30")->assertOk();
+
+        $this->assertSame(now()->addMinutes(30)->getTimestamp(), $expiry()->getTimestamp());
+    }
+
+    /**
+     * @return \Closure(): \DateTimeInterface the expiry the disk was last asked to sign
+     */
+    private function captureExpiry(): \Closure
+    {
+        $captured = null;
+
+        Storage::disk('s3')->buildTemporaryUrlsUsing(function (string $path, \DateTimeInterface $expiry) use (&$captured) {
+            $captured = $expiry;
+
+            return 'https://signed.test/'.$path;
+        });
+
+        return function () use (&$captured) {
+            return $captured ?? throw new \LogicException('Nothing was signed.');
+        };
     }
 
     public function test_access_log_written_on_download_and_view_routes(): void

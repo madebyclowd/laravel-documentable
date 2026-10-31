@@ -118,4 +118,11 @@ class UrlOptionsTest extends TestCase
         $this->assertStringContainsString('filename="dokumen r_sum_.pdf"', $utfHeader);
         $this->assertStringContainsString("filename*=UTF-8''dokumen%20r%C3%A9sum%C3%A9.pdf", $utfHeader);
     }
+
+    public function test_the_inline_content_type_is_compared_without_case_whitespace_or_parameters(): void
+    {
+        $options = new UrlOptions(disposition: 'inline', contentType: '  IMAGE/PNG ; charset=binary');
+
+        $this->assertSame('  IMAGE/PNG ; charset=binary', $options->contentType);
+    }
 }

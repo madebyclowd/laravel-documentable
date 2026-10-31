@@ -132,6 +132,8 @@ class DocumentModelApiTest extends TestCase
         $new = $this->service->upload(UploadedFile::fake()->create('inv1-v2.txt', 1), $this->type, $this->owner, [], $old->document_group_id);
         $other = $this->service->upload(UploadedFile::fake()->create('inv2.txt', 1), $this->type, $this->owner);
         $rec1 = $this->service->upload(UploadedFile::fake()->create('rec1.txt', 1), $otherType, $this->owner);
+        $stillProcessing = $this->service->upload(UploadedFile::fake()->create('inv3.txt', 1), $this->type, $this->owner);
+        $stillProcessing->forceFill(['status' => DocumentStatus::Processing])->save();
 
         DB::enableQueryLog();
         DB::flushQueryLog();
@@ -142,7 +144,7 @@ class DocumentModelApiTest extends TestCase
         DB::disableQueryLog();
 
         $this->assertCount(1, $queries);
-        $this->assertEqualsCanonicalizing([$new->id, $other->id], $results->pluck('id')->all(), 'The superseded version and the other type are left out.');
+        $this->assertEqualsCanonicalizing([$new->id, $other->id], $results->pluck('id')->all(), 'The superseded version, the other type and the document still processing are left out.');
     }
 
     public function test_document_of_type_returns_latest_version_only(): void

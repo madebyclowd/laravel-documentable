@@ -11,6 +11,7 @@ use InvalidArgumentException;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Exceptions\DocumentNotReady;
+use MadeByClowd\Documentable\Http\Requests\UrlRequest;
 use MadeByClowd\Documentable\Models\DocumentAccessLog;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Services\DocumentService;
@@ -99,6 +100,68 @@ class UrlOptionsSigningTest extends TestCase
     {
         config()->set('documentable.url.modifier', $class);
         $this->app->forgetInstance(DocumentableConfig::class);
+    }
+
+    /**
+     * Records what the disk is asked to sign: the expiry and the response overrides.
+     *
+     * @return object{expiry: ?\DateTimeInterface, options: array<string, mixed>}
+     */
+    private function recordSignedRequest(): object
+    {
+        $captured = (object) ['expiry' => null, 'options' => []];
+
+        Storage::disk('s3')->buildTemporaryUrlsUsing(function (string $path, \DateTimeInterface $expiry, array $options) use ($captured) {
+            $captured->expiry = $expiry;
+            $captured->options = $options;
+
+            return 'https://signed.test/'.$path;
+        });
+
+        return $captured;
+    }
+
+    public function test_the_url_expires_at_the_requested_ttl_and_never_after_the_configured_maximum(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $signed = $this->recordSignedRequest();
+        $doc = $this->service->upload(UploadedFile::fake()->create('a.pdf', 1), $this->type, $this->owner);
+
+        $this->service->getUrl($doc, new UrlOptions(ttl: now()->addMinutes(5)));
+        $this->assertSame(now()->addMinutes(5)->getTimestamp(), $signed->expiry->getTimestamp());
+
+        $this->service->getUrl($doc, new UrlOptions(ttl: new \DateInterval('PT7M')));
+        $this->assertSame(now()->addMinutes(7)->getTimestamp(), $signed->expiry->getTimestamp());
+
+        config()->set('documentable.url.max_ttl_minutes', 60);
+        $this->service->getUrl($doc, new UrlOptions(ttl: now()->addHours(5)));
+        $this->assertSame(now()->addMinutes(60)->getTimestamp(), $signed->expiry->getTimestamp(), 'Capped at the maximum, not one minute either side.');
+    }
+
+    public function test_the_url_uses_the_default_ttl_when_none_is_given(): void
+    {
+        $this->travelTo(now()->startOfSecond());
+        $signed = $this->recordSignedRequest();
+        $doc = $this->service->upload(UploadedFile::fake()->create('a.pdf', 1), $this->type, $this->owner);
+
+        $this->service->getUrl($doc, new UrlOptions);
+
+        $this->assertSame(now()->addMinutes(UrlRequest::DEFAULT_TTL_MINUTES)->getTimestamp(), $signed->expiry->getTimestamp());
+    }
+
+    public function test_the_download_name_and_content_type_reach_the_signed_request(): void
+    {
+        $signed = $this->recordSignedRequest();
+        $doc = $this->service->upload(UploadedFile::fake()->create('original.pdf', 1), $this->type, $this->owner);
+
+        $this->service->getUrl($doc, new UrlOptions(disposition: 'attachment', filename: 'Q3 report.pdf', contentType: 'application/pdf'));
+
+        $this->assertSame('attachment; filename="Q3 report.pdf"', $signed->options['ResponseContentDisposition']);
+        $this->assertSame('application/pdf', $signed->options['ResponseContentType']);
+
+        $this->service->getUrl($doc, new UrlOptions);
+        $this->assertSame('inline; filename="original.pdf"', $signed->options['ResponseContentDisposition'], 'Without an override the client filename is used.');
+        $this->assertArrayNotHasKey('ResponseContentType', $signed->options);
     }
 
     public function test_access_log_written_for_get_url_and_temporary_url_when_enabled(): void
