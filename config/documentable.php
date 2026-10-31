@@ -387,6 +387,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Version Retention & Pruning
+    |--------------------------------------------------------------------------
+    |
+    | Hold list of document IDs and/or document group IDs that must never be
+    | pruned by automatic retention or the prune-versions command.
+    |
+    */
+    'retention' => [
+        'hold' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Storage Doctor
     |--------------------------------------------------------------------------
     |

@@ -34,6 +34,8 @@ class DocumentService
 {
     protected StorageFileRepository $storageFiles;
 
+    protected VersionLifecycle $versionLifecycle;
+
     public function __construct(
         protected DocumentRepository $documentRepository,
         protected DirectUploadService $directUploads,
@@ -43,8 +45,10 @@ class DocumentService
         protected DocumentPurger $purger,
         protected DocumentAttacher $attacher,
         ?StorageFileRepository $storageFiles = null,
+        ?VersionLifecycle $versionLifecycle = null,
     ) {
         $this->storageFiles = $storageFiles ?? app(StorageFileRepository::class);
+        $this->versionLifecycle = $versionLifecycle ?? app(VersionLifecycle::class);
     }
 
     /**
@@ -190,6 +194,30 @@ class DocumentService
     public function delete(Document $document): bool
     {
         return $this->purger->delete($document);
+    }
+
+    /**
+     * Restore a soft-deleted document.
+     */
+    public function restore(Document $document): Document
+    {
+        return $this->versionLifecycle->restore($document);
+    }
+
+    /**
+     * Soft-delete every active version of a group in one transaction without promotion.
+     */
+    public function deleteGroup(string $groupId): int
+    {
+        return $this->purger->deleteGroup($groupId);
+    }
+
+    /**
+     * Make a specific non-latest, non-trashed version the latest of its group.
+     */
+    public function promote(Document $document): Document
+    {
+        return $this->versionLifecycle->promote($document);
     }
 
     /**

@@ -17,6 +17,7 @@ use MadeByClowd\Documentable\Events\DocumentUploaded;
 use MadeByClowd\Documentable\Events\DocumentVersionSuperseded;
 use MadeByClowd\Documentable\Exceptions\IllegalUploadSessionTransition;
 use MadeByClowd\Documentable\Exceptions\SlotConflict;
+use MadeByClowd\Documentable\Jobs\PruneDocumentVersions;
 use MadeByClowd\Documentable\Jobs\VerifyUploadedObject;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
@@ -35,6 +36,8 @@ use MadeByClowd\Documentable\ValueObjects\AttachOptions;
  */
 final class DocumentAttacher
 {
+    private readonly VersionLifecycle $lifecycle;
+
     public function __construct(
         private readonly DocumentRepository $documentRepository,
         private readonly UploadSessionRepository $sessions,
@@ -42,7 +45,10 @@ final class DocumentAttacher
         private readonly UploadFinalizer $finalizer,
         private readonly ActorResolver $actor,
         private readonly DocumentableConfig $config,
-    ) {}
+        ?VersionLifecycle $lifecycle = null,
+    ) {
+        $this->lifecycle = $lifecycle ?? app(VersionLifecycle::class);
+    }
 
     /**
      * Attach an uploaded session to its owner. This is the one place a slot is locked, demoted and versioned, so
@@ -238,6 +244,10 @@ final class DocumentAttacher
 
         Event::dispatch(new DocumentUploaded($document));
 
+        if ($type->versions_kept !== null || $type->versions_retain_days !== null) {
+            PruneDocumentVersions::dispatch((string) $groupId);
+        }
+
         return $document;
     }
 
@@ -258,7 +268,7 @@ final class DocumentAttacher
             return 1;
         }
 
-        $locked->update(['is_latest' => false, 'latest_marker' => null]);
+        $this->lifecycle->clearLatest($locked);
 
         if ($type->requires_versioning) {
             return $locked->version + 1;

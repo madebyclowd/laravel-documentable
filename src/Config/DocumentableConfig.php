@@ -42,6 +42,7 @@ final readonly class DocumentableConfig
      * @param  class-string<ResolvesDedupScope>|null  $dedupScopeResolver
      * @param  class-string<ScansUploadedFile>|null  $scanner
      * @param  class-string<GeneratesStoragePath>|null  $storagePathGenerator
+     * @param  list<string>  $retentionHold
      */
     private function __construct(
         public string $disk,
@@ -79,6 +80,7 @@ final readonly class DocumentableConfig
         public bool $multipartObjectMetadata = false,
         public ?string $multipartContentType = null,
         public string $doctorScratchPrefix = 'documentable-doctor',
+        public array $retentionHold = [],
     ) {}
 
     /**
@@ -152,6 +154,12 @@ final readonly class DocumentableConfig
             throw new InvalidDocumentableConfig('security.scan_error_policy', 'must be one of '.implode(', ', self::SCAN_ERROR_POLICIES), "Use 'reject' so a scanner outage cannot silently turn scanning off");
         }
 
+        $retention = $c['retention'] ?? ['hold' => []];
+        $hold = $retention['hold'] ?? [];
+        if (! is_array($hold) || ! array_is_list($hold) || ! self::allStrings($hold)) {
+            throw new InvalidDocumentableConfig('retention.hold', 'must be a list of document or group IDs', "Use a list of strings such as ['...']");
+        }
+
         $allowed = $c['security']['allowed_documentable_types'];
         if ($allowed !== null && ! (is_array($allowed) && array_is_list($allowed) && self::allStrings($allowed))) {
             throw new InvalidDocumentableConfig('security.allowed_documentable_types', 'must be null or an array of class names', 'Use null to reject every unmapped type, or list the model classes you accept');
@@ -208,6 +216,7 @@ final readonly class DocumentableConfig
             multipartObjectMetadata: $objectMetadata,
             multipartContentType: $contentType,
             doctorScratchPrefix: $scratchPrefix,
+            retentionHold: $hold,
         );
     }
 
@@ -259,6 +268,9 @@ final readonly class DocumentableConfig
             'listing' => ['per_page' => 50],
             'throttle' => 'documents',
             'audit' => ['enabled' => false, 'access_log' => false],
+            'retention' => [
+                'hold' => [],
+            ],
             'doctor' => [
                 'scratch_prefix' => 'documentable-doctor',
             ],
@@ -291,7 +303,7 @@ final readonly class DocumentableConfig
 
     private static function isFixedSection(string $key): bool
     {
-        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit', 'doctor'], true);
+        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit', 'doctor', 'retention'], true);
     }
 
     /**

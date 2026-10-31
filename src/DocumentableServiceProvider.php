@@ -19,6 +19,7 @@ use MadeByClowd\Documentable\Console\Commands\DocumentsDoctorCommand;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Console\Commands\ListDocumentTypesCommand;
 use MadeByClowd\Documentable\Console\Commands\MakeAuthorizerCommand;
+use MadeByClowd\Documentable\Console\Commands\PruneDocumentVersionsCommand;
 use MadeByClowd\Documentable\Console\Commands\RepairIntegrityCommand;
 use MadeByClowd\Documentable\Console\Commands\SyncDocumentTypesCommand;
 use MadeByClowd\Documentable\Console\Commands\UpgradeCheckCommand;
@@ -129,6 +130,7 @@ class DocumentableServiceProvider extends ServiceProvider
                 DocumentsDoctorCommand::class,
                 InstallCommand::class,
                 MakeAuthorizerCommand::class,
+                PruneDocumentVersionsCommand::class,
                 RepairIntegrityCommand::class,
                 SyncDocumentTypesCommand::class,
                 ListDocumentTypesCommand::class,
