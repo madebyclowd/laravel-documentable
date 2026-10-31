@@ -285,6 +285,7 @@ return [
     */
     'url' => [
         'max_ttl_minutes' => 1440,
+        'modifier' => null,
     ],
 
     /*

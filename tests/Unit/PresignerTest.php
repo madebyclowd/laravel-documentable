@@ -59,7 +59,8 @@ class PresignerTest extends TestCase
 
         $this->assertStringContainsString('my-bucket', $url);
         $this->assertStringContainsString('files/doc.pdf', $url);
-        $this->assertStringContainsString('X-Amz-Expires=600', $url);
+        // The SDK counts from its own clock read, so a second boundary between the two reads gives 599.
+        $this->assertMatchesRegularExpression('/X-Amz-Expires=(599|600)&/', $url);
         $this->assertStringContainsString('response-content-disposition=attachment%3B%20filename%3D%22doc.pdf%22', $url);
         $this->assertStringNotContainsString('x-amz-checksum-', strtolower($url));
         $this->assertStringNotContainsString('x-amz-sdk-checksum-algorithm', strtolower($url));

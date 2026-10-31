@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Services\DocumentService;
-use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
+use MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
 use MadeByClowd\Documentable\Validators\DwgValidator;

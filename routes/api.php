@@ -34,6 +34,8 @@ Route::prefix('documents')
         Route::post('/', [DocumentController::class, 'store']);
         Route::get('/types', [DocumentTypeController::class, 'index']);
         Route::get('/{document}/url', [DocumentController::class, 'url']);
+        Route::get('/{document}/download', [DocumentController::class, 'download']);
+        Route::get('/{document}/view', [DocumentController::class, 'view']);
         Route::delete('/{document}', [DocumentController::class, 'destroy']);
 
         Route::post('/presigned', [DirectUploadController::class, 'presign']);

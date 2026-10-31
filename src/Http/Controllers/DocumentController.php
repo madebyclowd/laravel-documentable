@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
@@ -14,6 +15,7 @@ use MadeByClowd\Documentable\Http\Requests\UploadDocumentRequest;
 use MadeByClowd\Documentable\Http\Requests\UrlRequest;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Services\DocumentService;
+use MadeByClowd\Documentable\ValueObjects\UrlOptions;
 
 class DocumentController extends Controller
 {
@@ -107,17 +109,46 @@ class DocumentController extends Controller
 
     public function url(UrlRequest $request, Document $document): JsonResponse
     {
+        $url = $this->generateUrl(
+            $request,
+            $document,
+            $request->disposition(),
+            $request->expiresInMinutes()
+        );
+
+        return response()->json(['url' => $url]);
+    }
+
+    public function download(Request $request, Document $document): RedirectResponse
+    {
+        $url = $this->generateUrl($request, $document, 'attachment');
+
+        return redirect()->away($url, 302, ['Cache-Control' => 'no-store']);
+    }
+
+    public function view(Request $request, Document $document): RedirectResponse
+    {
+        $url = $this->generateUrl($request, $document, 'inline');
+
+        return redirect()->away($url, 302, ['Cache-Control' => 'no-store']);
+    }
+
+    protected function generateUrl(Request $request, Document $document, string $disposition, ?int $expiresInMinutes = null): string
+    {
         if (! $this->authorizer->canView($request->user(), $document)) {
             abort(403);
         }
 
+        $options = new UrlOptions(
+            ttl: $expiresInMinutes !== null ? now()->addMinutes($expiresInMinutes) : null,
+            disposition: $disposition,
+        );
+
         try {
-            $url = $this->service->getUrl($document, now()->addMinutes($request->expiresInMinutes()), $request->disposition());
+            return $this->service->getUrl($document, $options);
         } catch (DocumentNotReady $e) {
             abort(409, $e->getMessage());
         }
-
-        return response()->json(['url' => $url]);
     }
 
     public function destroy(Request $request, Document $document): Response

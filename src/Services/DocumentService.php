@@ -10,6 +10,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
@@ -18,6 +19,7 @@ use MadeByClowd\Documentable\Repositories\DocumentRepository;
 use MadeByClowd\Documentable\Repositories\StorageFileRepository;
 use MadeByClowd\Documentable\ValueObjects\AttachOptions;
 use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
+use MadeByClowd\Documentable\ValueObjects\UrlOptions;
 
 /**
  * The public entry point for storing, reading and removing documents. Each method delegates to a focused
@@ -36,6 +38,8 @@ class DocumentService
 
     protected VersionLifecycle $versionLifecycle;
 
+    protected DocumentReader $reader;
+
     public function __construct(
         protected DocumentRepository $documentRepository,
         protected DirectUploadService $directUploads,
@@ -46,9 +50,11 @@ class DocumentService
         protected DocumentAttacher $attacher,
         ?StorageFileRepository $storageFiles = null,
         ?VersionLifecycle $versionLifecycle = null,
+        ?DocumentReader $reader = null,
     ) {
         $this->storageFiles = $storageFiles ?? app(StorageFileRepository::class);
         $this->versionLifecycle = $versionLifecycle ?? app(VersionLifecycle::class);
+        $this->reader = $reader ?? app(DocumentReader::class);
     }
 
     /**
@@ -138,6 +144,30 @@ class DocumentService
     }
 
     /**
+     * Attach an existing storage file to an owner without an upload session.
+     *
+     * The caller is responsible for having proven the right to reuse the file (the dedup
+     * handshake does this). This is the supported replacement for subclassing.
+     */
+    public function attachStorageFile(
+        StorageFile $storageFile,
+        DocumentType $type,
+        Model $owner,
+        string $clientFilename,
+        AttachOptions $options = new AttachOptions
+    ): Document {
+        return $this->attacher->attachStorageFile(
+            $storageFile,
+            $type,
+            $owner,
+            $clientFilename,
+            $options->metadata,
+            $options->documentGroupId,
+            DocumentStatus::Committed
+        );
+    }
+
+    /**
      * Find an existing verified storage file eligible for deduplication reuse under the current scope.
      */
     public function findReusable(string $hash, DocumentType $type, ?Authenticatable $user = null, ?Model $owner = null): ?StorageFile
@@ -148,9 +178,34 @@ class DocumentService
     /**
      * Generate a presigned URL for the document.
      */
-    public function getUrl(Document $document, DateTimeInterface $expiration, string $disposition = 'inline'): string
+    public function getUrl(Document $document, DateTimeInterface|UrlOptions|null $options = null, string $disposition = 'inline'): string
     {
-        return $this->urlSigner->sign($document, $expiration, $disposition);
+        $resolvedDisposition = $disposition === 'attachment' ? 'attachment' : 'inline';
+        $resolved = match (true) {
+            $options instanceof UrlOptions => $options,
+            $options instanceof DateTimeInterface => new UrlOptions(ttl: $options, disposition: $resolvedDisposition),
+            default => new UrlOptions(disposition: $resolvedDisposition),
+        };
+
+        return $this->urlSigner->sign($document, $resolved);
+    }
+
+    /**
+     * Open a readable PHP stream resource for the document's contents.
+     *
+     * @return resource
+     */
+    public function readStream(Document $document)
+    {
+        return $this->reader->readStream($document);
+    }
+
+    /**
+     * Read the entire contents of the document into memory, up to the given limit.
+     */
+    public function readContents(Document $document, int $maxBytes = 10485760): string
+    {
+        return $this->reader->readContents($document, $maxBytes);
     }
 
     /**

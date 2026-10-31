@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Config;
 use Illuminate\Console\Scheduling\Event;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
+use MadeByClowd\Documentable\Contracts\ModifiesUrlOptions;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
@@ -42,6 +43,7 @@ final readonly class DocumentableConfig
      * @param  class-string<ResolvesDedupScope>|null  $dedupScopeResolver
      * @param  class-string<ScansUploadedFile>|null  $scanner
      * @param  class-string<GeneratesStoragePath>|null  $storagePathGenerator
+     * @param  class-string<ModifiesUrlOptions>|null  $urlModifier
      * @param  list<string>  $retentionHold
      */
     private function __construct(
@@ -81,6 +83,7 @@ final readonly class DocumentableConfig
         public ?string $multipartContentType = null,
         public string $doctorScratchPrefix = 'documentable-doctor',
         public array $retentionHold = [],
+        public ?string $urlModifier = null,
     ) {}
 
     /**
@@ -217,6 +220,7 @@ final readonly class DocumentableConfig
             multipartContentType: $contentType,
             doctorScratchPrefix: $scratchPrefix,
             retentionHold: $hold,
+            urlModifier: self::implementing($c['url']['modifier'] ?? null, ModifiesUrlOptions::class, 'url.modifier'),
         );
     }
 
@@ -261,7 +265,7 @@ final readonly class DocumentableConfig
                 'scan_error_policy' => 'reject',
             ],
             'verification' => ['sync_hash_max_bytes' => 50 * 1024 * 1024, 'connection' => null, 'queue' => null],
-            'url' => ['max_ttl_minutes' => 1440],
+            'url' => ['max_ttl_minutes' => 1440, 'modifier' => null],
             'storage_path' => ['generator' => null],
             'disks' => [],
             'middleware' => ['api'],

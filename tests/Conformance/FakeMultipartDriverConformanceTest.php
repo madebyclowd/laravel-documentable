@@ -7,7 +7,7 @@ namespace MadeByClowd\Documentable\Tests\Conformance;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
 use MadeByClowd\Documentable\Models\UploadSession;
-use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
+use MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver;
 
 class FakeMultipartDriverConformanceTest extends MultipartDriverConformanceTest
 {

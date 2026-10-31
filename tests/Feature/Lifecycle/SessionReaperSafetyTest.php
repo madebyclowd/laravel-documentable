@@ -17,7 +17,7 @@ use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\UploadSessionLifecycle;
-use MadeByClowd\Documentable\Tests\Fixtures\FakeMultipartUploadDriver;
+use MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver;
 use MadeByClowd\Documentable\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 
