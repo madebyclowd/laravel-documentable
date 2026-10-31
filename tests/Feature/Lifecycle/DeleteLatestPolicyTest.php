@@ -16,9 +16,14 @@ use MadeByClowd\Documentable\Exceptions\CannotDeleteLatestVersion;
 use MadeByClowd\Documentable\Integrity\IntegrityInspector;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
+use MadeByClowd\Documentable\Repositories\DocumentRepository;
+use MadeByClowd\Documentable\Repositories\StorageFileRepository;
+use MadeByClowd\Documentable\Services\ActorResolver;
+use MadeByClowd\Documentable\Services\DocumentPurger;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
+use Mockery;
 
 class DeleteLatestPolicyTest extends TestCase
 {
@@ -215,6 +220,27 @@ class DeleteLatestPolicyTest extends TestCase
 
         $this->assertSoftDeleted('documents', ['id' => $v1->id]);
         $this->assertNull($v1->fresh()->latest_marker);
+    }
+
+    public function test_a_failed_delete_leaves_the_latest_in_place_and_fires_nothing(): void
+    {
+        Event::fake([DocumentDeleted::class, DocumentVersionPromoted::class]);
+
+        $type = $this->makeType();
+        $v1 = $this->uploadVersion($type, 'v1');
+        $v2 = $this->uploadVersion($type, 'v2', $v1->document_group_id);
+
+        $repository = Mockery::mock(DocumentRepository::class);
+        $repository->shouldReceive('delete')->once()->andReturn(false);
+        $purger = new DocumentPurger($repository, $this->app->make(StorageFileRepository::class), $this->app->make(ActorResolver::class));
+
+        $this->assertFalse($purger->delete($v2));
+
+        $this->assertTrue($v2->fresh()->is_latest);
+        $this->assertNotNull($v2->fresh()->latest_marker);
+        $this->assertFalse($v1->fresh()->is_latest);
+        Event::assertNotDispatched(DocumentDeleted::class);
+        Event::assertNotDispatched(DocumentVersionPromoted::class);
     }
 
     public function test_deleting_non_latest_version_is_unchanged_across_all_policies(): void

@@ -64,14 +64,12 @@ final class DocumentPurger
                 throw new CannotDeleteLatestVersion($document);
             }
 
-            $this->lifecycle->clearLatest($document);
-            $document->update(['deleted_by' => $this->actor->idForAudit()]);
-
-            $deleted = $this->documentRepository->delete($document);
-
-            if (! $deleted) {
+            if (! $this->documentRepository->delete($document)) {
                 return false;
             }
+
+            $this->lifecycle->clearLatest($document);
+            $document->update(['deleted_by' => $this->actor->idForAudit()]);
 
             Event::dispatch(new DocumentDeleted($document));
 
