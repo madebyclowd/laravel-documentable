@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Services;
 
 use DateTimeInterface;
-use Illuminate\Support\Facades\Storage;
 use LogicException;
 use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
 use MadeByClowd\Documentable\Exceptions\DocumentNotReady;
 use MadeByClowd\Documentable\Models\Document;
-use RuntimeException;
 
 /**
  * Signs time-limited download URLs and builds the `Content-Disposition` value that goes with them.
@@ -20,7 +18,10 @@ use RuntimeException;
  */
 final class UrlSigner
 {
-    public function __construct(private readonly AccessLogger $accessLogger) {}
+    public function __construct(
+        private readonly AccessLogger $accessLogger,
+        private readonly Presigner $presigner,
+    ) {}
 
     /**
      * @throws DocumentNotReady when the document is still being verified, or was refused
@@ -34,17 +35,12 @@ final class UrlSigner
             throw new DocumentNotReady($document->id, $document->status);
         }
 
-        try {
-            $url = Storage::disk($storageFile->disk)->temporaryUrl(
-                $storageFile->path,
-                $expiration,
-                [
-                    'ResponseContentDisposition' => self::contentDisposition($disposition, $document->client_filename),
-                ]
-            );
-        } catch (RuntimeException $e) {
-            throw DiskDoesNotSupportTemporaryUrlsException::forDisk($storageFile->disk, $e);
-        }
+        $url = $this->presigner->download(
+            $storageFile->disk,
+            $storageFile->path,
+            $expiration,
+            self::contentDisposition($disposition, $document->client_filename)
+        );
 
         $this->accessLogger->log($document, $disposition === 'attachment' ? 'download' : 'view');
 

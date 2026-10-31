@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
+use Aws\MockHandler;
+use Aws\Result;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
@@ -382,6 +385,93 @@ class ArtisanCommandsTest extends TestCase
             ->assertExitCode(0);
 
         $this->assertStringContainsString("'key_type' => 'ulid'", file_get_contents(config_path('documentable.php')));
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_offers_doctor_when_interactive_and_default_disk_is_s3(): void
+    {
+        @unlink(config_path('documentable.php'));
+        config()->set('documentable.disk', 's3_install_test');
+        config()->set('filesystems.disks.s3_install_test', [
+            'driver' => 's3',
+            'bucket' => 'test-bucket',
+            'region' => 'us-east-1',
+            'key' => 'k',
+            'secret' => 's',
+        ]);
+
+        $this->artisan('documents:install', ['--shape' => 'separate-api', '--etag-strategy' => 'server-authoritative', '--types' => 'code-first'])
+            ->expectsChoice(
+                "What type is the primary key of the models that will own documents?\n".
+                "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+                "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+                "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+                '                use the column index, and PostgreSQL needs no casts.',
+                'ulid',
+                ['int', 'uuid', 'ulid', 'string']
+            )
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
+            )
+            ->expectsConfirmation('Would you like to run `php artisan documents:doctor s3_install_test` to check bucket connectivity?', 'no')
+            ->assertExitCode(0);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_runs_the_doctor_when_the_offer_is_accepted(): void
+    {
+        @unlink(config_path('documentable.php'));
+        $mock = new MockHandler;
+        for ($i = 0; $i < 60; $i++) {
+            $mock->append(new Result);
+        }
+        Http::fake(['*' => Http::response('', 200)]);
+        config()->set('documentable.disk', 's3_install_test');
+        config()->set('filesystems.disks.s3_install_test', [
+            'driver' => 's3',
+            'bucket' => 'test-bucket',
+            'region' => 'us-east-1',
+            'key' => 'k',
+            'secret' => 's',
+            'handler' => $mock,
+        ]);
+
+        $this->artisan('documents:install', ['--shape' => 'separate-api', '--etag-strategy' => 'server-authoritative', '--types' => 'code-first'])
+            ->expectsChoice(
+                "What type is the primary key of the models that will own documents?\n".
+                "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+                "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+                "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+                '                use the column index, and PostgreSQL needs no casts.',
+                'ulid',
+                ['int', 'uuid', 'ulid', 'string']
+            )
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
+            )
+            ->expectsConfirmation('Would you like to run `php artisan documents:doctor s3_install_test` to check bucket connectivity?', 'yes')
+            ->expectsOutputToContain('Running diagnostics for disk [s3_install_test]...')
+            ->assertExitCode(0);
 
         @unlink(config_path('documentable.php'));
     }

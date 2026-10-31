@@ -25,10 +25,9 @@ final class ObjectRangeReader
             throw new RuntimeException("Invalid range [{$offset}, {$length}] for [{$path}].");
         }
 
-        $filesystem = Storage::disk($disk);
-        $client = method_exists($filesystem, 'getClient') ? $filesystem->getClient() : null;
+        $client = S3ClientDetector::client($disk);
 
-        $bytes = $client instanceof S3Client
+        $bytes = $client !== null
             ? $this->readS3($client, $disk, $path, $offset, $length)
             : $this->readStream($disk, $path, $offset, $length);
 
@@ -43,7 +42,7 @@ final class ObjectRangeReader
     {
         try {
             $result = $client->getObject([
-                'Bucket' => (string) config("filesystems.disks.{$disk}.bucket"),
+                'Bucket' => S3ClientDetector::bucket($disk),
                 'Key' => $path,
                 'Range' => 'bytes='.$offset.'-'.($offset + $length - 1),
             ]);

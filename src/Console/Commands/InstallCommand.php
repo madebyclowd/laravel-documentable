@@ -6,6 +6,7 @@ namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
+use MadeByClowd\Documentable\Services\S3ClientDetector;
 
 /**
  * Interactive wizard mirroring the reference package's `sequence:install`.
@@ -163,6 +164,13 @@ class InstallCommand extends Command
 
         $this->line('  4. Upload your first file: $document = app(\MadeByClowd\Documentable\Services\DocumentService::class)->upload($file, $type, $owner);');
         $this->line('See the README for a full walkthrough and every HTTP route the package ships.');
+
+        $defaultDisk = (string) config('documentable.disk', 's3');
+        if ($this->input->isInteractive() && S3ClientDetector::isS3($defaultDisk)) {
+            if ($this->confirm("Would you like to run `php artisan documents:doctor {$defaultDisk}` to check bucket connectivity?", false)) {
+                $this->call('documents:doctor', ['disk' => $defaultDisk]);
+            }
+        }
 
         return self::SUCCESS;
     }

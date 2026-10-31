@@ -16,6 +16,7 @@ use MadeByClowd\Documentable\Http\Requests\MultipartSessionStatusRequest;
 use MadeByClowd\Documentable\Http\Requests\PartUploadUrlRequest;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
+use MadeByClowd\Documentable\Services\PartSizePlanner;
 use MadeByClowd\Documentable\ValueObjects\AttachOptions;
 use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
 
@@ -47,7 +48,11 @@ class MultipartUploadController extends Controller
             )
         );
 
-        return response()->json($session, 201);
+        $partSize = $session->declared_size !== null
+            ? (new PartSizePlanner)->partSize($session->declared_size)
+            : null;
+
+        return response()->json(array_merge($session->toArray(), ['part_size' => $partSize]), 201);
     }
 
     public function partUrl(PartUploadUrlRequest $request): JsonResponse

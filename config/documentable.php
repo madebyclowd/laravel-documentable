@@ -128,6 +128,12 @@ return [
     |     always resolves ETags via ListParts before completing. No CORS
     |     dependency. Needed for SaaS-managed/limited-CORS buckets.
     |
+    | object_metadata: when true, CreateMultipartUpload sends the URL-encoded
+    | original filename in object metadata. Default is false (sends no metadata).
+    |
+    | content_type: MIME type sent on CreateMultipartUpload when configured.
+    | Default is null (does not force ContentType).
+    |
     */
     'multipart' => [
         'threshold_bytes' => 10 * 1024 * 1024,
@@ -137,6 +143,8 @@ return [
         'drivers' => [
             's3' => S3MultipartDriver::class,
         ],
+        'object_metadata' => false,
+        'content_type' => null,
     ],
 
     /*
@@ -154,9 +162,11 @@ return [
     | hashes and scans it, then marks it `committed` or `rejected`. A
     | `processing` document cannot be downloaded or deduplicated against. Needs
     | a queue worker; with the `sync` queue driver the job runs in the request.
-    | Reading is fast (a 1 GiB object hashed in about a second from storage on
-    | the same network), so the limit protects the request time, not the CPU:
-    | 50 MiB leaves a wide margin at 10 MB/s. Set 0 to always verify in a job.
+    | The read is bound by bandwidth to storage, not by the CPU: a 1 GiB object
+    | hashes in about a second from storage on the same network, but a 50 MiB
+    | object took 27 to 39 seconds to hash over the public internet from a
+    | development machine. Size the limit to the link between your servers and
+    | the bucket. Set 0 to always verify in a job.
     |
     | connection / queue: where the job runs. null uses the application default.
     |
@@ -294,16 +304,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Per-Disk Server-Side Encryption
+    | Per-Disk Storage Settings
     |--------------------------------------------------------------------------
     |
-    | Explicit SSE, passed through to every write/presign/multipart-create
-    | call rather than relying on the bucket's default encryption setting.
-    | server_side_encryption: 'AES256' | 'aws:kms'. kms_key_id only used when
-    | server_side_encryption is 'aws:kms'.
+    | Configuration options for specific disks.
+    | - server_side_encryption: 'AES256' | 'aws:kms'.
+    | - kms_key_id: KMS key ARN or alias when server_side_encryption is 'aws:kms'.
+    | - presign_endpoint: optional public URL used when generating presigned
+    |   download and upload URLs, leaving internal traffic on the disk's endpoint.
+    | - presign_use_path_style: optional boolean overriding path-style endpoint
+    |   behavior for presigned URLs.
     |
     | Example:
-    | 's3' => ['server_side_encryption' => 'AES256'],
+    | 's3' => [
+    |     'server_side_encryption' => 'AES256',
+    |     'presign_endpoint' => 'https://downloads.example.com',
+    |     'presign_use_path_style' => false,
+    | ],
     |
     */
     'disks' => [
@@ -366,5 +383,18 @@ return [
     'audit' => [
         'enabled' => false,
         'access_log' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Storage Doctor
+    |--------------------------------------------------------------------------
+    |
+    | Scratch prefix under which php artisan documents:doctor performs read/write
+    | probes. Always cleaned up after probes finish.
+    |
+    */
+    'doctor' => [
+        'scratch_prefix' => 'documentable-doctor',
     ],
 ];

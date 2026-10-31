@@ -68,7 +68,7 @@ final class MultipartUploadService
         $this->assertOpenMultipart($session);
 
         return $this->drivers->forDisk($session->disk)
-            ->presignPartUpload($session->disk, $session->path, (string) $session->upload_id, $partNumber);
+            ->presignPartUpload($session, $partNumber);
     }
 
     /**
@@ -80,7 +80,7 @@ final class MultipartUploadService
     {
         $this->assertOpenMultipart($session);
 
-        return $this->drivers->forDisk($session->disk)->listParts($session->disk, $session->path, (string) $session->upload_id);
+        return $this->drivers->forDisk($session->disk)->listParts($session);
     }
 
     /**
@@ -102,11 +102,10 @@ final class MultipartUploadService
         $this->assertOpenMultipart($session);
 
         $driver = $this->drivers->forDisk($session->disk);
-        $uploadId = (string) $session->upload_id;
 
-        $parts = $this->resolvePartsForCompletion($driver, $session->disk, $session->path, $uploadId, $clientParts);
+        $parts = $this->resolvePartsForCompletion($driver, $session, $clientParts);
 
-        $driver->complete($session->disk, $session->path, $uploadId, $parts);
+        $driver->complete($session, $parts);
 
         return $this->finalizer->finalize($session, null, $expectedHash);
     }
@@ -132,12 +131,12 @@ final class MultipartUploadService
      * @param  array<int, array{PartNumber: int, ETag: string}>|null  $clientParts
      * @return array<int, array{PartNumber: int, ETag: string}>
      */
-    private function resolvePartsForCompletion(MultipartUploadDriver $driver, string $disk, string $path, string $uploadId, ?array $clientParts): array
+    private function resolvePartsForCompletion(MultipartUploadDriver $driver, UploadSession $session, ?array $clientParts): array
     {
         $strategy = $this->config->get('documentable.multipart.etag_strategy', 'server-authoritative');
 
         if ($strategy === 'client' && ! empty($clientParts)) {
-            $authoritative = $driver->listParts($disk, $path, $uploadId);
+            $authoritative = $driver->listParts($session);
 
             $authoritativeNumbers = collect($authoritative)->pluck('PartNumber')->sort()->values()->all();
             $clientNumbers = collect($clientParts)->pluck('PartNumber')->sort()->values()->all();
@@ -150,7 +149,7 @@ final class MultipartUploadService
 
             $parts = $clientParts;
         } else {
-            $parts = $driver->listParts($disk, $path, $uploadId);
+            $parts = $driver->listParts($session);
         }
 
         usort($parts, fn ($a, $b) => $a['PartNumber'] <=> $b['PartNumber']);

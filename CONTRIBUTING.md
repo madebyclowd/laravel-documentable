@@ -24,6 +24,18 @@ composer format    # Pint, check only; run vendor/bin/pint to fix
 composer analyse   # PHPStan level 8 with the 1G memory limit CI uses
 ```
 
+Coverage only says which lines ran. Mutation testing says whether the tests notice a change, and CI runs it on
+the lines a pull request changes (covered mutation score of at least 80%). To run it locally, install
+[Infection](https://infection.github.io/guide/installation.html) and run it on what you touched, one thread
+because the tests share a fake-disk directory:
+
+```bash
+php -d memory_limit=-1 infection --threads=1 --only-covering-test-cases --git-diff-lines --git-diff-base=origin/3.x
+```
+
+A surviving mutant is either a missing test or code that does nothing (a guard that cannot be reached).
+Add the test or delete the code; do not weaken the check.
+
 Write the failing test first. Coverage is measured on the newest PHP and Laravel leg only, so measure it
 locally with `php -d pcov.enabled=1 vendor/bin/phpunit --coverage-text` before claiming it did not drop.
 

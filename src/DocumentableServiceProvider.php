@@ -15,6 +15,7 @@ use MadeByClowd\Documentable\Console\Commands\AttachModelCommand;
 use MadeByClowd\Documentable\Console\Commands\CleanOrphanedDocumentsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketCorsCommand;
 use MadeByClowd\Documentable\Console\Commands\ConfigureBucketLifecycleCommand;
+use MadeByClowd\Documentable\Console\Commands\DocumentsDoctorCommand;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Console\Commands\ListDocumentTypesCommand;
 use MadeByClowd\Documentable\Console\Commands\MakeAuthorizerCommand;
@@ -32,6 +33,8 @@ use MadeByClowd\Documentable\Defaults\NullFileScanner;
 use MadeByClowd\Documentable\Defaults\TypeAndTenantScope;
 use MadeByClowd\Documentable\Exceptions\InsecureConfiguration;
 use MadeByClowd\Documentable\Models\DocumentType;
+use MadeByClowd\Documentable\Services\PresignClientFactory;
+use MadeByClowd\Documentable\Services\Presigner;
 
 class DocumentableServiceProvider extends ServiceProvider
 {
@@ -41,6 +44,10 @@ class DocumentableServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/documentable.php', 'documentable');
+
+        // One presign client per disk for the whole process: building an S3 client reads its credentials and config.
+        $this->app->singleton(PresignClientFactory::class);
+        $this->app->singleton(Presigner::class);
 
         $this->app->singleton(DocumentableConfig::class, fn ($app) => DocumentableConfig::fromArray(
             (array) $app['config']->get('documentable', []),
@@ -119,6 +126,7 @@ class DocumentableServiceProvider extends ServiceProvider
                 CleanOrphanedDocumentsCommand::class,
                 ConfigureBucketCorsCommand::class,
                 ConfigureBucketLifecycleCommand::class,
+                DocumentsDoctorCommand::class,
                 InstallCommand::class,
                 MakeAuthorizerCommand::class,
                 RepairIntegrityCommand::class,

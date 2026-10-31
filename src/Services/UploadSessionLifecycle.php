@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Services;
 
+use Aws\S3\S3Client;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Enums\UploadKind;
@@ -12,7 +14,7 @@ use MadeByClowd\Documentable\Events\MultipartUploadAborted;
 use MadeByClowd\Documentable\Exceptions\IllegalUploadSessionTransition;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
 use MadeByClowd\Documentable\Models\UploadSession;
-use MadeByClowd\Documentable\Repositories\UploadSessionRepository;
+use Throwable;
 
 /**
  * Ends an open session, by the owner's request (abort) or because it ran out of time (expire): releases the
@@ -24,7 +26,6 @@ use MadeByClowd\Documentable\Repositories\UploadSessionRepository;
 final class UploadSessionLifecycle
 {
     public function __construct(
-        private readonly UploadSessionRepository $sessions,
         private readonly MultipartDriverResolver $drivers,
         private readonly DocumentPurger $purger,
     ) {}
@@ -41,29 +42,41 @@ final class UploadSessionLifecycle
 
     private function end(UploadSession $session, UploadSessionStatus $to): UploadSession
     {
-        // A provider upload still open is aborted before the state changes, so a provider that cannot be reached
-        // leaves the session open for the next sweep to retry.
-        if ($this->holdsOpenProviderUpload($session)) {
-            $this->abortProviderUpload($session);
-        }
+        return DB::transaction(function () use ($session, $to) {
+            /** @var UploadSession $locked */
+            $locked = UploadSession::whereKey($session->getKey())->lockForUpdate()->firstOrFail();
 
-        // The transition re-reads the row under a lock. If the session moved on in the meantime (attached by a
-        // request that raced this one), nothing it holds may be deleted.
-        try {
-            $ended = $to === UploadSessionStatus::Expired
-                ? $this->sessions->markExpired($session)
-                : $this->sessions->markAborted($session);
-        } catch (IllegalUploadSessionTransition) {
-            return $session->fresh() ?? $session;
-        }
+            try {
+                $locked->status->transitionTo($to);
+            } catch (IllegalUploadSessionTransition) {
+                return $locked;
+            }
 
-        $this->discardStoredObject($ended);
+            // A provider upload still open is aborted before the state changes, so a provider that cannot be reached
+            // leaves the session open for the next sweep to retry.
+            if ($this->holdsOpenProviderUpload($locked)) {
+                $this->abortProviderUpload($locked);
+            }
 
-        if ($ended->kind === UploadKind::Multipart) {
-            Event::dispatch(new MultipartUploadAborted($ended));
-        }
+            // Invariant: a session row is never Expired while its storage object remains.
+            // Attach-race invariant: check + delete + status update happens inside lockForUpdate,
+            // only proceeding if storage_file_id is still null.
+            if ($locked->storage_file_id === null) {
+                $this->discardOrphanedObject($locked);
+            }
 
-        return $ended;
+            $locked->forceFill(['status' => $to])->save();
+
+            if ($storageFile = $locked->storageFile) {
+                $this->purger->removeStorageFileIfUnreferenced($storageFile);
+            }
+
+            if ($locked->kind === UploadKind::Multipart) {
+                Event::dispatch(new MultipartUploadAborted($locked));
+            }
+
+            return $locked;
+        });
     }
 
     /**
@@ -77,28 +90,52 @@ final class UploadSessionLifecycle
     private function abortProviderUpload(UploadSession $session): void
     {
         try {
-            $this->drivers->forDisk($session->disk)->abort($session->disk, $session->path, (string) $session->upload_id);
+            $this->drivers->forDisk($session->disk)->abort($session);
         } catch (MultipartUploadNotFoundException) {
             // Already gone on the provider: the abort has reached its goal.
         }
     }
 
     /**
-     * Deletes what an ended session still holds: the stored file if one owns the object (and nothing else
-     * references it), otherwise the object itself.
+     * Deletes the object a never-attached session may have left. A failure bubbles up, rolling back the transaction
+     * so the row stays open for the next run.
      */
-    private function discardStoredObject(UploadSession $session): void
+    private function discardOrphanedObject(UploadSession $session): void
     {
-        if ($session->storage_file_id !== null) {
-            $storageFile = $session->storageFile;
+        $client = S3ClientDetector::client($session->disk);
 
-            if ($storageFile !== null) {
-                $this->purger->removeStorageFileIfUnreferenced($storageFile);
-            }
+        if ($client === null) {
+            $this->deleteFromDisk($session);
 
             return;
         }
 
+        $this->deleteFromBucket($client, $session);
+    }
+
+    /**
+     * Native HeadObject first, so a 404 counts as already gone. `Storage::exists()` would answer false for any
+     * error on a disk with `throw` off, hiding a real failure.
+     */
+    private function deleteFromBucket(S3Client $client, UploadSession $session): void
+    {
+        $object = ['Bucket' => S3ClientDetector::bucket($session->disk), 'Key' => $session->path];
+
+        try {
+            $client->headObject($object);
+        } catch (Throwable $e) {
+            if (S3ExceptionMapper::isNotFoundOrGone($e)) {
+                return;
+            }
+
+            throw $e;
+        }
+
+        $client->deleteObject($object);
+    }
+
+    private function deleteFromDisk(UploadSession $session): void
+    {
         $disk = Storage::disk($session->disk);
 
         if ($disk->exists($session->path)) {
