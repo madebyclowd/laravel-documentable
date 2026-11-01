@@ -87,6 +87,7 @@ final readonly class DocumentableConfig
         public array $retentionHold = [],
         public ?string $urlModifier = null,
         public ?string $attachMetadataResolver = null,
+        public string $routePrefix = 'documents',
     ) {}
 
     /**
@@ -224,6 +225,7 @@ final readonly class DocumentableConfig
             doctorScratchPrefix: $scratchPrefix,
             retentionHold: $hold,
             urlModifier: self::implementing($c['url']['modifier'] ?? null, ModifiesUrlOptions::class, 'url.modifier'),
+            routePrefix: self::routePrefix($c['route_prefix'] ?? 'documents'),
             attachMetadataResolver: self::implementing($c['attach']['metadata_resolver'] ?? null, ResolvesAttachMetadata::class, 'attach.metadata_resolver'),
         );
     }
@@ -241,6 +243,7 @@ final readonly class DocumentableConfig
             'key_type' => 'string',
             'load_migrations' => true,
             'load_routes' => true,
+            'route_prefix' => 'documents',
             'types' => [],
             'validators' => [],
             'multipart' => [
@@ -377,6 +380,20 @@ final readonly class DocumentableConfig
         }
 
         return $value;
+    }
+
+    /**
+     * The prefix without the slashes around it, so `/uploads/` and `uploads` mount the same routes.
+     */
+    private static function routePrefix(mixed $value): string
+    {
+        $prefix = is_string($value) ? trim($value, '/') : '';
+
+        if ($prefix === '') {
+            throw new InvalidDocumentableConfig('route_prefix', 'must be a non-empty string', "Use a path segment such as 'documents' or 'api/uploads'");
+        }
+
+        return $prefix;
     }
 
     private static function bool(mixed $value, string $key): bool

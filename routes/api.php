@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Http\Controllers\DedupHandshakeController;
 use MadeByClowd\Documentable\Http\Controllers\DirectUploadController;
 use MadeByClowd\Documentable\Http\Controllers\DocumentController;
@@ -21,10 +22,11 @@ use MadeByClowd\Documentable\Http\Controllers\MultipartUploadController;
 | your app defines no limiter of that name the package registers one at 60
 | requests a minute per user or IP; define your own with RateLimiter::for()
 | in your AppServiceProvider to change it. Disable this file entirely and
-| mount these controllers yourself for full control over prefix/middleware/guard.
+| mount these controllers yourself for full control over middleware/guard. The
+| path is config('documentable.route_prefix') (default 'documents').
 |
 */
-Route::prefix('documents')
+Route::prefix(app(DocumentableConfig::class)->routePrefix)
     ->middleware([
         ...config('documentable.middleware', ['api']),
         'throttle:'.config('documentable.throttle', 'documents'),

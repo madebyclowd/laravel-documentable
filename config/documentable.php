@@ -57,10 +57,14 @@ return [
     |--------------------------------------------------------------------------
     |
     | Set to false to disable auto-registration and mount the package's
-    | controllers yourself (custom prefix/middleware/throttle).
+    | controllers yourself (custom middleware/throttle).
+    |
+    | route_prefix is the path the routes are mounted under. Change it when
+    | your app already has routes of its own under /documents.
     |
     */
     'load_routes' => true,
+    'route_prefix' => 'documents',
 
     /*
     |--------------------------------------------------------------------------
