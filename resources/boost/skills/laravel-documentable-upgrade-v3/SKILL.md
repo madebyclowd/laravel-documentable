@@ -57,7 +57,7 @@ Address each rule detected by `php artisan documents:upgrade-check --code`:
 ### removed-upload-api
 - Rule ID: `removed-upload-api`
 - Matching heading in UPGRADE.md: [Removed upload API](UPGRADE.md#removed-upload-api)
-- Pattern: `\buploadDetached\s*\(|\breassociateDocument\s*\(|^(?=.*ocument).*->commit\s*\(|\bDocumentStatus::Pending\b|status.*['"]pending['"]|['"]pending['"].*status`
+- Pattern: `\buploadDetached\s*\(|\breassociateDocument\s*\(|^(?=.*ocument).*->commit\s*\(|\bDocumentStatus::Pending\b|^(?=.*doc).*(?:status.*['"]pending['"]|['"]pending['"].*status)` (case-insensitive; migrations and comments are skipped)
 - Fix: Use `stageUpload()` and `attach($session, $owner)`. Handle `DocumentStatus::Processing` instead of pending status.
 
 ### old-authorizer
