@@ -15,7 +15,7 @@ use MadeByClowd\Documentable\Upgrade\CodeScanner;
  */
 class UpgradeCheckCommand extends Command
 {
-    protected $signature = 'documents:upgrade-check {--code : Run static code scan for v2 API usage} {--path= : Base path to scan}';
+    protected $signature = 'documents:upgrade-check {--code : Run static code scan for v2 API usage} {--path= : Base path to scan} {--ignore=* : Rule id to skip in the code scan, repeatable}';
 
     protected $description = 'Report data that would block the integrity constraints (writes nothing).';
 
@@ -48,7 +48,17 @@ class UpgradeCheckCommand extends Command
     {
         $pathOption = $this->option('path');
         $basePath = is_string($pathOption) && $pathOption !== '' ? $pathOption : base_path();
-        $findings = $scanner->scan($basePath);
+
+        /** @var list<string> $ignored */
+        $ignored = array_values(array_filter((array) $this->option('ignore'), is_string(...)));
+
+        foreach (array_diff($ignored, $scanner->ruleIds()) as $unknown) {
+            $this->error("Unknown rule \"{$unknown}\". Known rules: ".implode(', ', $scanner->ruleIds()).'.');
+
+            return self::INVALID;
+        }
+
+        $findings = $scanner->scan($basePath, $ignored);
 
         if ($findings === []) {
             $this->info('No v2 API found.');

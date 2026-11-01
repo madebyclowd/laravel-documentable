@@ -16,13 +16,16 @@ use SplFileInfo;
  */
 final class CodeScanner
 {
+    private const MIGRATION_DIVERGENCE = 'package-migration-diverges';
+
     /** @var list<Rule>|null */
     private ?array $rules = null;
 
     /**
+     * @param  list<string>  $ignoredRules  Rule ids to skip, as listed by {@see ruleIds()}
      * @return list<Finding>
      */
-    public function scan(string $basePath): array
+    public function scan(string $basePath, array $ignoredRules = []): array
     {
         $basePath = rtrim($basePath, '/\\');
         $files = $this->collectPhpFiles($basePath);
@@ -30,12 +33,23 @@ final class CodeScanner
 
         foreach ($files as $filePath) {
             $relativePath = str_replace('\\', '/', ltrim(substr($filePath, strlen($basePath)), '/\\'));
-            $this->scanFile($filePath, $relativePath, $findings);
+            $this->scanFile($filePath, $relativePath, $ignoredRules, $findings);
         }
 
         usort($findings, fn (Finding $a, Finding $b) => [$a->file, $a->line] <=> [$b->file, $b->line]);
 
         return $findings;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function ruleIds(): array
+    {
+        return array_values(array_unique([
+            self::MIGRATION_DIVERGENCE,
+            ...array_map(fn (Rule $rule) => $rule->id, $this->rules()),
+        ]));
     }
 
     /**
@@ -70,14 +84,21 @@ final class CodeScanner
     }
 
     /**
+     * @param  list<string>  $ignoredRules
      * @param  list<Finding>  $findings
      */
-    private function scanFile(string $filePath, string $relativePath, array &$findings): void
+    private function scanFile(string $filePath, string $relativePath, array $ignoredRules, array &$findings): void
     {
         $content = (string) file_get_contents($filePath);
 
+        // A migration is history the app wrote for itself: the only thing worth reporting is a published package
+        // migration that was edited.
         if (str_starts_with($relativePath, 'database/migrations/')) {
-            $this->checkPackageMigrationDivergence($relativePath, $content, $findings);
+            if (! in_array(self::MIGRATION_DIVERGENCE, $ignoredRules, true)) {
+                $this->checkPackageMigrationDivergence($relativePath, $content, $findings);
+            }
+
+            return;
         }
 
         $scopes = [Rule::ANY_FILE];
@@ -91,20 +112,20 @@ final class CodeScanner
             $scopes[] = Rule::SERVICE_SUBCLASSES;
         }
 
-        $lines = explode("\n", $content);
+        $rules = array_filter($this->rules(), fn (Rule $rule) => ! in_array($rule->id, $ignoredRules, true));
+        $insideBlockComment = false;
 
-        foreach ($lines as $index => $line) {
-            $lineNumber = $index + 1;
-            if ($this->isCommentLine($line)) {
+        foreach (explode("\n", $content) as $index => $line) {
+            if ($this->isComment($line, $insideBlockComment)) {
                 continue;
             }
 
-            foreach ($this->rules() as $rule) {
+            foreach ($rules as $rule) {
                 if (in_array($rule->scope, $scopes, true) && preg_match($rule->pattern, $line, $match)) {
                     $findings[] = new Finding(
                         rule: $rule->id,
                         file: $relativePath,
-                        line: $lineNumber,
+                        line: $index + 1,
                         message: str_replace('{match}', $match[1] ?? '', $rule->message),
                         replacement: $rule->replacement,
                         anchor: $rule->anchor,
@@ -112,6 +133,28 @@ final class CodeScanner
                 }
             }
         }
+    }
+
+    /**
+     * True for a line that holds only comment text. `$insideBlockComment` carries a block comment across the
+     * lines it spans, so the box-drawing banners in a published config file are not read as code.
+     */
+    private function isComment(string $line, bool &$insideBlockComment): bool
+    {
+        if ($insideBlockComment) {
+            $insideBlockComment = ! str_contains($line, '*/');
+
+            return true;
+        }
+
+        if ($this->isCommentLine($line)) {
+            $trimmed = ltrim($line);
+            $insideBlockComment = str_starts_with($trimmed, '/*') && ! str_contains($trimmed, '*/');
+
+            return true;
+        }
+
+        return false;
     }
 
     private function isCommentLine(string $line): bool
@@ -147,7 +190,7 @@ final class CodeScanner
 
         if ($normalize($content) !== $normalize($packageContent)) {
             $findings[] = new Finding(
-                rule: 'package-migration-diverges',
+                rule: self::MIGRATION_DIVERGENCE,
                 file: $relativePath,
                 line: 1,
                 message: 'A published copy differs from the package migration; re-publish it or confirm the divergence.',
@@ -167,7 +210,7 @@ final class CodeScanner
         return $this->rules ??= [
             new Rule('documentservice-subclass', '/extends\s+[A-Za-z0-9_\\\\]*DocumentService\b/', 'Subclassing `DocumentService` is not supported.', $seams, '#documentservice-internals-sealed'),
             new Rule('documentservice-subclass', '/(?:\$this->|parent::)(createDocumentFromStorageFile|createDocumentFromUploadedPath|getOrCreateStorageFile|logAccess|isStorageFileReferenced|deleteBlob|validateFile|validateSizeAndMime|abortSession|assertPathIsWithinTypePrefix|assertTypeActive|sseOptions|currentActorId|resolveActorId|storeUploadedFile|resolveMultipartDriver|findOwnedSessionOrFail|resolvePartsForCompletion|resolveAssembledFileInfo|detectMimeFromHead|hashAndDetectMime|validateOrDelete|scanOrDelete|verifyIntegrityOrDelete|assertIntegrity|demoteAndResolveVersion|storageFileRepository|documentRepository|multipartUploadRepository|fileScanner|dedupScopeResolver|pathGenerator)\b/', 'Protected member `{match}` was removed from `DocumentService`.', $seams, '#documentservice-internals-sealed', Rule::SERVICE_SUBCLASSES),
-            new Rule('removed-upload-api', '/\buploadDetached\s*\(|\breassociateDocument\s*\(|^(?=.*ocument).*->commit\s*\(|\bDocumentStatus::Pending\b|status.*[\'"]pending[\'"]|[\'"]pending[\'"].*status/i', 'Removed upload or pending API used.', 'Use `attach(session, owner)` and the `processing` status.', '#removed-upload-api'),
+            new Rule('removed-upload-api', '/\buploadDetached\s*\(|\breassociateDocument\s*\(|^(?=.*ocument).*->commit\s*\(|\bDocumentStatus::Pending\b|^(?=.*doc).*(?:status.*[\'"]pending[\'"]|[\'"]pending[\'"].*status)/i', 'Removed upload or pending API used.', 'Use `attach(session, owner)` and the `processing` status.', '#removed-upload-api'),
             new Rule('old-authorizer', '/\bPermissiveDocumentAuthorizer\b|\bcanUpload\s*\(/', 'Old authorizer API used.', 'Implement the explicit authorizer methods or extend `GateDocumentAuthorizer`.', '#authorization-contract-rewritten'),
             new Rule('native-checksum', '/\buse_native_checksum\b|\bretrieveChecksum\b/', 'Native checksum API was removed.', 'Removed. Verification is tiered and automatic.', '#removed-native-checksum'),
             new Rule('renamed-config', '/\bmax_versions_to_keep\b/', 'Config key `max_versions_to_keep` was renamed.', 'versions_kept', '#renamed-config-keys', Rule::CONFIG_ONLY),
