@@ -91,7 +91,7 @@ final class DocumentAttacher
                 $type,
                 $owner,
                 $locked->client_filename,
-                $options->metadata,
+                $this->metadataFor($locked, $owner, $options),
                 $options->documentGroupId,
                 $locked->isVerified() ? DocumentStatus::Committed : DocumentStatus::Processing
             );
@@ -105,6 +105,23 @@ final class DocumentAttacher
 
             return $document;
         });
+    }
+
+    /**
+     * The client's metadata with the server's stamps over it. The keys the package measures are put over both
+     * in {@see placeInSlot()}.
+     *
+     * @return array<string, mixed>
+     */
+    private function metadataFor(UploadSession $session, Model $owner, AttachOptions $options): array
+    {
+        $resolver = $this->config->attachMetadataResolver;
+
+        if ($resolver === null) {
+            return $options->metadata;
+        }
+
+        return array_merge($options->metadata, app($resolver)->resolve($session, $owner, $options));
     }
 
     private function assertGroupBelongsToOwner(?string $groupId, Model $owner, DocumentType $type): void
@@ -186,10 +203,10 @@ final class DocumentAttacher
     ): Document {
         $normalizedName = FilenameNormalizer::normalize($clientFilename);
 
-        $metadata = array_merge([
+        $metadata = array_merge(array_diff_key($metadata, ['original_filename' => true]), [
             'size' => $storageFile->size_bytes,
             'mime_type' => $storageFile->mime_type,
-        ], $normalizedName === $clientFilename ? [] : ['original_filename' => $clientFilename], $metadata);
+        ], $normalizedName === $clientFilename ? [] : ['original_filename' => $clientFilename]);
 
         $version = 1;
         $groupId = $documentGroupId;

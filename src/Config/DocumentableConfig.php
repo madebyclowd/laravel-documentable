@@ -9,6 +9,7 @@ use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
 use MadeByClowd\Documentable\Contracts\GeneratesStoragePath;
 use MadeByClowd\Documentable\Contracts\ModifiesUrlOptions;
 use MadeByClowd\Documentable\Contracts\MultipartUploadDriver;
+use MadeByClowd\Documentable\Contracts\ResolvesAttachMetadata;
 use MadeByClowd\Documentable\Contracts\ResolvesDedupScope;
 use MadeByClowd\Documentable\Contracts\ScansUploadedFile;
 use MadeByClowd\Documentable\Contracts\ValidatesUploadedFile;
@@ -44,6 +45,7 @@ final readonly class DocumentableConfig
      * @param  class-string<ScansUploadedFile>|null  $scanner
      * @param  class-string<GeneratesStoragePath>|null  $storagePathGenerator
      * @param  class-string<ModifiesUrlOptions>|null  $urlModifier
+     * @param  class-string<ResolvesAttachMetadata>|null  $attachMetadataResolver
      * @param  list<string>  $retentionHold
      */
     private function __construct(
@@ -84,6 +86,7 @@ final readonly class DocumentableConfig
         public string $doctorScratchPrefix = 'documentable-doctor',
         public array $retentionHold = [],
         public ?string $urlModifier = null,
+        public ?string $attachMetadataResolver = null,
     ) {}
 
     /**
@@ -221,6 +224,7 @@ final readonly class DocumentableConfig
             doctorScratchPrefix: $scratchPrefix,
             retentionHold: $hold,
             urlModifier: self::implementing($c['url']['modifier'] ?? null, ModifiesUrlOptions::class, 'url.modifier'),
+            attachMetadataResolver: self::implementing($c['attach']['metadata_resolver'] ?? null, ResolvesAttachMetadata::class, 'attach.metadata_resolver'),
         );
     }
 
@@ -266,6 +270,7 @@ final readonly class DocumentableConfig
             ],
             'verification' => ['sync_hash_max_bytes' => 50 * 1024 * 1024, 'connection' => null, 'queue' => null],
             'url' => ['max_ttl_minutes' => 1440, 'modifier' => null],
+            'attach' => ['metadata_resolver' => null],
             'storage_path' => ['generator' => null],
             'disks' => [],
             'middleware' => ['api'],
@@ -307,7 +312,7 @@ final readonly class DocumentableConfig
 
     private static function isFixedSection(string $key): bool
     {
-        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'listing', 'audit', 'doctor', 'retention'], true);
+        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'attach', 'listing', 'audit', 'doctor', 'retention'], true);
     }
 
     /**

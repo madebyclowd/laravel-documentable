@@ -290,6 +290,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Attach Metadata
+    |--------------------------------------------------------------------------
+    |
+    | The client may send `metadata` when it attaches an upload, and the server
+    | must not trust it for anything that matters. Set a class implementing
+    | MadeByClowd\Documentable\Contracts\ResolvesAttachMetadata to stamp keys
+    | on the document yourself. It runs for every upload transport, its keys beat
+    | the client's, and `size`, `mime_type` and `original_filename` (measured by
+    | the package) beat both. It only adds keys: to refuse an attach, deny it in
+    | the authorizer's canAttach().
+    |
+    */
+    'attach' => [
+        'metadata_resolver' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Storage Path Generation
     |--------------------------------------------------------------------------
     |
