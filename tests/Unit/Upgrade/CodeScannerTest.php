@@ -243,4 +243,38 @@ class CodeScannerTest extends TestCase
             @rmdir($tempDir);
         }
     }
+
+    public function test_rule_ids_are_a_list_without_duplicates_and_include_the_migration_check(): void
+    {
+        $ids = (new CodeScanner)->ruleIds();
+
+        $this->assertTrue(array_is_list($ids));
+        $this->assertSame($ids, array_values(array_unique($ids)));
+        $this->assertContains('package-migration-diverges', $ids);
+        $this->assertContains('removed-upload-api', $ids);
+    }
+
+    public function test_the_rules_are_built_once(): void
+    {
+        $scanner = new CodeScanner;
+        $rules = new \ReflectionMethod($scanner, 'rules');
+
+        $this->assertSame($rules->invoke($scanner)[0], $rules->invoke($scanner)[0]);
+    }
+
+    public function test_a_migration_is_only_checked_for_a_diverged_package_copy(): void
+    {
+        $base = sys_get_temp_dir().'/documentable-scan-'.bin2hex(random_bytes(4));
+        mkdir($base.'/database/migrations', 0777, true);
+        file_put_contents($base.'/database/migrations/2026_01_01_000000_backfill_documents.php', "<?php\n\$service->uploadDetached(\$file);\n");
+
+        try {
+            $this->assertSame([], (new CodeScanner)->scan($base));
+        } finally {
+            array_map('unlink', glob($base.'/database/migrations/*') ?: []);
+            rmdir($base.'/database/migrations');
+            rmdir($base.'/database');
+            rmdir($base);
+        }
+    }
 }

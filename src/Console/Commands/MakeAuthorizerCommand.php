@@ -65,7 +65,7 @@ class MakeAuthorizerCommand extends Command
         return self::SUCCESS;
     }
 
-    protected function gatesStub(string $name): string
+    private function gatesStub(string $name): string
     {
         return <<<PHP
         <?php
@@ -105,7 +105,8 @@ class MakeAuthorizerCommand extends Command
                 // Attach an upload to its owner. \$source is the uploaded session, or an unsaved Document that
                 // carries only document_type_id for a direct POST /documents upload.
                 Gate::define('documents.attach', function (Authenticatable \$user, UploadSession|Document \$source, Model \$owner): bool {
-                    // TODO: e.g. return \$owner instanceof \\App\\Models\\Project && \$owner->owner()->is(\$user);
+                    // The owner is known here, and this check cannot be bypassed: put owner-based rules in this method.
+                // TODO: e.g. return \$owner instanceof \\App\\Models\\Project && \$owner->owner()->is(\$user);
                     return false;
                 });
 
@@ -125,7 +126,7 @@ class MakeAuthorizerCommand extends Command
         PHP;
     }
 
-    protected function classStub(string $name): string
+    private function classStub(string $name): string
     {
         return <<<PHP
         <?php
@@ -146,6 +147,8 @@ class MakeAuthorizerCommand extends Command
         {
             public function canInitiateUpload(?Authenticatable \$user, DocumentType \$type): bool
             {
+                // No owner exists yet at this stage, so decide on the user and the type only. Rules that depend
+                // on the owner belong in canAttach().
                 // TODO: e.g. return \$user?->can('upload-'.\$type->code) === true;
                 return false;
             }

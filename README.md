@@ -194,7 +194,7 @@ The package delegates authorization decisions to implementations of `MadeByClowd
 
 Every method receives the authenticated user (or `null` for unauthenticated requests) and the subject being acted on:
 
-- `canInitiateUpload(?Authenticatable $user, DocumentType $type): bool`: decides whether the user may start an upload session for this document type. Also filters the types returned by `GET /documents/types`.
+- `canInitiateUpload(?Authenticatable $user, DocumentType $type): bool`: decides whether the user may start an upload session for this document type. Also filters the types returned by `GET /documents/types`. No owner exists yet at this stage, so decide on the user and the type only; rules that depend on the owner belong in `canAttach`.
 - `canFinalize(?Authenticatable $user, UploadSession $session): bool`: decides whether the user may finalize or check status on an in-flight upload session.
 - `canAttach(?Authenticatable $user, UploadSession|Document $source, Model $owner): bool`: decides whether the user may attach an upload session or document to the specified owner model.
 - `canView(?Authenticatable $user, Document $document): bool`: decides whether the user may view or download the document.
@@ -239,7 +239,7 @@ Configure your authorizer in `config/documentable.php`:
 
 ## Upload flows and the client
 
-The package provides routes under `/documents` (`config('documentable.load_routes')`, default `true`). File bytes transfer directly from client to storage, keeping file streams off your application server.
+The package provides routes under `/documents` (`config('documentable.load_routes')`, default `true`). Set `config('documentable.route_prefix')` to mount them elsewhere, for example when your app already has routes of its own under `/documents`. File bytes transfer directly from client to storage, keeping file streams off your application server.
 
 Routes mount under `config('documentable.middleware')` (default `['api']`). For session-based monoliths (Inertia, Livewire, Blade), configure `['web', 'auth']` so `$request->user()` is populated.
 
@@ -407,6 +407,38 @@ To prevent hash oracle attacks when deduplicating files, clients perform a proof
    }
    ```
    On verification success, the server returns an `UploadSession` in `uploaded` status ready to attach. On failure, HTTP 422 is returned. Three invalid attempts expire the challenge.
+
+   A decoy challenge (step 1 for a file the server does not have) fails with the same 422 as a wrong proof, on purpose, so a client cannot tell "the file does not exist" from "my proof was wrong". Treat a 422 from `/handshake/answer` as a miss and upload the file normally.
+
+### Uploading before the owner exists
+
+`attach($session, $owner)` takes the owner when it is called, so a form can upload a file before its parent record exists: keep the session id from `stageUpload()` (or from the presigned and multipart initiate calls) and attach when the parent is saved. The session expires after `multipart.session_ttl_hours` (default 24); raise it for long forms. To give a committed document to another owner, call `attachStorageFile()` for the new owner and then `purge()` the old document; the blob stays because the new document references it.
+
+A form with many documents attaches them all on submit, inside one transaction of your own. The batch is all or nothing: if one session cannot be attached (expired, already attached, refused by your own checks), the rest roll back and every session stays attachable for a retry.
+
+```php
+DB::transaction(function () use ($sessionIds, $application) {
+    foreach (UploadSession::findMany($sessionIds) as $session) {
+        $documentService->attach($session, $application);
+    }
+});
+```
+
+### Stamping metadata on the server
+
+The `metadata` a client sends on attach or complete is stored as sent, so it cannot carry anything the server must decide. Set `attach.metadata_resolver` to a class implementing `MadeByClowd\Documentable\Contracts\ResolvesAttachMetadata`; it is asked once per attach, with the session, the owner and the requested `AttachOptions`, and returns the keys to stamp:
+
+```php
+class StampMetadata implements ResolvesAttachMetadata
+{
+    public function resolve(UploadSession $session, Model $owner, AttachOptions $requested): array
+    {
+        return $owner instanceof Project ? ['pending_transition' => true] : [];
+    }
+}
+```
+
+It runs for every transport. Its keys replace the client's, and `size`, `mime_type` and `original_filename` are always set by the package. It only adds keys: to refuse an attach, deny it in `canAttach`.
 
 ### Direct service calls
 
@@ -790,6 +822,9 @@ return [
     // Whether to register package HTTP routes
     'load_routes' => true,
 
+    // The path the routes are mounted under
+    'route_prefix' => 'documents',
+
     // Code-first document types catalog
     'types' => [
         // 'invoice' => [...]
@@ -998,11 +1033,11 @@ See [`UPGRADE.md`](UPGRADE.md) for full upgrade instructions and breaking change
 Run the migration steps in this exact order:
 
 1. `composer require madebyclowd/laravel-documentable:^3.0`
-   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding.
+   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding. While 3.x only has pre-release tags, Composer refuses `^3.0` under the default `minimum-stability`; require `^3.0@alpha` instead.
 2. `php artisan documents:upgrade-check --code`
-   Scans application code for removed or renamed v2 APIs and configurations. Failure means the codebase still calls removed methods that will throw errors at runtime.
+   Scans application code for removed or renamed v2 APIs and configurations. Failure means the codebase still calls removed methods that will throw errors at runtime. The scan is a regex heuristic, so a finding can be a false positive: skip a rule you have checked with `--ignore=<rule-id>` (repeatable).
 3. `php artisan documents:upgrade-check`
-   Preflight inspection for existing database rows that violate new integrity constraints. Failure means existing data violates single-slot latest markers or storage file uniqueness and will block migrations.
+   Preflight inspection for existing database rows that violate new integrity constraints. Failure means existing data violates single-slot latest markers or storage file uniqueness and will block migrations. Steps 3 and 4 are safe to run on a v2 database: they do not need the tables that `migrate` adds.
 4. `php artisan documents:repair --dry-run` then `php artisan documents:repair --apply`
    Previews and applies automated repairs to demote duplicate latest versions and merge duplicate storage files. Failure means unrepairable data anomalies remain that require manual inspection.
 5. `php artisan migrate`

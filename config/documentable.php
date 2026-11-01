@@ -57,10 +57,14 @@ return [
     |--------------------------------------------------------------------------
     |
     | Set to false to disable auto-registration and mount the package's
-    | controllers yourself (custom prefix/middleware/throttle).
+    | controllers yourself (custom middleware/throttle).
+    |
+    | route_prefix is the path the routes are mounted under. Change it when
+    | your app already has routes of its own under /documents.
     |
     */
     'load_routes' => true,
+    'route_prefix' => 'documents',
 
     /*
     |--------------------------------------------------------------------------
@@ -286,6 +290,24 @@ return [
     'url' => [
         'max_ttl_minutes' => 1440,
         'modifier' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Attach Metadata
+    |--------------------------------------------------------------------------
+    |
+    | The client may send `metadata` when it attaches an upload, and the server
+    | must not trust it for anything that matters. Set a class implementing
+    | MadeByClowd\Documentable\Contracts\ResolvesAttachMetadata to stamp keys
+    | on the document yourself. It runs for every upload transport, its keys beat
+    | the client's, and `size`, `mime_type` and `original_filename` (measured by
+    | the package) beat both. It only adds keys: to refuse an attach, deny it in
+    | the authorizer's canAttach().
+    |
+    */
+    'attach' => [
+        'metadata_resolver' => null,
     ],
 
     /*

@@ -6,6 +6,7 @@ namespace MadeByClowd\Documentable\Integrity;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Models\UploadSession;
@@ -99,7 +100,10 @@ final class IntegrityRepairer
     {
         DB::transaction(function () use ($fromId, $toId) {
             Document::withTrashed()->where('storage_file_id', $fromId)->update(['storage_file_id' => $toId]);
-            UploadSession::query()->where('storage_file_id', $fromId)->update(['storage_file_id' => $toId]);
+
+            if (Schema::hasTable('upload_sessions')) {
+                UploadSession::query()->where('storage_file_id', $fromId)->update(['storage_file_id' => $toId]);
+            }
         });
 
         return true;

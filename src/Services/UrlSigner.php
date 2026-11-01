@@ -10,6 +10,7 @@ use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
 use MadeByClowd\Documentable\Exceptions\DocumentNotReady;
 use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\ValueObjects\UrlOptions;
 
 /**
@@ -46,12 +47,26 @@ final class UrlSigner
             $storageFile->path,
             $options->expiration(),
             self::contentDisposition($options->disposition, $options->filename ?? $document->client_filename),
-            $options->contentType
+            $this->contentTypeFor($options, $storageFile)
         );
 
         $this->accessLogger->log($document, $options->disposition === 'attachment' ? 'download' : 'view');
 
         return $url;
+    }
+
+    /**
+     * Objects are stored without a `Content-Type` of their own, so an inline image or PDF would download instead
+     * of previewing. The type the upload was verified as is declared for it, but only when it is one a browser may
+     * render inline: anything else, HTML above all, is left to the provider's default.
+     */
+    private function contentTypeFor(UrlOptions $options, StorageFile $storageFile): ?string
+    {
+        if ($options->contentType !== null || $options->disposition !== 'inline') {
+            return $options->contentType;
+        }
+
+        return in_array($storageFile->mime_type, UrlOptions::INLINE_MIMES, true) ? $storageFile->mime_type : null;
     }
 
     /**

@@ -161,6 +161,47 @@ class UrlOptionsSigningTest extends TestCase
 
         $this->service->getUrl($doc, new UrlOptions);
         $this->assertSame('inline; filename="original.pdf"', $signed->options['ResponseContentDisposition'], 'Without an override the client filename is used.');
+    }
+
+    public function test_an_inline_url_previews_with_the_stored_content_type_by_default(): void
+    {
+        $signed = $this->recordSignedRequest();
+        $doc = $this->service->upload(UploadedFile::fake()->create('scan.pdf', 1), $this->type, $this->owner);
+
+        $this->service->getUrl($doc, new UrlOptions);
+
+        $this->assertSame($doc->storageFile->mime_type, $signed->options['ResponseContentType']);
+        $this->assertContains($signed->options['ResponseContentType'], UrlOptions::INLINE_MIMES);
+    }
+
+    public function test_an_explicit_content_type_wins_over_the_stored_one(): void
+    {
+        $signed = $this->recordSignedRequest();
+        $doc = $this->service->upload(UploadedFile::fake()->create('scan.pdf', 1), $this->type, $this->owner);
+
+        $this->service->getUrl($doc, new UrlOptions(contentType: 'image/png'));
+
+        $this->assertSame('image/png', $signed->options['ResponseContentType']);
+    }
+
+    public function test_an_attachment_url_sets_no_content_type_of_its_own(): void
+    {
+        $signed = $this->recordSignedRequest();
+        $doc = $this->service->upload(UploadedFile::fake()->create('scan.pdf', 1), $this->type, $this->owner);
+
+        $this->service->getUrl($doc, new UrlOptions(disposition: 'attachment'));
+
+        $this->assertArrayNotHasKey('ResponseContentType', $signed->options);
+    }
+
+    public function test_a_stored_type_that_is_not_safe_to_render_inline_is_never_declared(): void
+    {
+        $signed = $this->recordSignedRequest();
+        $doc = $this->service->upload(UploadedFile::fake()->createWithContent('notes.txt', 'plain text'), $this->type, $this->owner);
+        $this->assertSame('text/plain', $doc->storageFile->mime_type);
+
+        $this->service->getUrl($doc, new UrlOptions);
+
         $this->assertArrayNotHasKey('ResponseContentType', $signed->options);
     }
 

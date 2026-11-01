@@ -12,11 +12,11 @@
 Run the migration steps in this exact order:
 
 1. `composer require madebyclowd/laravel-documentable:^3.0`
-   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding.
+   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding. While 3.x only has pre-release tags, Composer refuses `^3.0` under the default `minimum-stability`; require `^3.0@alpha` instead.
 2. `php artisan documents:upgrade-check --code`
-   Scans application code for removed or renamed v2 APIs and configurations. Failure means the codebase still calls removed methods that will throw errors at runtime.
+   Scans application code for removed or renamed v2 APIs and configurations. Failure means the codebase still calls removed methods that will throw errors at runtime. The scan is a regex heuristic, so a finding can be a false positive: skip a rule you have checked with `--ignore=<rule-id>` (repeatable).
 3. `php artisan documents:upgrade-check`
-   Preflight inspection for existing database rows that violate new integrity constraints. Failure means existing data violates single-slot latest markers or storage file uniqueness and will block migrations.
+   Preflight inspection for existing database rows that violate new integrity constraints. Failure means existing data violates single-slot latest markers or storage file uniqueness and will block migrations. Steps 3 and 4 are safe to run on a v2 database: they do not need the tables that `migrate` adds.
 4. `php artisan documents:repair --dry-run` then `php artisan documents:repair --apply`
    Previews and applies automated repairs to demote duplicate latest versions and merge duplicate storage files. Failure means unrepairable data anomalies remain that require manual inspection.
 5. `php artisan migrate`
@@ -93,7 +93,30 @@ Run `php artisan documents:upgrade-check --code` (rule `removed-upload-api`), or
 **Manual step:**
 Replace direct calls to detached upload and commit with `stageUpload()` and `attach()`. Update status checks to handle `DocumentStatus::Processing`.
 
+**Uploading before the owner exists:**
+`attach($session, $owner)` takes the owner when it is called, not when the file is uploaded. A form that uploads a file before its parent record exists keeps the session id, and attaches when the parent is saved:
+
+```php
+$session = $documentService->stageUpload($file, $type, $userId); // on upload, no owner yet
+// ...the form is submitted and the parent record is created...
+$document = $documentService->attach($session, $parent);
+```
+
+The session expires after `multipart.session_ttl_hours` (default 24), so raise that for long forms. There is no `reassociateDocument()` replacement for a document that is already attached: to give a committed document to another owner, call `attachStorageFile($document->storageFile, $type, $newOwner, $document->client_filename)` and then `purge($document)`. The blob survives the purge because the new document still references it.
+
+A form with many documents attaches them all on submit, inside one transaction of your own. The batch is all or nothing: if one session cannot be attached (expired, already attached, refused by your own checks), the rest roll back and every session stays attachable for a retry.
+
+```php
+DB::transaction(function () use ($sessionIds, $application) {
+    foreach (UploadSession::findMany($sessionIds) as $session) {
+        $documentService->attach($session, $application);
+    }
+});
+```
+
 ### Authorization contract rewritten
+
+Authorization has two stages. `canInitiateUpload($user, $type)` runs when a session is started, before any owner exists, so it can only decide on the user and the document type. `canAttach($user, $source, $owner)` runs when the upload is attached to its owner, and it cannot be bypassed. Put rules that depend on the owner ("execution evidence follows the project's permissions, everything else needs an admin") in `canAttach`. A user who passes `canInitiateUpload` but fails `canAttach` has uploaded bytes that nothing refers to; the throttle and the expired-session cleanup bound that cost.
 
 The authorization contract is rewritten with explicit methods (`canInitiateUpload`, `canFinalize`, `canAttach`, `canView`, `canDelete`, `canViewMany`). Without a configured authorizer, the package uses `MadeByClowd\Documentable\Defaults\GateDocumentAuthorizer`, which denies every ability your app has not defined. In production, booting without `documentable.authorization.resolver` set throws `InsecureConfiguration`. Client-supplied `user_id` fallback and `canUpload(null)` handlers are removed.
 
@@ -531,9 +554,33 @@ $url = $documentService->getUrl(
 );
 ```
 
+The routes are mounted under `documentable.route_prefix` (default `documents`). Set it when your app already has routes of its own under `/documents`, which would otherwise shadow the package's or be shadowed by them.
+
 Two download routes are registered under the package route prefix:
 - `GET /documents/{document}/download`
 - `GET /documents/{document}/view`
+
+Inline URLs (`disposition: 'inline'`, the default) now declare the stored content type, so an image or PDF previews in the browser instead of downloading. Only types in `UrlOptions::INLINE_MIMES` are declared; any other type, HTML above all, gets none. An explicit `contentType` on the options, or one set by a `url.modifier`, takes precedence. If you overrode `getUrl()` in a subclass to set a content type, delete the override.
+
+### Server-side metadata
+
+A subclass of `DocumentService` could force metadata on every document. The service is sealed in v3, and `metadata` sent by the client on attach or complete is stored as sent, so it cannot carry anything the server must decide. Implement `MadeByClowd\Documentable\Contracts\ResolvesAttachMetadata` and set it as `attach.metadata_resolver`:
+
+```php
+class StampMetadata implements ResolvesAttachMetadata
+{
+    public function resolve(UploadSession $session, Model $owner, AttachOptions $requested): array
+    {
+        return $owner instanceof Project ? ['pending_transition' => true] : [];
+    }
+}
+```
+
+It runs for every upload transport. Its keys replace the client's. `size`, `mime_type` and `original_filename` are always set by the package and can no longer be overwritten by the client or the resolver; in v2 a client could overwrite `size` and `mime_type`. The resolver only adds keys. To refuse an attach, return `false` from `canAttach`.
+
+### Content sniffing
+
+An upload is checked against the bytes it holds, not only its name and the client-declared type. A file named `scan.jpg` that holds text is refused with `File type 'text/plain' is not allowed.` Test suites that fake uploads with arbitrary content under an image or PDF name now fail with that message; give the fake file real bytes of the type it claims.
 
 ### Deduplication Scoping Redesign & Proof-of-Possession Handshake
 

@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Repositories;
 
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Exceptions\IllegalUploadSessionTransition;
@@ -53,7 +53,7 @@ final class UploadSessionRepository
      *
      * @return Collection<int, UploadSession>
      */
-    public function expiredBefore(Carbon $at): Collection
+    public function expiredBefore(CarbonInterface $at): Collection
     {
         return UploadSession::whereIn('status', $this->openStatuses())->where('expires_at', '<', $at)->get();
     }
@@ -74,7 +74,7 @@ final class UploadSessionRepository
      *
      * @return Collection<int, UploadSession>
      */
-    public function openCreatedBefore(Carbon $at): Collection
+    public function openCreatedBefore(CarbonInterface $at): Collection
     {
         return UploadSession::whereIn('status', $this->openStatuses())->where('created_at', '<', $at)->get();
     }

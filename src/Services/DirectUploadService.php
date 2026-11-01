@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Services;
 
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -164,7 +164,7 @@ final class DirectUploadService
         return $this->finalizer->finalize($session, null, $expectedHash);
     }
 
-    private function expiry(): Carbon
+    private function expiry(): CarbonInterface
     {
         return now()->addHours((int) $this->config->get('documentable.multipart.session_ttl_hours', 24));
     }
