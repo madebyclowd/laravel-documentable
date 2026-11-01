@@ -414,6 +414,16 @@ To prevent hash oracle attacks when deduplicating files, clients perform a proof
 
 `attach($session, $owner)` takes the owner when it is called, so a form can upload a file before its parent record exists: keep the session id from `stageUpload()` (or from the presigned and multipart initiate calls) and attach when the parent is saved. The session expires after `multipart.session_ttl_hours` (default 24); raise it for long forms. To give a committed document to another owner, call `attachStorageFile()` for the new owner and then `purge()` the old document; the blob stays because the new document references it.
 
+A form with many documents attaches them all on submit, inside one transaction of your own. The batch is all or nothing: if one session cannot be attached (expired, already attached, refused by your own checks), the rest roll back and every session stays attachable for a retry.
+
+```php
+DB::transaction(function () use ($sessionIds, $application) {
+    foreach (UploadSession::findMany($sessionIds) as $session) {
+        $documentService->attach($session, $application);
+    }
+});
+```
+
 ### Stamping metadata on the server
 
 The `metadata` a client sends on attach or complete is stored as sent, so it cannot carry anything the server must decide. Set `attach.metadata_resolver` to a class implementing `MadeByClowd\Documentable\Contracts\ResolvesAttachMetadata`; it is asked once per attach, with the session, the owner and the requested `AttachOptions`, and returns the keys to stamp:

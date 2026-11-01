@@ -104,6 +104,16 @@ $document = $documentService->attach($session, $parent);
 
 The session expires after `multipart.session_ttl_hours` (default 24), so raise that for long forms. There is no `reassociateDocument()` replacement for a document that is already attached: to give a committed document to another owner, call `attachStorageFile($document->storageFile, $type, $newOwner, $document->client_filename)` and then `purge($document)`. The blob survives the purge because the new document still references it.
 
+A form with many documents attaches them all on submit, inside one transaction of your own. The batch is all or nothing: if one session cannot be attached (expired, already attached, refused by your own checks), the rest roll back and every session stays attachable for a retry.
+
+```php
+DB::transaction(function () use ($sessionIds, $application) {
+    foreach (UploadSession::findMany($sessionIds) as $session) {
+        $documentService->attach($session, $application);
+    }
+});
+```
+
 ### Authorization contract rewritten
 
 Authorization has two stages. `canInitiateUpload($user, $type)` runs when a session is started, before any owner exists, so it can only decide on the user and the document type. `canAttach($user, $source, $owner)` runs when the upload is attached to its owner, and it cannot be bypassed. Put rules that depend on the owner ("execution evidence follows the project's permissions, everything else needs an admin") in `canAttach`. A user who passes `canInitiateUpload` but fails `canAttach` has uploaded bytes that nothing refers to; the throttle and the expired-session cleanup bound that cost.
