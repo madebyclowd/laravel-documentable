@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Enums\OnDeleteLatest;
@@ -193,7 +194,16 @@ final class DocumentPurger
         // An open session holds the file for a document it is about to create (a handshake session links a file
         // other documents may all have dropped), so it keeps the file alive like a document does.
         return Document::withTrashed()->where('storage_file_id', $storageFile->id)->exists()
-            || UploadSession::where('storage_file_id', $storageFile->id)
+            || $this->isHeldByOpenSession($storageFile);
+    }
+
+    /**
+     * `documents:repair` runs before `migrate`, when the sessions table does not exist yet and so holds nothing.
+     */
+    private function isHeldByOpenSession(StorageFile $storageFile): bool
+    {
+        return Schema::hasTable('upload_sessions')
+            && UploadSession::where('storage_file_id', $storageFile->id)
                 ->whereIn('status', [UploadSessionStatus::Initiated, UploadSessionStatus::Uploaded])
                 ->exists();
     }

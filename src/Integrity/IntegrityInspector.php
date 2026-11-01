@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MadeByClowd\Documentable\Integrity;
 
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
@@ -33,12 +34,24 @@ final class IntegrityInspector
             documentsMissingStorageFile: $this->documentsMissingStorageFile(),
             documentsOutsideKeyType: $this->documentsOutsideKeyType(),
             keyType: $this->config->keyType,
-            openUploadSessions: UploadSession::query()->whereIn('status', array_map(
-                fn (UploadSessionStatus $status) => $status->value,
-                array_filter(UploadSessionStatus::cases(), fn (UploadSessionStatus $status) => $status->isOpen()),
-            ))->count(),
+            openUploadSessions: $this->openUploadSessions(),
             ownerlessDocuments: Document::query()->whereNull('documentable_id')->count(),
         );
+    }
+
+    /**
+     * The upload sessions table is added by v3, and this runs before `migrate` on a database still on v2.
+     */
+    private function openUploadSessions(): int
+    {
+        if (! Schema::hasTable('upload_sessions')) {
+            return 0;
+        }
+
+        return UploadSession::query()->whereIn('status', array_map(
+            fn (UploadSessionStatus $status) => $status->value,
+            array_filter(UploadSessionStatus::cases(), fn (UploadSessionStatus $status) => $status->isOpen()),
+        ))->count();
     }
 
     /**

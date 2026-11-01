@@ -109,6 +109,23 @@ class RepairCommandTest extends TestCase
         Storage::disk('test_disk')->assertMissing('blobs/extra');
     }
 
+    public function test_it_plans_and_repairs_before_the_v3_tables_exist(): void
+    {
+        $this->dropDedupIndex();
+        $this->dropTablesAddedByV3();
+        Storage::disk('test_disk')->put('blobs/keep', 'bytes');
+        Storage::disk('test_disk')->put('blobs/extra', 'bytes');
+        $keep = $this->storageFile('hash-1', path: 'blobs/keep', createdAt: '2026-01-01 10:00:00');
+        $extra = $this->storageFile('hash-1', path: 'blobs/extra', createdAt: '2026-01-02 10:00:00');
+        $onExtra = $this->latestDocument($this->multiSlotType(), $this->owner(), $extra);
+
+        $this->artisan('documents:repair', ['--dry-run' => true])->assertExitCode(0);
+        $this->artisan('documents:repair', ['--apply' => true])->assertExitCode(0);
+
+        $this->assertSame($keep->id, $onExtra->refresh()->storage_file_id);
+        $this->assertNull(StorageFile::find($extra->id));
+    }
+
     public function test_it_never_deletes_the_blob_when_the_duplicate_rows_share_one_path(): void
     {
         $this->dropDedupIndex();

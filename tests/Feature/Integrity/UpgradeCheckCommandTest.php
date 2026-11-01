@@ -26,6 +26,18 @@ class UpgradeCheckCommandTest extends TestCase
             ->assertExitCode(0);
     }
 
+    public function test_it_runs_before_the_v3_tables_exist(): void
+    {
+        $this->dropTablesAddedByV3();
+        $type = $this->singleSlotType();
+        $first = $this->latestDocument($type, $owner = $this->owner());
+        $this->latestDocument($type, $owner);
+
+        $this->artisan('documents:upgrade-check')
+            ->expectsOutputToContain($first->id)
+            ->assertExitCode(1);
+    }
+
     public function test_duplicate_latest_rows_for_a_single_slot_type_fail_with_the_exact_ids(): void
     {
         $type = $this->singleSlotType();

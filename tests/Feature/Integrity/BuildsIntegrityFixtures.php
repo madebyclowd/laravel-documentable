@@ -27,6 +27,15 @@ trait BuildsIntegrityFixtures
     }
 
     /**
+     * The preflight commands run before `migrate`, so on a real v2 database the tables v3 adds do not exist yet.
+     */
+    protected function dropTablesAddedByV3(): void
+    {
+        Schema::dropIfExists('dedup_challenges');
+        Schema::dropIfExists('upload_sessions');
+    }
+
+    /**
      * Leaves `$document` pointing at a stored file that no longer exists. Engines that enforce the foreign key
      * (MySQL, PostgreSQL) cannot reach that state at all, so there the test has nothing to check.
      */
