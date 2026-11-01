@@ -7,6 +7,20 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.10] - 2026-11-01
+
+### Changed
+- Inline URLs now declare the stored content type, so an image or PDF previews in the browser instead of downloading. Only types in `UrlOptions::INLINE_MIMES` are declared; an explicit `contentType` or a `url.modifier` still wins.
+- `documents:upgrade-check --code` reports fewer false positives: migrations are skipped (except the published-copy check), block comments are ignored, and the string `'pending'` status match needs a document mention on the line. A rule can be skipped with `--ignore=<rule-id>`.
+
+### Fixed
+- Uploads, staged uploads, attach and `documents:clean-orphaned` no longer throw a `TypeError` in an app that calls `Date::use(CarbonImmutable::class)`. `DirectUploadService` and `UploadSessionRepository` now accept any `CarbonInterface`.
+- `documents:upgrade-check` and `documents:repair` run on a v2 database before `migrate`, as UPGRADE.md orders them. They no longer fail with `relation "upload_sessions" does not exist`; a missing sessions table is treated as holding nothing.
+
+### Added
+- `ResolvesAttachMetadata`, set as `attach.metadata_resolver`, lets the server stamp document metadata as an upload is attached, for every upload transport. Its keys replace the client's. `size`, `mime_type` and `original_filename` are now always set by the package and can no longer be overwritten by the client's `metadata`.
+- `documentable.route_prefix` (default `documents`) mounts the package's routes under another path, for apps that already own routes under `/documents`.
+
 ## [3.0.0-alpha.9] - 2026-10-31
 
 ### Added
@@ -308,3 +322,5 @@ Initial release.
 [3.0.0-alpha.8]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.7...v3.0.0-alpha.8
 
 [3.0.0-alpha.9]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.8...v3.0.0-alpha.9
+
+[3.0.0-alpha.10]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.9...v3.0.0-alpha.10
