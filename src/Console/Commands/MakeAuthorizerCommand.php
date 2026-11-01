@@ -65,7 +65,7 @@ class MakeAuthorizerCommand extends Command
         return self::SUCCESS;
     }
 
-    protected function gatesStub(string $name): string
+    private function gatesStub(string $name): string
     {
         return <<<PHP
         <?php
@@ -126,7 +126,7 @@ class MakeAuthorizerCommand extends Command
         PHP;
     }
 
-    protected function classStub(string $name): string
+    private function classStub(string $name): string
     {
         return <<<PHP
         <?php

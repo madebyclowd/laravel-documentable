@@ -6,6 +6,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use MadeByClowd\Documentable\Tests\TestCase;
+use MadeByClowd\Documentable\Upgrade\CodeScanner;
 
 class UpgradeCheckCodeModeTest extends TestCase
 {
@@ -63,7 +64,7 @@ class UpgradeCheckCodeModeTest extends TestCase
             '--path' => $this->fixturesPath.'/clean',
             '--ignore' => ['no-such-rule'],
         ])
-            ->expectsOutputToContain('Unknown rule "no-such-rule"')
+            ->expectsOutput('Unknown rule "no-such-rule". Known rules: '.implode(', ', (new CodeScanner)->ruleIds()).'.')
             ->assertExitCode(2);
     }
 

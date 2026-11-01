@@ -9,10 +9,12 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
+use MadeByClowd\Documentable\Enums\UploadSessionStatus;
 use MadeByClowd\Documentable\Integrity\IntegrityRepairer;
 use MadeByClowd\Documentable\Integrity\RepairStep;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Tests\TestCase;
 use Mockery;
 
@@ -107,6 +109,31 @@ class RepairCommandTest extends TestCase
         $this->assertNull(StorageFile::find($extra->id));
         Storage::disk('test_disk')->assertExists('blobs/keep');
         Storage::disk('test_disk')->assertMissing('blobs/extra');
+    }
+
+    public function test_it_repoints_upload_sessions_of_duplicate_storage_files(): void
+    {
+        $this->dropDedupIndex();
+        Storage::disk('test_disk')->put('blobs/keep', 'bytes');
+        Storage::disk('test_disk')->put('blobs/extra', 'bytes');
+        $keep = $this->storageFile('hash-1', path: 'blobs/keep', createdAt: '2026-01-01 10:00:00');
+        $extra = $this->storageFile('hash-1', path: 'blobs/extra', createdAt: '2026-01-02 10:00:00');
+        $type = $this->multiSlotType();
+        $session = UploadSession::create([
+            'id' => strtolower((string) Str::ulid()),
+            'document_type_id' => $type->id,
+            'storage_file_id' => $extra->id,
+            'disk' => 'test_disk',
+            'kind' => 'single',
+            'client_filename' => 'a.pdf',
+            'path' => 'blobs/extra',
+            'status' => UploadSessionStatus::Uploaded,
+            'expires_at' => now()->addHour(),
+        ]);
+
+        $this->artisan('documents:repair', ['--apply' => true])->assertExitCode(0);
+
+        $this->assertSame($keep->id, $session->refresh()->storage_file_id);
     }
 
     public function test_it_plans_and_repairs_before_the_v3_tables_exist(): void

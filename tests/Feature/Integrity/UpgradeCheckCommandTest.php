@@ -7,6 +7,7 @@ namespace MadeByClowd\Documentable\Tests\Feature\Integrity;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
+use MadeByClowd\Documentable\Integrity\IntegrityInspector;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Tests\TestCase;
@@ -35,7 +36,10 @@ class UpgradeCheckCommandTest extends TestCase
 
         $this->artisan('documents:upgrade-check')
             ->expectsOutputToContain($first->id)
+            ->doesntExpectOutputToContain('upload session(s) still open')
             ->assertExitCode(1);
+
+        $this->assertSame(0, $this->app->make(IntegrityInspector::class)->inspect()->openUploadSessions);
     }
 
     public function test_duplicate_latest_rows_for_a_single_slot_type_fail_with_the_exact_ids(): void

@@ -50,7 +50,7 @@ class UpgradeCheckCommand extends Command
         $basePath = is_string($pathOption) && $pathOption !== '' ? $pathOption : base_path();
 
         /** @var list<string> $ignored */
-        $ignored = array_values(array_filter((array) $this->option('ignore'), is_string(...)));
+        $ignored = (array) $this->option('ignore');
 
         foreach (array_diff($ignored, $scanner->ruleIds()) as $unknown) {
             $this->error("Unknown rule \"{$unknown}\". Known rules: ".implode(', ', $scanner->ruleIds()).'.');
