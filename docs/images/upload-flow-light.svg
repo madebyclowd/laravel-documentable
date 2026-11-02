@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" font-family="Nunito, Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+<title id="t">How an upload travels</title>
+<desc id="d">The browser asks your Laravel app for an upload, gets a presigned URL, sends the file straight to the bucket, then asks the app to attach it. The app checks the file in the bucket. The file never passes through the app.</desc>
+<rect width="960" height="420" rx="22" fill="#F7F6F3"/>
+<text x="40" y="52" font-size="22" font-weight="800" fill="#16171A">The file never touches your PHP server</text>
+<text x="40" y="78" font-size="14" fill="#5B6068">Your app hands out permission. The bucket receives the bytes.</text>
+<rect x="40" y="120" width="200" height="150" rx="16" fill="#FFFFFF" stroke="#DAD8D2" stroke-width="1.5"/><rect x="68" y="120" width="144" height="5" rx="2.5" fill="#09B1EC"/><text x="140" y="188" text-anchor="middle" font-size="20" font-weight="800" fill="#16171A">Browser</text><text x="140" y="214" text-anchor="middle" font-size="13.5" fill="#5B6068">Vue, React, Inertia</text>
+<rect x="380" y="120" width="200" height="150" rx="16" fill="#FFFFFF" stroke="#DAD8D2" stroke-width="1.5"/><rect x="408" y="120" width="144" height="5" rx="2.5" fill="#09B1EC"/><text x="480" y="188" text-anchor="middle" font-size="20" font-weight="800" fill="#16171A">Your Laravel app</text><text x="480" y="214" text-anchor="middle" font-size="13.5" fill="#5B6068">Rules, sessions, models</text>
+<rect x="720" y="120" width="200" height="150" rx="16" fill="#FFFFFF" stroke="#DAD8D2" stroke-width="1.5"/><rect x="748" y="120" width="144" height="5" rx="2.5" fill="#09B1EC"/><text x="820" y="188" text-anchor="middle" font-size="20" font-weight="800" fill="#16171A">Your bucket</text><text x="820" y="214" text-anchor="middle" font-size="13.5" fill="#5B6068">S3, R2, MinIO</text>
+<line x1="250" y1="168" x2="360" y2="168" stroke="#16171A" stroke-width="2.5" stroke-linecap="round"/><polygon points="370,168 360,162 360,174" fill="#16171A"/><circle cx="264" cy="151" r="0" fill="none"/><text x="310.0" y="159" text-anchor="middle" font-size="13.5" font-weight="600" fill="#16171A">1  Ask to upload</text>
+<line x1="370" y1="206" x2="260" y2="206" stroke="#16171A" stroke-width="2.5" stroke-linecap="round"/><polygon points="250,206 260,200 260,212" fill="#16171A"/><circle cx="356" cy="189" r="0" fill="none"/><text x="310.0" y="197" text-anchor="middle" font-size="13.5" font-weight="600" fill="#16171A">2  Presigned URL</text>
+<line x1="250" y1="244" x2="360" y2="244" stroke="#16171A" stroke-width="2.5" stroke-linecap="round"/><polygon points="370,244 360,238 360,250" fill="#16171A"/><circle cx="264" cy="227" r="0" fill="none"/><text x="310.0" y="235" text-anchor="middle" font-size="13.5" font-weight="600" fill="#16171A">4  Attach it</text>
+<line x1="590" y1="206" x2="700" y2="206" stroke="#16171A" stroke-width="2.5" stroke-linecap="round"/><polygon points="710,206 700,200 700,212" fill="#16171A"/><circle cx="604" cy="189" r="0" fill="none"/><text x="650.0" y="197" text-anchor="middle" font-size="13.5" font-weight="600" fill="#16171A">5  Check the file</text>
+<path d="M140,270 C140,372 820,372 820,278" fill="none" stroke="#09B1EC" stroke-width="5" stroke-linecap="round"/>
+<polygon points="820,272 810,286 830,286" fill="#09B1EC"/>
+<rect x="310" y="334" width="340" height="40" rx="20" fill="#FFB020"/>
+<text x="480" y="360" text-anchor="middle" font-size="15.5" font-weight="800" fill="#16171A">3  The file goes straight to the bucket</text>
+<text x="480" y="402" text-anchor="middle" font-size="12.5" fill="#5B6068">Large files upload in parts and can resume. The app only ever sees a session id.</text>
+</svg>

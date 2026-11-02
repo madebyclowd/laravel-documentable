@@ -56,6 +56,17 @@ class ReadmeTest extends TestCase
         $this->assertCount(count(self::DOCS), glob($this->root.'/docs/*.md') ?: [], 'docs/ must hold only the listed pages.');
     }
 
+    public function test_every_image_the_readme_shows_exists(): void
+    {
+        preg_match_all('/(?:src|srcset)="(docs\/images\/[^"]+)"/', (string) file_get_contents($this->readmePath), $matches);
+
+        $this->assertNotEmpty($matches[1], 'README.md must show the upload-flow diagram.');
+
+        foreach (array_unique($matches[1]) as $image) {
+            $this->assertFileExists($this->root.'/'.$image);
+        }
+    }
+
     public function test_the_readme_stays_short_enough_to_read(): void
     {
         $this->assertLessThanOrEqual(220, count(explode("\n", (string) file_get_contents($this->readmePath))), 'Move detail into docs/ instead of growing the README.');

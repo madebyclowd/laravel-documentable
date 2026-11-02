@@ -20,6 +20,13 @@ $invoice->documentOfType('invoice-pdf')->first();   // the latest PDF of this in
 $service->getUrl($document, now()->addMinutes(5));  // a private link that expires in 5 minutes
 ```
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/upload-flow-dark.svg">
+    <img src="docs/images/upload-flow-light.svg" alt="The browser asks your Laravel app for an upload and gets a presigned URL. It then sends the file straight to the bucket, so the file never passes through PHP. The app checks the file in the bucket and attaches it to the model." width="900">
+  </picture>
+</p>
+
 ## Small on purpose
 
 `Storage::put()` is small, but you then write direct uploads, big-file handling, versions, duplicate detection, cleanup and access checks yourself. A full media library covers more, and adds admin screens, image processing and tables you may not want.
