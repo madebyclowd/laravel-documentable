@@ -48,7 +48,7 @@ The package also ships an optional TypeScript upload helper that hashes files, r
 
 ## Quick start (5 minutes)
 
-Five steps: install, say which files you accept, mark your model, upload, read it back. You do not need to know S3 first.
+Six steps: install, say which files you accept, mark your model, upload, read it back, and set access rules before production. You do not need to know S3 first.
 
 ### 1. Install the package
 
@@ -58,22 +58,6 @@ php artisan documents:install
 ```
 
 The installer publishes the configuration and database migrations, offers to run `php artisan migrate`, and sets your owner key type, application shape, multipart ETag strategy, and catalog mode.
-
-In production, booting with package routes mounted requires an authorizer. Scaffold an authorizer class:
-
-```bash
-php artisan documents:make-authorizer AppDocumentAuthorizer --style=class
-```
-
-Then configure it in `config/documentable.php`:
-
-```php
-'authorization' => [
-    'resolver' => \App\Documentable\AppDocumentAuthorizer::class,
-],
-```
-
-To use Laravel Gates instead, set the resolver to `MadeByClowd\Documentable\Defaults\GateDocumentAuthorizer::class`, or run `php artisan documents:make-authorizer --style=gates` and define the gate abilities in your service provider. Leaving the resolver unset uses the same Gate-backed authorizer, which denies every ability you have not defined, and production boot throws until you set it.
 
 ### 2. Define a document type
 
@@ -163,6 +147,26 @@ $url = $service->getUrl($document, now()->addMinutes(5));
 // Or read the raw file contents safely:
 $contents = $service->readContents($document);
 ```
+
+### 6. Before production: say who may do what
+
+The steps above work on your machine without any access rules, because `DocumentService` is plain PHP. The HTTP routes are different. They ask an authorizer, and the default denies everything. In production the app also refuses to boot until you set one.
+
+Generate one and fill in your own checks:
+
+```bash
+php artisan documents:make-authorizer AppDocumentAuthorizer --style=class
+```
+
+```php
+// config/documentable.php
+'authorization' => [
+    'resolver' => \App\Documentable\AppDocumentAuthorizer::class,
+],
+```
+
+Prefer Laravel Gates? Run `php artisan documents:make-authorizer --style=gates` and define the abilities in a service provider. Details are in [Authorization](docs/authorization.md).
+
 
 To upload from client applications directly to storage over HTTP, see [Upload flows](docs/uploads.md).
 
