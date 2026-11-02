@@ -20,7 +20,7 @@ class ShippedTextTest extends TestCase
         $root = dirname(__DIR__, 2);
         $matches = [];
 
-        foreach (['src', 'config', 'routes', 'database', 'resources', 'README.md'] as $path) {
+        foreach (['src', 'config', 'routes', 'database', 'resources', 'README.md', 'docs'] as $path) {
             $full = $root.'/'.$path;
 
             if (! file_exists($full)) {

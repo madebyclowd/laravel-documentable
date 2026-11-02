@@ -163,7 +163,7 @@ class InstallCommand extends Command
         }
 
         $this->line('  4. Upload your first file: $document = app(\MadeByClowd\Documentable\Services\DocumentService::class)->upload($file, $type, $owner);');
-        $this->line('See the README for a full walkthrough and every HTTP route the package ships.');
+        $this->line('See the README for the quick start and the docs folder for every flow and HTTP route the package ships.');
 
         $defaultDisk = (string) config('documentable.disk', 's3');
         if ($this->input->isInteractive() && S3ClientDetector::isS3($defaultDisk)) {

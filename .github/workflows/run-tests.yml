@@ -49,7 +49,7 @@ jobs:
       # tests/Unit/ShippedTextTest.php; this step fails fast without installing dependencies.
       - name: Reject references to internal planning documents
         run: |
-          if grep -rnEi 'phase[ -]?[0-9]|docs/feedbacks|docs/implementations|bugs\.md|best-practices\.md|missing-features\.md|feedback\.md' src config routes database resources README.md; then
+          if grep -rnEi 'phase[ -]?[0-9]|docs/feedbacks|docs/implementations|bugs\.md|best-practices\.md|missing-features\.md|feedback\.md' src config routes database resources README.md docs; then
             echo "::error::Shipped files must not point at internal planning documents. Rewrite the match as a self-contained sentence."
             exit 1
           fi
