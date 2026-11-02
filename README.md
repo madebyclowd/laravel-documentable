@@ -1,4 +1,4 @@
-# Laravel Documentable
+# Laravel Documentable: file uploads, versions and S3 storage for Eloquent models
 
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/madebyclowd/laravel-documentable.svg?style=flat-square)](https://packagist.org/packages/madebyclowd/laravel-documentable)
 [![Total Downloads](https://img.shields.io/packagist/dt/madebyclowd/laravel-documentable.svg?style=flat-square)](https://packagist.org/packages/madebyclowd/laravel-documentable)
@@ -7,15 +7,48 @@
 [![codecov](https://img.shields.io/codecov/c/github/madebyclowd/laravel-documentable?style=flat-square)](https://codecov.io/gh/madebyclowd/laravel-documentable)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 
-Document storage for Laravel models on S3-compatible buckets. It provides content-addressable deduplication, composable versioning, presigned direct-PUT and multipart uploads, and automated orphan cleanup without forcing a storage backend or admin UI.
+**Let users upload files to your Laravel app, store them in S3, R2 or MinIO, and keep every version, without sending a single byte through your PHP server.**
+
+Laravel Documentable attaches documents (PDFs, scans, contracts, photos) to any Eloquent model. The browser uploads straight to your bucket with a presigned URL. Big files go in parts and can resume. The same file is stored once. Old versions are kept, then cleaned up on a schedule you choose.
 
 ```bash
 composer require madebyclowd/laravel-documentable
 ```
 
+```php
+$invoice->documentOfType('invoice-pdf')->first();   // the latest PDF of this invoice
+$service->getUrl($document, now()->addMinutes(5));  // a private link that expires in 5 minutes
+```
+
+## Small on purpose
+
+A plain `Storage::put()` is small, but then you write the hard parts yourself: direct uploads, big files, versions, duplicates, cleanup, and "who may see this file?". A full media library covers a lot, but it brings its own admin screens, image processing and database tables you did not ask for.
+
+Documentable sits in between. It does one job, **business documents that belong to a model**, and does it completely. Nothing else.
+
+| You get | In plain words |
+|---|---|
+| **Direct to bucket** | Files never touch your web server. No timeouts, no memory limit, no `upload_max_filesize` fights. |
+| **Big files that resume** | A 2 GB upload that drops at 90% continues where it stopped. |
+| **Same file, stored once** | A file with the same SHA-256 is saved one time. A user cannot "claim" someone else's file by guessing its hash: they must prove they hold the bytes. |
+| **Versions and retention** | Upload a new passport scan and the old one stays. Keep the last 5 versions, or 90 days. |
+| **Real file checks** | The file type is read from the bytes, not the file name. A `.exe` renamed to `.pdf` is refused. |
+| **Safe by default** | Every action goes through your authorizer. In production the app refuses to boot without one. |
+| **Self-cleaning** | Half-finished uploads and orphan files in the bucket are found and removed. |
+| **Any S3-compatible bucket** | AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces. |
+| **No admin UI, no lock-in** | You keep your own screens. Plain Eloquent models and a small HTTP API. |
+
+It also ships an optional TypeScript upload helper (hashing, retry, resume, progress) so your Vue, React or Inertia front end does not need to rebuild any of this.
+
+### Is it for you?
+
+**Use it** when users upload documents that must be kept, versioned, protected and audited: invoices, contracts, IDs, certificates, medical or legal files, permit applications.
+
+**Skip it** when you only need a profile picture or a one-off file field, or when you need image resizing, galleries or a media browser. A simple `store()` call or a media library fits those better.
+
 ## Quick start (5 minutes)
 
-Follow these steps to install the package, define a document type, attach documents to an Eloquent model, upload a file, and read it back.
+Five small steps: install, say what kind of file you accept, mark your model, upload, read it back. You do not need to know S3 first.
 
 ### 1. Install the package
 
