@@ -12,7 +12,7 @@
 Run the migration steps in this exact order:
 
 1. `composer require madebyclowd/laravel-documentable:^3.0`
-   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding. While 3.x only has pre-release tags, Composer refuses `^3.0` under the default `minimum-stability`; require `^3.0@alpha` instead.
+   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding.
 2. `php artisan documents:upgrade-check --code`
    Scans application code for removed or renamed v2 APIs and configurations. Failure means the codebase still calls removed methods that will throw errors at runtime. The scan is a regex heuristic, so a finding can be a false positive: skip a rule you have checked with `--ignore=<rule-id>` (repeatable).
 3. `php artisan documents:upgrade-check`
