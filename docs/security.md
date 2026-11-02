@@ -15,7 +15,7 @@ Relation::enforceMorphMap([
 ]);
 ```
 
-Unmapped model classes are rejected by default unless explicitly listed in `documentable.security.allowed_documentable_types`. Clients should send the morph map alias (`invoice`), never the internal class FQCN.
+The package rejects model classes that have no morph map entry, unless you list them in `documentable.security.allowed_documentable_types`. Clients should send the morph map alias (`invoice`), never the internal class FQCN.
 
 ## Production authorization requirement
 
@@ -27,4 +27,4 @@ When an antivirus scanner returns `ScanResult::Error` (for example, during scann
 
 ## Upload sessions and storage security
 
-Every upload is bound to a server-managed `UploadSession` record. Storage keys are generated server-side and never revealed to client callers. Clients reference uploads solely through session IDs, preventing storage key tampering and unauthorized path traversal.
+Every upload belongs to an `UploadSession` record that the server manages. The server generates the storage keys and never shows them to clients. Clients refer to an upload only by its session ID, so they cannot tamper with a storage key or traverse a path.

@@ -108,7 +108,7 @@ Query strings for GET endpoints (such as `session_id`) are automatically appende
 
 ## Resuming an upload
 
-When a multipart upload is interrupted by a page reload or network drop, pass `resumeSessionId` with the previous session ID. The helper checks `GET /documents/multipart/status` and `GET /documents/multipart/parts`, skips already uploaded chunks, and continues uploading remaining parts.
+If a page reload or network drop interrupts a multipart upload, pass `resumeSessionId` with the previous session ID. The helper checks `GET /documents/multipart/status` and `GET /documents/multipart/parts`, skips parts that already uploaded, and uploads the rest.
 
 ## Deduplication handshake
 

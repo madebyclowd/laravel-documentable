@@ -9,7 +9,7 @@
 
 **Let users upload files to your Laravel app, store them in S3, R2 or MinIO, and keep every version, without sending a single byte through your PHP server.**
 
-Laravel Documentable attaches documents (PDFs, scans, contracts, photos) to any Eloquent model. The browser uploads straight to your bucket with a presigned URL. Big files go in parts and can resume. The same file is stored once. Old versions are kept, then cleaned up on a schedule you choose.
+Laravel Documentable attaches documents (PDFs, scans, contracts, photos) to any Eloquent model. The browser uploads straight to your bucket with a presigned URL. Big files upload in parts and can resume. A file you upload twice is stored once. Old versions are kept, then deleted on the schedule you choose.
 
 ```bash
 composer require madebyclowd/laravel-documentable
@@ -22,23 +22,23 @@ $service->getUrl($document, now()->addMinutes(5));  // a private link that expir
 
 ## Small on purpose
 
-A plain `Storage::put()` is small, but then you write the hard parts yourself: direct uploads, big files, versions, duplicates, cleanup, and "who may see this file?". A full media library covers a lot, but it brings its own admin screens, image processing and database tables you did not ask for.
+`Storage::put()` is small, but you then write direct uploads, big-file handling, versions, duplicate detection, cleanup and access checks yourself. A full media library covers more, and adds admin screens, image processing and tables you may not want.
 
-Documentable sits in between. It does one job, **business documents that belong to a model**, and does it completely. Nothing else.
+Documentable is the middle option. It handles one thing, business documents that belong to a model, and leaves everything else to you.
 
-| You get | In plain words |
+| Feature | What it does |
 |---|---|
-| **Direct to bucket** | Files never touch your web server. No timeouts, no memory limit, no `upload_max_filesize` fights. |
-| **Big files that resume** | A 2 GB upload that drops at 90% continues where it stopped. |
-| **Same file, stored once** | A file with the same SHA-256 is saved one time. A user cannot "claim" someone else's file by guessing its hash: they must prove they hold the bytes. |
-| **Versions and retention** | Upload a new passport scan and the old one stays. Keep the last 5 versions, or 90 days. |
-| **Real file checks** | The file type is read from the bytes, not the file name. A `.exe` renamed to `.pdf` is refused. |
-| **Safe by default** | Every action goes through your authorizer. In production the app refuses to boot without one. |
-| **Self-cleaning** | Half-finished uploads and orphan files in the bucket are found and removed. |
-| **Any S3-compatible bucket** | AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces. |
-| **No admin UI, no lock-in** | You keep your own screens. Plain Eloquent models and a small HTTP API. |
+| Direct to bucket | The browser sends the file to the bucket. PHP's `upload_max_filesize`, `post_max_size` and request timeout do not apply to it. |
+| Resumable big files | A 2 GB upload that drops at 90% continues from the last finished part. |
+| Same file, stored once | Files with the same SHA-256 share one stored copy. A user cannot claim a file by guessing its hash, because the server asks for proof that they hold the bytes. |
+| Versions and retention | A new passport scan keeps the old one. You set how many versions or how many days to keep. |
+| File checks | The server reads the file type from the bytes, not the file name, so a `.exe` renamed to `.pdf` is refused. |
+| Authorizer required | Every action asks your authorizer. In production the app does not boot without one. |
+| Cleanup | Commands delete half-finished uploads and bucket files that no document points to. You schedule them. |
+| Any S3-compatible bucket | AWS S3, Cloudflare R2, MinIO and DigitalOcean Spaces. |
+| No admin UI | You build your own screens on plain Eloquent models and a small HTTP API. |
 
-It also ships an optional TypeScript upload helper (hashing, retry, resume, progress) so your Vue, React or Inertia front end does not need to rebuild any of this.
+The package also ships an optional TypeScript upload helper that hashes files, retries, resumes and reports progress, so your Vue, React or Inertia front end does not need its own version of that code.
 
 ### Is it for you?
 
@@ -48,7 +48,7 @@ It also ships an optional TypeScript upload helper (hashing, retry, resume, prog
 
 ## Quick start (5 minutes)
 
-Five small steps: install, say what kind of file you accept, mark your model, upload, read it back. You do not need to know S3 first.
+Five steps: install, say which files you accept, mark your model, upload, read it back. You do not need to know S3 first.
 
 ### 1. Install the package
 

@@ -1,6 +1,6 @@
 # Upload flows and the client
 
-The package provides routes under `/documents` (`config('documentable.load_routes')`, default `true`). Set `config('documentable.route_prefix')` to mount them elsewhere, for example when your app already has routes of its own under `/documents`. File bytes transfer directly from client to storage, keeping file streams off your application server.
+The package provides routes under `/documents` (`config('documentable.load_routes')`, default `true`). Set `config('documentable.route_prefix')` to mount them elsewhere, for example when your app already has routes of its own under `/documents`. The client sends file bytes straight to storage, so they never pass through your application server.
 
 Routes mount under `config('documentable.middleware')` (default `['api']`). For session-based monoliths (Inertia, Livewire, Blade), configure `['web', 'auth']` so `$request->user()` is populated.
 
