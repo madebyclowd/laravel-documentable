@@ -1,0 +1,851 @@
+export interface DocumentRecord {
+  id: string;
+  [key: string]: unknown;
+}
+
+export interface UploadOptions {
+  type: string;                                   // a document type code or id, resolved from /config
+  owner?: { type: string; id: string | number };  // present: attach in the same flow; absent: stop at an uploaded session
+  metadata?: Record<string, unknown>;
+  documentGroupId?: string;
+  onProgress?: (p: { loaded: number; total: number }) => void;
+  signal?: AbortSignal;
+  resumeSessionId?: string;                       // continue an interrupted multipart upload
+  onSession?: (sessionId: string) => void;        // multipart only: called once the session exists. Store the id to resume after a reload
+  dedup?: boolean;                                // default true: attempt proof-of-possession handshake before uploading
+  waitForProcessing?: boolean;                    // default true: poll show route while status is 'processing'
+  processingTimeoutMs?: number;                   // default 120000 ms
+  pollIntervalMs?: number;                        // default 2000 ms
+}
+
+export interface ClientRoutes {
+  config?: () => { url: string };
+  presign?: () => { url: string };
+  presignFinalize?: () => { url: string };
+  attach?: () => { url: string };
+  handshake?: () => { url: string };
+  handshakeAnswer?: () => { url: string };
+  multipartInitiate?: () => { url: string };
+  multipartPartUrls?: () => { url: string };
+  multipartParts?: () => { url: string };
+  multipartStatus?: () => { url: string };
+  multipartComplete?: () => { url: string };
+  multipartAbort?: () => { url: string };
+  show?: (params: { document: string }) => { url: string };
+}
+
+export interface ClientOptions {
+  baseUrl?: string;                               // default '/documents'; matches documentable.route_prefix
+  fetch?: typeof fetch;                           // default globalThis.fetch
+  headers?: () => Record<string, string> | Promise<Record<string, string>>; // auth, XSRF, etc, added to every server request
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+  now?: () => number;
+  isOnline?: () => boolean;                       // default: navigator.onLine, true where there is no navigator
+  waitForOnline?: (signal?: AbortSignal) => Promise<void>; // default: waits for the window 'online' event
+  routes?: ClientRoutes;
+}
+
+export interface UploadResult {
+  sessionId: string;
+  document?: DocumentRecord;
+}
+
+export type UploadErrorCode =
+  | 'aborted'
+  | 'file_too_large'
+  | 'type_not_allowed'
+  | 'unknown_type'
+  | 'network'
+  | 'validation'
+  | 'forbidden'
+  | 'server'
+  | 'part_failed'
+  | 'rejected'
+  | 'processing_timeout';
+
+export class UploadError extends Error {
+  readonly code: UploadErrorCode;
+  readonly status?: number;
+  readonly errors?: Record<string, string[]>;
+  /** Set when a multipart session was kept: pass it as `resumeSessionId` to continue. */
+  sessionId?: string;
+
+  constructor(code: UploadErrorCode, message?: string, options?: { status?: number; errors?: Record<string, string[]> }) {
+    super(message ?? code);
+    this.name = 'UploadError';
+    this.code = code;
+    this.status = options?.status;
+    this.errors = options?.errors;
+    Object.setPrototypeOf(this, UploadError.prototype);
+  }
+}
+
+interface DocumentTypeConfig {
+  id: string;
+  code: string;
+  name: string;
+  max_bytes: number;
+  allowed_mimes: string[];
+  allowed_extensions: string[];
+  trust_extension_for_generic_mime: boolean;
+  allows_multiple: boolean;
+}
+
+interface ClientConfig {
+  threshold_bytes: number;
+  min_part_size: number;
+  max_parts: number;
+  max_concurrency: number;
+  retry: { attempts: number; base_delay_ms: number; max_delay_ms: number };
+  sync_hash_max_bytes: number;
+  etag_strategy: string;
+  types: DocumentTypeConfig[];
+}
+
+/** Pure TypeScript streaming SHA-256 (Web Crypto cannot hash incrementally). */
+export class Sha256 {
+  private h = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  private buffer = new Uint8Array(64);
+  private bufLen = 0;
+  private totalBytes = 0n;
+  private finalized = false;
+  private w = new Uint32Array(64);
+
+  private static readonly K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ]);
+
+  private processBlock(block: Uint8Array): void {
+    const w = this.w, K = Sha256.K;
+    const view = new DataView(block.buffer, block.byteOffset, 64);
+    for (let t = 0; t < 16; t++) w[t] = view.getUint32(t * 4, false);
+    for (let t = 16; t < 64; t++) {
+      const w15 = w[t - 15]!, w2 = w[t - 2]!;
+      const s0 = ((w15 >>> 7) | (w15 << 25)) ^ ((w15 >>> 18) | (w15 << 14)) ^ (w15 >>> 3);
+      const s1 = ((w2 >>> 17) | (w2 << 15)) ^ ((w2 >>> 19) | (w2 << 13)) ^ (w2 >>> 10);
+      w[t] = (w[t - 16]! + s0 + w[t - 7]! + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = this.h as unknown as [number, number, number, number, number, number, number, number];
+    for (let t = 0; t < 64; t++) {
+      const s1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + s1 + ch + K[t]! + w[t]!) >>> 0;
+      const s0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (s0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    const add = [a, b, c, d, e, f, g, h];
+    for (let i = 0; i < 8; i++) this.h[i] = (this.h[i]! + add[i]!) >>> 0;
+  }
+
+  update(data: Uint8Array | ArrayBuffer | ArrayBufferView | string): this {
+    if (this.finalized) throw new Error('Sha256 has already been finalized');
+    let bytes: Uint8Array;
+    if (typeof data === 'string') bytes = new TextEncoder().encode(data);
+    else if (data instanceof Uint8Array) bytes = data;
+    else if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
+    else bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+
+    this.totalBytes += BigInt(bytes.byteLength);
+    let offset = 0, len = bytes.byteLength;
+    if (this.bufLen > 0) {
+      const needed = 64 - this.bufLen;
+      if (len >= needed) {
+        this.buffer.set(bytes.subarray(0, needed), this.bufLen);
+        this.processBlock(this.buffer);
+        offset += needed; len -= needed; this.bufLen = 0;
+      } else {
+        this.buffer.set(bytes, this.bufLen);
+        this.bufLen += len;
+        return this;
+      }
+    }
+    while (len >= 64) {
+      this.processBlock(bytes.subarray(offset, offset + 64));
+      offset += 64; len -= 64;
+    }
+    if (len > 0) {
+      this.buffer.set(bytes.subarray(offset, offset + len), 0);
+      this.bufLen = len;
+    }
+    return this;
+  }
+
+  digest(): string {
+    if (this.finalized) throw new Error('Sha256 has already been finalized');
+    this.finalized = true;
+    const totalBits = this.totalBytes * 8n;
+    this.buffer[this.bufLen++] = 0x80;
+    if (this.bufLen > 56) {
+      this.buffer.fill(0, this.bufLen, 64);
+      this.processBlock(this.buffer);
+      this.bufLen = 0;
+    }
+    this.buffer.fill(0, this.bufLen, 56);
+    new DataView(this.buffer.buffer, this.buffer.byteOffset, 64).setBigUint64(56, totalBits, false);
+    this.processBlock(this.buffer);
+    return Array.from(this.h).map(n => n.toString(16).padStart(8, '0')).join('');
+  }
+}
+
+/** Reads a Blob in 4 MiB slices to calculate lower-case hex SHA-256 without memory blowup. */
+export async function hashBlob(blob: Blob, signal?: AbortSignal): Promise<string> {
+  const CHUNK_SIZE = 4 * 1024 * 1024;
+  const sha = new Sha256();
+  let offset = 0;
+  while (offset < blob.size) {
+    if (signal?.aborted) throw new UploadError('aborted', 'Hashing was aborted');
+    const end = Math.min(offset + CHUNK_SIZE, blob.size);
+    const buffer = await blob.slice(offset, end).arrayBuffer();
+    sha.update(buffer);
+    offset = end;
+  }
+  return sha.digest();
+}
+
+/** Computes lower-case hex sha256(nonce || concatenated range bytes) matching RangeProof::computeFromConcatenated. */
+export function computeRangeProof(nonce: string, concatenatedRanges: Uint8Array): string {
+  return new Sha256().update(nonce).update(concatenatedRanges).digest();
+}
+
+/** Uniform part sizing matching PartSizePlanner: >= 5 MiB, uniform rounded up to 1 MiB. */
+function computePartSize(totalBytes: number, minPartSize = 5 * 1024 * 1024): number {
+  const ONE_MIB = 1024 * 1024;
+  const target = Math.max(minPartSize, Math.ceil(totalBytes / 10000));
+  return Math.ceil(target / ONE_MIB) * ONE_MIB;
+}
+
+const defaultSleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+function resolveUrl(
+  client: ClientOptions,
+  routeName: keyof ClientRoutes,
+  defaultPath: string,
+  routeParams?: { document: string },
+  queryParams?: Record<string, string>
+): string {
+  let url: string;
+  const routeFn = client.routes?.[routeName];
+  if (routeFn) {
+    url = (routeFn as (p?: { document: string }) => { url: string })(routeParams).url;
+  } else {
+    const baseUrl = (client.baseUrl ?? '/documents').replace(/\/+$/, '');
+    url = `${baseUrl}${defaultPath}`;
+  }
+  if (queryParams && Object.keys(queryParams).length > 0) {
+    const search = new URLSearchParams(queryParams).toString();
+    url += (url.includes('?') ? '&' : '?') + search;
+  }
+  return url;
+}
+
+function getXsrfHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const doc = (globalThis as unknown as { document?: { cookie?: string } }).document;
+  if (doc && typeof doc.cookie === 'string') {
+    headers['X-Requested-With'] = 'XMLHttpRequest';
+    const match = doc.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    if (match && match[1]) {
+      try {
+        headers['X-XSRF-TOKEN'] = decodeURIComponent(match[1]);
+      } catch {
+        headers['X-XSRF-TOKEN'] = match[1];
+      }
+    }
+  }
+  return headers;
+}
+
+function attachPayload(options: UploadOptions, base: Record<string, unknown>): Record<string, unknown> {
+  if (options.owner) {
+    base.documentable_type = options.owner.type;
+    base.documentable_id = String(options.owner.id);
+  }
+  if (options.metadata) base.metadata = options.metadata;
+  if (options.documentGroupId) base.document_group_id = options.documentGroupId;
+  return base;
+}
+
+async function requestServer<T>(
+  client: ClientOptions,
+  url: string,
+  method: 'GET' | 'POST',
+  body?: unknown,
+  signal?: AbortSignal
+): Promise<T> {
+  const fetchFn = client.fetch ?? globalThis.fetch;
+  const customHeaders = client.headers ? await client.headers() : getXsrfHeaders();
+  const headers: Record<string, string> = { Accept: 'application/json', ...customHeaders };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+  let res: Response;
+  try {
+    res = await fetchFn(url, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+      signal,
+    });
+  } catch (err) {
+    if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+      throw new UploadError('aborted', 'Upload was aborted');
+    }
+    throw new UploadError('network', err instanceof Error ? err.message : 'Network request failed');
+  }
+
+  if (!res.ok) {
+    let errorJson: { message?: string; errors?: Record<string, string[]> } | undefined;
+    try {
+      errorJson = (await res.json()) as { message?: string; errors?: Record<string, string[]> };
+    } catch {
+      // Body not JSON
+    }
+    if (res.status === 401 || res.status === 403) {
+      throw new UploadError('forbidden', errorJson?.message ?? 'Forbidden', { status: res.status });
+    }
+    if (res.status === 422) {
+      throw new UploadError('validation', errorJson?.message ?? 'Validation failed', {
+        status: 422,
+        errors: errorJson?.errors,
+      });
+    }
+    throw new UploadError('server', errorJson?.message ?? `Server error (${res.status})`, { status: res.status });
+  }
+
+  return res.status === 204 ? (undefined as unknown as T) : ((await res.json()) as T);
+}
+
+async function waitForProcessingIfNeeded(
+  initialDoc: DocumentRecord,
+  options: UploadOptions,
+  client: ClientOptions
+): Promise<DocumentRecord> {
+  if (initialDoc.status !== 'processing' || options.waitForProcessing === false) {
+    return initialDoc;
+  }
+
+  const pollIntervalMs = options.pollIntervalMs ?? 2000;
+  const timeoutMs = options.processingTimeoutMs ?? 120000;
+  const sleepFn = client.sleep ?? defaultSleep;
+  const nowFn = client.now ?? Date.now;
+  const startTime = nowFn();
+
+  let doc = initialDoc;
+  while (doc.status === 'processing') {
+    if (options.signal?.aborted) {
+      throw new UploadError('aborted', 'Document processing wait was aborted');
+    }
+    if (nowFn() - startTime >= timeoutMs) {
+      throw new UploadError('processing_timeout', `Document processing timed out after ${timeoutMs}ms`);
+    }
+
+    await sleepFn(pollIntervalMs);
+
+    if (options.signal?.aborted) {
+      throw new UploadError('aborted', 'Document processing wait was aborted');
+    }
+    if (nowFn() - startTime >= timeoutMs) {
+      throw new UploadError('processing_timeout', `Document processing timed out after ${timeoutMs}ms`);
+    }
+
+    const showUrl = resolveUrl(client, 'show', `/${encodeURIComponent(initialDoc.id)}`, { document: initialDoc.id });
+    doc = await requestServer<DocumentRecord>(client, showUrl, 'GET', undefined, options.signal);
+
+    if (doc.status === 'rejected') {
+      throw new UploadError('rejected', 'Document was rejected during processing');
+    }
+    if (doc.status === 'committed') {
+      return doc;
+    }
+  }
+
+  return doc;
+}
+
+/** Finishes a dedup hit: attaches the stored session to the owner (when there is one) and waits for processing. */
+async function finishDedupHit(sessionId: string, options: UploadOptions, client: ClientOptions): Promise<UploadResult> {
+  if (!options.owner) return { sessionId };
+
+  const attachUrl = resolveUrl(client, 'attach', '/attach');
+  const attached = await requestServer<DocumentRecord>(client, attachUrl, 'POST', attachPayload(options, { session_id: sessionId }), options.signal);
+
+  return { sessionId, document: await waitForProcessingIfNeeded(attached, options, client) };
+}
+
+/**
+ * Asks the server whether it already holds these bytes. Resolves the session id on a hit and null on a miss. Only
+ * the handshake itself may fall back: what happens after a hit (attach, waiting) must fail loudly.
+ */
+async function tryDedupHandshake(
+  file: File | (Blob & { name: string }),
+  options: UploadOptions,
+  client: ClientOptions,
+  docType: DocumentTypeConfig,
+  hash: string
+): Promise<string | null> {
+  if (options.dedup === false || file.size === 0) {
+    return null;
+  }
+
+  try {
+    const handshakeBody: Record<string, unknown> = {
+      document_type_id: docType.id,
+      hash,
+      size: file.size,
+      filename: file.name,
+    };
+    if (options.owner) {
+      handshakeBody.documentable_type = options.owner.type;
+      handshakeBody.documentable_id = String(options.owner.id);
+    }
+
+    const challengeUrl = resolveUrl(client, 'handshake', '/handshake');
+    const challenge = await requestServer<{
+      challenge_id: string;
+      nonce: string;
+      ranges: Array<{ offset: number; length: number }>;
+    }>(client, challengeUrl, 'POST', handshakeBody, options.signal);
+
+    // Ranges that fall outside the file cannot be answered: treat as a miss
+    let totalRangeBytes = 0;
+    for (const r of challenge.ranges) {
+      if (r.offset < 0 || r.length <= 0 || r.offset + r.length > file.size) {
+        return null;
+      }
+      totalRangeBytes += r.length;
+    }
+
+    const concatenatedRanges = new Uint8Array(totalRangeBytes);
+    let offset = 0;
+    for (const r of challenge.ranges) {
+      if (options.signal?.aborted) throw new UploadError('aborted', 'Upload was aborted');
+      const sliceBuf = await file.slice(r.offset, r.offset + r.length).arrayBuffer();
+      concatenatedRanges.set(new Uint8Array(sliceBuf), offset);
+      offset += r.length;
+    }
+
+    const proof = computeRangeProof(challenge.nonce, concatenatedRanges);
+    const answerUrl = resolveUrl(client, 'handshakeAnswer', '/handshake/answer');
+    const answerRes = await requestServer<{ session_id: string }>(
+      client,
+      answerUrl,
+      'POST',
+      {
+        challenge_id: challenge.challenge_id,
+        proof,
+        filename: file.name,
+      },
+      options.signal
+    );
+
+    // Hit: the server already has the bytes, so the upload is skipped.
+    return answerRes.session_id;
+  } catch (err) {
+    if (err instanceof UploadError && err.code === 'aborted') {
+      throw err;
+    }
+    // HTTP 422 on the answer means MISS (a decoy and a wrong proof are deliberately indistinguishable).
+    // ANY other failure (network, 403, 429, 5xx) must also fall back to the normal upload.
+    return null;
+  }
+}
+
+function defaultIsOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
+function defaultWaitForOnline(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      resolve();
+      return;
+    }
+    const done = () => {
+      window.removeEventListener('online', onOnline);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onOnline = () => { done(); resolve(); };
+    const onAbort = () => { done(); reject(new UploadError('aborted', 'Upload was aborted')); };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    window.addEventListener('online', onOnline, { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Runs a request that is safe to repeat (signing part URLs, reading session status and parts) and tries it again
+ * after a dropped connection or a 5xx/429, with the server's backoff. While the browser says it is offline it waits
+ * for it to come back instead of using up attempts. initiate and complete are not run through this: repeating them
+ * after a lost reply could leave a stray session or complete twice.
+ */
+async function repeatable<T>(
+  client: ClientOptions,
+  retryPolicy: { attempts: number; base_delay_ms: number; max_delay_ms: number },
+  signal: AbortSignal | undefined,
+  run: () => Promise<T>
+): Promise<T> {
+  const sleepFn = client.sleep ?? defaultSleep;
+  const randomFn = client.random ?? Math.random;
+  const isOnline = client.isOnline ?? defaultIsOnline;
+  const waitForOnline = client.waitForOnline ?? defaultWaitForOnline;
+  const maxTries = 1 + retryPolicy.attempts;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      const transient = err instanceof UploadError
+        && (err.code === 'network' || (err.code === 'server' && (err.status === undefined || err.status >= 500 || err.status === 429)));
+      if (!transient) throw err;
+      if (err instanceof UploadError && err.code === 'network' && !isOnline()) {
+        await waitForOnline(signal);
+        attempt--;
+        continue;
+      }
+      if (attempt >= maxTries - 1) throw err;
+      const delayCap = Math.min(retryPolicy.max_delay_ms, retryPolicy.base_delay_ms * Math.pow(2, attempt));
+      await sleepFn(delayCap * randomFn());
+    }
+  }
+}
+
+/** Failures that leave a multipart session worth resuming: the connection or the server, not a refusal. */
+function keepsSession(err: unknown): boolean {
+  if (!(err instanceof UploadError)) return false;
+  return err.code === 'part_failed'
+    || err.code === 'network'
+    || (err.code === 'server' && (err.status === undefined || err.status >= 500 || err.status === 429));
+}
+
+async function uploadPartWithRetry(
+  fetchFn: typeof fetch,
+  url: string,
+  partSlice: Blob,
+  retryPolicy: { attempts: number; base_delay_ms: number; max_delay_ms: number },
+  etagStrategy: string,
+  signal?: AbortSignal,
+  sleepFn = defaultSleep,
+  randomFn = Math.random,
+  isOnline = defaultIsOnline,
+  waitForOnline = defaultWaitForOnline
+): Promise<string | undefined> {
+  const maxTries = 1 + retryPolicy.attempts;
+  let lastStatus: number | undefined;
+
+  for (let attempt = 0; attempt < maxTries; attempt++) {
+    if (signal?.aborted) throw new UploadError('aborted', 'Part upload aborted');
+    try {
+      const res = await fetchFn(url, { method: 'PUT', body: partSlice, signal });
+      if (res.ok) {
+        if (etagStrategy === 'client') {
+          const rawEtag = res.headers.get('etag') ?? res.headers.get('ETag');
+          if (!rawEtag) {
+            throw new UploadError('part_failed', 'ETag header missing from storage response. Ensure CORS configuration includes ExposeHeaders for ETag.');
+          }
+          return rawEtag.replace(/^"|"$/g, '').trim();
+        }
+        return undefined;
+      }
+      lastStatus = res.status;
+      // 4xx other than 429 fails immediately
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+        const code = (res.status === 401 || res.status === 403) ? 'forbidden' : 'server';
+        throw new UploadError(code, `Storage upload rejected (${res.status})`, { status: res.status });
+      }
+    } catch (err) {
+      if (err instanceof UploadError) throw err;
+      if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw new UploadError('aborted', 'Part upload aborted');
+      }
+      // The browser says it is offline: wait for it to come back instead of using up an attempt.
+      if (!isOnline()) {
+        await waitForOnline(signal);
+        attempt--;
+        continue;
+      }
+    }
+
+    if (attempt < maxTries - 1) {
+      const delayCap = Math.min(retryPolicy.max_delay_ms, retryPolicy.base_delay_ms * Math.pow(2, attempt));
+      await sleepFn(delayCap * randomFn());
+    }
+  }
+
+  throw new UploadError('part_failed', 'Part upload failed after exhausting retries', { status: lastStatus });
+}
+
+export function createUploader(client: ClientOptions = {}): {
+  uploadFile(file: File | (Blob & { name: string }), options: UploadOptions): Promise<UploadResult>;
+} {
+  const fetchFn = client.fetch ?? globalThis.fetch;
+  let configPromise: Promise<ClientConfig> | null = null;
+
+  function getConfig(signal?: AbortSignal): Promise<ClientConfig> {
+    if (!configPromise) {
+      const configUrl = resolveUrl(client, 'config', '/config');
+      configPromise = requestServer<ClientConfig>(client, configUrl, 'GET', undefined, signal).catch(err => {
+        configPromise = null;
+        throw err;
+      });
+    }
+    return configPromise;
+  }
+
+  async function uploadFileImpl(
+    file: File | (Blob & { name: string }),
+    options: UploadOptions
+  ): Promise<UploadResult> {
+    const filename = file.name;
+    const config = await getConfig(options.signal);
+    const docType = config.types.find(t => t.code === options.type) ?? config.types.find(t => t.id === options.type);
+    if (!docType) throw new UploadError('unknown_type', `Unknown document type "${options.type}"`);
+
+    if (file.size > docType.max_bytes) {
+      throw new UploadError('file_too_large', `File size (${file.size}) exceeds maximum allowed bytes (${docType.max_bytes})`);
+    }
+
+    if (docType.allowed_extensions.length > 0) {
+      const ext = filename.includes('.') ? filename.split('.').pop()!.toLowerCase() : '';
+      if (!docType.allowed_extensions.map(e => e.toLowerCase()).includes(ext)) {
+        throw new UploadError('type_not_allowed', `File extension .${ext} is not allowed for type "${docType.name}"`);
+      }
+    }
+
+    const hash = await hashBlob(file, options.signal);
+
+    const dedupSessionId = await tryDedupHandshake(file, options, client, docType, hash);
+    if (dedupSessionId !== null) {
+      return finishDedupHit(dedupSessionId, options, client);
+    }
+
+    return file.size <= config.threshold_bytes
+      ? uploadSinglePut(file, options, docType, hash)
+      : uploadMultipart(file, options, config, docType, hash);
+  }
+
+  async function uploadSinglePut(
+    file: File | (Blob & { name: string }),
+    options: UploadOptions,
+    docType: DocumentTypeConfig,
+    hash: string
+  ): Promise<UploadResult> {
+    const presignUrl = resolveUrl(client, 'presign', '/presigned');
+    const presign = await requestServer<{ session_id: string; url: string; headers: Record<string, string> }>(
+      client, presignUrl, 'POST', {
+        document_type_id: docType.id,
+        filename: file.name,
+        declared_size: file.size,
+        declared_mime: file.type || null,
+        declared_hash: hash,
+      }, options.signal
+    );
+
+    try {
+      const putRes = await fetchFn(presign.url, { method: 'PUT', headers: presign.headers, body: file, signal: options.signal });
+      if (!putRes.ok) {
+        const code = (putRes.status === 401 || putRes.status === 403) ? 'forbidden' : 'server';
+        throw new UploadError(code, `Storage rejected PUT (${putRes.status})`, { status: putRes.status });
+      }
+    } catch (err) {
+      if (err instanceof UploadError) throw err;
+      if (options.signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        throw new UploadError('aborted', 'Storage upload was aborted');
+      }
+      throw new UploadError('network', err instanceof Error ? err.message : 'Storage upload failed');
+    }
+
+    options.onProgress?.({ loaded: file.size, total: file.size });
+    const finalizeUrl = resolveUrl(client, 'presignFinalize', '/presigned/finalize');
+    const finalizeBody = attachPayload(options, { session_id: presign.session_id, expected_hash: hash });
+    const finalized = await requestServer<Record<string, unknown>>(client, finalizeUrl, 'POST', finalizeBody, options.signal);
+    let doc: DocumentRecord | undefined;
+    if (options.owner) {
+      doc = await waitForProcessingIfNeeded(finalized as DocumentRecord, options, client);
+    }
+    return { sessionId: presign.session_id, document: doc };
+  }
+
+  async function uploadMultipart(
+    file: File | (Blob & { name: string }),
+    options: UploadOptions,
+    config: ClientConfig,
+    docType: DocumentTypeConfig,
+    hash: string
+  ): Promise<UploadResult> {
+    let sessionId: string | null = null;
+    let partSize = computePartSize(file.size, config.min_part_size);
+    const completedParts: Array<{ PartNumber: number; ETag: string }> = [];
+    const completedSet = new Set<number>();
+
+    // 1. Resume check
+    if (options.resumeSessionId) {
+      try {
+        const statusUrl = resolveUrl(client, 'multipartStatus', '/multipart/status', undefined, { session_id: options.resumeSessionId });
+        const status = await repeatable(client, config.retry, options.signal, () => requestServer<{ exists: boolean; status: string | null }>(
+          client, statusUrl, 'GET', undefined, options.signal
+        ));
+        if (status.exists && status.status === 'initiated') {
+          sessionId = options.resumeSessionId;
+          options.onSession?.(sessionId);
+          const partsUrl = resolveUrl(client, 'multipartParts', '/multipart/parts', undefined, { session_id: sessionId });
+          const { parts } = await repeatable(client, config.retry, options.signal, () => requestServer<{ parts: Array<{ PartNumber: number; ETag: string }> }>(
+            client, partsUrl, 'GET', undefined, options.signal
+          ));
+          for (const p of parts) {
+            completedSet.add(p.PartNumber);
+            completedParts.push({ PartNumber: p.PartNumber, ETag: p.ETag.replace(/^"|"$/g, '').trim() });
+          }
+        }
+      } catch {
+        sessionId = null;
+      }
+    }
+
+    try {
+      // 2. Initiate fresh session if not resumed
+      if (!sessionId) {
+        const initUrl = resolveUrl(client, 'multipartInitiate', '/multipart/initiate');
+        const init = await requestServer<{ id: string; part_size?: number }>(
+          client, initUrl, 'POST', {
+            document_type_id: docType.id,
+            filename: file.name,
+            declared_size: file.size,
+            declared_mime: file.type || null,
+            declared_hash: hash,
+          }, options.signal
+        );
+        sessionId = init.id;
+        options.onSession?.(sessionId);
+        if (init.part_size) partSize = init.part_size;
+      }
+
+      const partCount = Math.max(1, Math.ceil(file.size / partSize));
+      let loadedBytes = 0;
+      for (const p of completedSet) {
+        loadedBytes += p === partCount ? file.size - (partCount - 1) * partSize : partSize;
+      }
+      if (loadedBytes > 0) options.onProgress?.({ loaded: loadedBytes, total: file.size });
+
+      const partsToUpload: number[] = [];
+      for (let p = 1; p <= partCount; p++) {
+        if (!completedSet.has(p)) partsToUpload.push(p);
+      }
+
+      // 3. Parallel part upload with URL batching and bounded concurrency. The workers share an internal signal so
+      // that the first failure stops the others, and the caller's signal still stops all of them.
+      const inner = new AbortController();
+      const stopOnCallerAbort = () => inner.abort();
+      if (options.signal?.aborted) inner.abort();
+      else options.signal?.addEventListener('abort', stopOnCallerAbort, { once: true });
+      const urlCache = new Map<number, string>();
+      let pendingBatch: Promise<void> | null = null;
+
+      async function getPartUrl(pNum: number): Promise<string> {
+        while (!urlCache.has(pNum)) {
+          if (!pendingBatch) {
+            const needed = partsToUpload.filter(p => !urlCache.has(p)).slice(0, 100);
+            const partUrlsUrl = resolveUrl(client, 'multipartPartUrls', '/multipart/part-urls');
+            pendingBatch = repeatable(client, config.retry, inner.signal, () => requestServer<{ urls: Record<string, string> }>(
+              client, partUrlsUrl, 'POST', { session_id: sessionId, part_numbers: needed }, inner.signal
+            )).then(res => {
+              for (const [k, v] of Object.entries(res.urls)) urlCache.set(Number(k), v);
+              pendingBatch = null;
+            }).catch(err => {
+              pendingBatch = null;
+              throw err;
+            });
+          }
+          await pendingBatch;
+        }
+        return urlCache.get(pNum)!;
+      }
+
+      const concurrency = Math.min(config.max_concurrency || 4, partsToUpload.length);
+      let nextIndex = 0;
+      const workers: Promise<void>[] = [];
+      for (let w = 0; w < concurrency; w++) {
+        workers.push((async () => {
+          try {
+            while (nextIndex < partsToUpload.length) {
+              if (inner.signal.aborted) throw new UploadError('aborted', 'Upload was aborted');
+              const pNum = partsToUpload[nextIndex++]!;
+              const url = await getPartUrl(pNum);
+              const start = (pNum - 1) * partSize;
+              const end = Math.min(start + partSize, file.size);
+              const etag = await uploadPartWithRetry(
+                fetchFn, url, file.slice(start, end), config.retry, config.etag_strategy,
+                inner.signal, client.sleep, client.random, client.isOnline, client.waitForOnline
+              );
+              if (etag !== undefined) completedParts.push({ PartNumber: pNum, ETag: etag });
+              loadedBytes += end - start;
+              options.onProgress?.({ loaded: loadedBytes, total: file.size });
+            }
+          } catch (err) {
+            inner.abort();
+            throw err;
+          }
+        })());
+      }
+      const settled = await Promise.allSettled(workers);
+      options.signal?.removeEventListener('abort', stopOnCallerAbort);
+      const failures = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected').map(r => r.reason);
+      if (failures.length > 0) {
+        // The failure that stopped the others is the real one; the rest are only them reacting to it.
+        throw failures.find(f => !(f instanceof UploadError && f.code === 'aborted')) ?? failures[0];
+      }
+
+      // 4. Complete session
+      const completeBody = attachPayload(options, { session_id: sessionId, expected_hash: hash });
+      if (config.etag_strategy === 'client') {
+        completedParts.sort((a, b) => a.PartNumber - b.PartNumber);
+        completeBody.parts = completedParts;
+      }
+      const completeUrl = resolveUrl(client, 'multipartComplete', '/multipart/complete');
+      const completeRes = await requestServer<Record<string, unknown>>(
+        client, completeUrl, 'POST', completeBody, options.signal
+      );
+      let doc: DocumentRecord | undefined;
+      if (options.owner) {
+        doc = await waitForProcessingIfNeeded(completeRes as DocumentRecord, options, client);
+      }
+      return { sessionId, document: doc };
+    } catch (err) {
+      // A lost connection or a failing server leaves a session worth resuming: keep it and hand the id to the caller.
+      // Anything else (a refusal, a validation error, the caller's own abort) ends the session.
+      if (sessionId && keepsSession(err)) {
+        (err as UploadError).sessionId = sessionId;
+      } else if (sessionId) {
+        try {
+          const abortUrl = resolveUrl(client, 'multipartAbort', '/multipart/abort');
+          await requestServer(client, abortUrl, 'POST', { session_id: sessionId });
+        } catch {
+          // Never mask original failure
+        }
+      }
+      throw err;
+    }
+  }
+
+  return { uploadFile: uploadFileImpl };
+}
+
+export function uploadFile(
+  file: File | (Blob & { name: string }),
+  options: UploadOptions,
+  client?: ClientOptions
+): Promise<UploadResult> {
+  return createUploader(client).uploadFile(file, options);
+}

@@ -1,0 +1,16 @@
+{
+    "client_filename": "large-file.pdf",
+    "created_at": "<timestamp>",
+    "declared_hash": null,
+    "declared_mime": null,
+    "declared_size": 5242881,
+    "disk": "test_disk",
+    "document_type_id": "<id>",
+    "expires_at": "<timestamp>",
+    "id": "<id>",
+    "kind": "multipart",
+    "part_size": 5242880,
+    "status": "initiated",
+    "updated_at": "<timestamp>",
+    "user_id": "42"
+}

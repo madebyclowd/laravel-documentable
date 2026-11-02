@@ -104,6 +104,15 @@ class DocumentService
     }
 
     /**
+     * @param  list<int>  $partNumbers
+     * @return array<int, string> the URL of each part, keyed by part number
+     */
+    public function generatePartUploadUrls(UploadSession $session, array $partNumbers): array
+    {
+        return $this->multipartUploads->presignParts($session, $partNumbers);
+    }
+
+    /**
      * @return array<int, array{PartNumber: int, ETag: string}>
      */
     public function listPartsForSession(UploadSession $session): array

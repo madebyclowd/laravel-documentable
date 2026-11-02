@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 896" width="960" height="896" role="img" aria-labelledby="multipart-resume-title multipart-resume-desc">
+<title id="multipart-resume-title">Multipart upload with resume</title>
+<desc id="multipart-resume-desc">Sequence diagram: the browser starts a multipart session, asks for signed part URLs, and uploads the parts straight to the bucket in parallel. If the connection drops and the app resumes, it asks which parts are done and continues. It then completes the upload and the app joins the parts and returns the document.</desc>
+<defs>
+<marker id="multipart-resume-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5B6068"/></marker>
+<marker id="multipart-resume-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#09B1EC"/></marker>
+</defs>
+<rect width="960" height="896" fill="#F7F6F3"/>
+<line x1="160" y1="128" x2="160" y2="784" stroke="rgba(22,23,26,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="480" y1="128" x2="480" y2="784" stroke="rgba(22,23,26,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="800" y1="128" x2="800" y2="784" stroke="rgba(22,23,26,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<rect x="476" y="176" width="8" height="48" fill="rgba(22,23,26,0.06)" stroke="#5B6068" stroke-width="0.8"/>
+<rect x="476" y="272" width="8" height="48" fill="rgba(22,23,26,0.06)" stroke="#5B6068" stroke-width="0.8"/>
+<rect x="796" y="368" width="8" height="80" fill="rgba(22,23,26,0.06)" stroke="#5B6068" stroke-width="0.8"/>
+<rect x="476" y="536" width="8" height="48" fill="rgba(22,23,26,0.06)" stroke="#5B6068" stroke-width="0.8"/>
+<rect x="476" y="648" width="8" height="100" fill="rgba(22,23,26,0.06)" stroke="#5B6068" stroke-width="0.8"/>
+<rect x="796" y="680" width="8" height="36" fill="rgba(22,23,26,0.06)" stroke="#5B6068" stroke-width="0.8"/>
+<line x1="160" y1="176" x2="476" y2="176" stroke="#5B6068" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="476" y1="208" x2="160" y2="208" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="160" y1="272" x2="476" y2="272" stroke="#5B6068" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="476" y1="304" x2="160" y2="304" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="160" y1="368" x2="796" y2="368" stroke="#09B1EC" stroke-width="2.4" marker-end="url(#multipart-resume-arrow-accent)"/>
+<line x1="796" y1="424" x2="160" y2="424" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
+<rect x="104" y="464" width="432" height="128" rx="4" fill="rgba(22,23,26,0.06)" fill-opacity="0.5" stroke="rgba(22,23,26,0.22)" stroke-width="1"/>
+<rect x="104" y="464" width="48" height="20" rx="2" fill="#F7F6F3" stroke="rgba(22,23,26,0.22)" stroke-width="1"/>
+<text x="128" y="478" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.12em">OPT</text>
+<text x="164" y="478" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">[you resume after a drop]</text>
+<line x1="160" y1="536" x2="476" y2="536" stroke="#5B6068" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="476" y1="568" x2="160" y2="568" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="160" y1="648" x2="476" y2="648" stroke="#5B6068" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="484" y1="680" x2="796" y2="680" stroke="#5B6068" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="796" y1="712" x2="484" y2="712" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
+<line x1="476" y1="744" x2="160" y2="744" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
+<rect x="280" y="152" width="80" height="16" rx="2" fill="#F7F6F3"/>
+<text x="320" y="164" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">INITIATE</text>
+<rect x="236" y="184" width="168" height="16" rx="2" fill="#F7F6F3"/>
+<text x="320" y="196" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SESSION + PART SIZE</text>
+<rect x="276" y="248" width="88" height="16" rx="2" fill="#F7F6F3"/>
+<text x="320" y="260" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PART URLS</text>
+<rect x="268" y="280" width="104" height="16" rx="2" fill="#F7F6F3"/>
+<text x="320" y="292" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SIGNED URLS</text>
+<rect x="596" y="344" width="88" height="16" rx="2" fill="#F7F6F3"/>
+<text x="640" y="356" fill="#07739F" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PUT PARTS</text>
+<rect x="592" y="400" width="96" height="16" rx="2" fill="#F7F6F3"/>
+<text x="640" y="412" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">200 + ETAG</text>
+<rect x="264" y="512" width="112" height="16" rx="2" fill="#F0EFEB"/>
+<text x="320" y="524" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WHICH PARTS?</text>
+<rect x="272" y="544" width="96" height="16" rx="2" fill="#F0EFEB"/>
+<text x="320" y="556" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PARTS DONE</text>
+<rect x="280" y="624" width="80" height="16" rx="2" fill="#F7F6F3"/>
+<text x="320" y="636" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">COMPLETE</text>
+<rect x="592" y="656" width="96" height="16" rx="2" fill="#F7F6F3"/>
+<text x="640" y="668" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">JOIN PARTS</text>
+<rect x="608" y="688" width="64" height="16" rx="2" fill="#F7F6F3"/>
+<text x="640" y="700" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">JOINED</text>
+<rect x="280" y="720" width="80" height="16" rx="2" fill="#F7F6F3"/>
+<text x="320" y="732" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">DOCUMENT</text>
+<path d="M 320 388 L 320 370" fill="none" stroke="#07739F" stroke-opacity="0.6" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="320" cy="370" r="2" fill="#07739F"/>
+<text x="320" y="404" fill="#07739F" font-size="16" font-style="italic" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif" text-anchor="middle">Parts go up in parallel. PHP stays idle.</text>
+<rect x="60" y="48" width="200" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="60" y="48" width="200" height="64" rx="6" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="160" y="76" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Browser</text>
+<text x="160" y="96" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">Vue, React, Inertia</text>
+<rect x="380" y="48" width="200" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="380" y="48" width="200" height="64" rx="6" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="480" y="76" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Your Laravel app</text>
+<text x="480" y="96" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">rules + sessions</text>
+<rect x="700" y="48" width="200" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="700" y="48" width="200" height="64" rx="6" fill="rgba(9,177,236,0.12)" stroke="#09B1EC" stroke-width="1"/>
+<text x="800" y="76" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Your bucket</text>
+<text x="800" y="96" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">S3, R2, MinIO</text>
+<line x1="56" y1="816" x2="904" y2="816" stroke="rgba(22,23,26,0.14)" stroke-width="0.8"/>
+<text x="56" y="840" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<line x1="56" y1="860" x2="88" y2="860" stroke="#5B6068" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>
+<text x="100" y="864" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Request</text>
+<line x1="216" y1="860" x2="248" y2="860" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
+<text x="260" y="864" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Reply</text>
+<line x1="364" y1="860" x2="396" y2="860" stroke="#09B1EC" stroke-width="2.4" marker-end="url(#multipart-resume-arrow-accent)"/>
+<text x="408" y="864" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">The file itself</text>
+</svg>

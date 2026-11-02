@@ -12,7 +12,7 @@
 Run the migration steps in this exact order:
 
 1. `composer require madebyclowd/laravel-documentable:^3.0`
-   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding. While 3.x only has pre-release tags, Composer refuses `^3.0` under the default `minimum-stability`; require `^3.0@alpha` instead.
+   Installs the 3.0 release and updates package dependencies. Failure means composer dependency conflicts that must be resolved before proceeding.
 2. `php artisan documents:upgrade-check --code`
    Scans application code for removed or renamed v2 APIs and configurations. Failure means the codebase still calls removed methods that will throw errors at runtime. The scan is a regex heuristic, so a finding can be a false positive: skip a rule you have checked with `--ignore=<rule-id>` (repeatable).
 3. `php artisan documents:upgrade-check`
@@ -113,6 +113,78 @@ DB::transaction(function () use ($sessionIds, $application) {
     }
 });
 ```
+
+### Single part URL route removed
+
+The single part presigning route `POST /documents/multipart/part-url` is removed. Uploaders request presigned URLs in batches through `POST /documents/multipart/part-urls` with an array of part numbers (`part_numbers[]`, up to 100 per request). Presigning is a local computation, so batching avoids one round-trip, one session lookup, and one rate-limit hit per part.
+
+Batching part URL signing reduces network overhead and database load on large uploads.
+
+**Before:**
+
+One request per part:
+
+```http
+POST /documents/multipart/part-url
+Content-Type: application/json
+
+{
+  "session_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "part_number": 1
+}
+```
+
+Response:
+
+```json
+{
+  "url": "https://storage.example.com/..."
+}
+```
+
+**After:**
+
+One batch request for up to 100 parts:
+
+```http
+POST /documents/multipart/part-urls
+Content-Type: application/json
+
+{
+  "session_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "part_numbers": [1, 2, 3]
+}
+```
+
+Response:
+
+```json
+{
+  "urls": {
+    "1": "https://storage.example.com/...",
+    "2": "https://storage.example.com/...",
+    "3": "https://storage.example.com/..."
+  }
+}
+```
+
+**Detect it:**
+Search your frontend upload code or API client for `multipart/part-url` that is not followed by `s` (for example `grep -rnE "multipart/part-url([^s]|$)" resources/js`).
+
+**Manual step:**
+Update client uploader code to call `POST /documents/multipart/part-urls` with `part_numbers` (up to 100 part numbers per request) and read the presigned URLs from the `urls` object keyed by part number.
+
+### Replace a hand-written uploader
+
+Instead of updating custom upload implementations to adapt to the new batched part URLs (and removing calls to the former single `part-url` route), applications may optionally delete their hand-written uploader entirely and adopt the official TypeScript client helper.
+
+Publish the helper with:
+
+```bash
+php artisan vendor:publish --tag=documentable-client
+```
+
+The published client (`resources/js/vendor/documentable/documentable.ts`) handles configuration discovery, chunk calculation, hashing, dedup handshake with proof of possession, batched part URLs, retry with exponential backoff, and processing status polling.
 
 ### Authorization contract rewritten
 

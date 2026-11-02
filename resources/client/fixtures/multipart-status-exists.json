@@ -1,0 +1,6 @@
+{
+    "disk": "test_disk",
+    "exists": true,
+    "expires_at": "<timestamp>",
+    "status": "initiated"
+}

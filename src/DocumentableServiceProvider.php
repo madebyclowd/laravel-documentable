@@ -122,6 +122,10 @@ class DocumentableServiceProvider extends ServiceProvider
                 __DIR__.'/../routes/api.php' => base_path('routes/documentable.php'),
             ], 'documentable-routes');
 
+            $this->publishes([
+                __DIR__.'/../resources/client/documentable.ts' => resource_path('js/vendor/documentable/documentable.ts'),
+            ], 'documentable-client');
+
             $this->commands([
                 AttachModelCommand::class,
                 CleanOrphanedDocumentsCommand::class,

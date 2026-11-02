@@ -1,6 +1,6 @@
 {
     "name": "madebyclowd/laravel-documentable",
-    "description": "Customizable, S3-compatible-first document storage for Laravel — dedup, versioning, multipart uploads, orphan cleanup.",
+    "description": "Laravel file uploads straight to S3, R2 or MinIO with presigned URLs, resumable multipart, versioning, deduplication and cleanup for Eloquent models.",
     "license": "MIT",
     "keywords": [
         "laravel",
@@ -11,7 +11,13 @@
         "multipart",
         "versioning",
         "r2",
-        "minio"
+        "minio",
+        "file-upload",
+        "presigned-url",
+        "direct-upload",
+        "deduplication",
+        "eloquent",
+        "cloudflare-r2"
     ],
     "authors": [
         {

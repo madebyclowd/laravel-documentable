@@ -312,6 +312,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Browser Client
+    |--------------------------------------------------------------------------
+    |
+    | What GET /documents/config tells the browser uploader, so an app does not
+    | hard-code these numbers or pass them through its own props. max_concurrency
+    | is how many parts the client uploads in parallel. retry is the policy for a
+    | failed part: attempts retries, with exponential backoff from base_delay_ms
+    | up to max_delay_ms.
+    |
+    */
+    'client' => [
+        'max_concurrency' => 4,
+        'retry' => [
+            'attempts' => 3,
+            'base_delay_ms' => 500,
+            'max_delay_ms' => 8000,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Storage Path Generation
     |--------------------------------------------------------------------------
     |

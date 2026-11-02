@@ -61,7 +61,7 @@ class AuthorizationGapsTest extends TestCase
     public static function followUpEndpoints(): array
     {
         return [
-            'part-url' => ['POST', '/documents/multipart/part-url'],
+            'part-urls' => ['POST', '/documents/multipart/part-urls'],
             'parts' => ['GET', '/documents/multipart/parts'],
             'status' => ['GET', '/documents/multipart/status'],
             'abort' => ['POST', '/documents/multipart/abort'],
@@ -74,7 +74,7 @@ class AuthorizationGapsTest extends TestCase
         $session = $this->initiateSession($this->makeType());
         $this->useAuthorizer(ConfigurableAuthorizer::denying('canFinalize'));
 
-        $payload = ['session_id' => $session['id'], 'part_number' => 1];
+        $payload = ['session_id' => $session['id'], 'part_numbers' => [1]];
 
         $response = $method === 'GET'
             ? $this->getJson($uri.'?'.http_build_query($payload))
@@ -185,9 +185,9 @@ class AuthorizationGapsTest extends TestCase
     {
         $session = $this->initiateSession($this->makeType(), 10);
 
-        $this->signIn(11)->postJson('/documents/multipart/part-url', [
+        $this->signIn(11)->postJson('/documents/multipart/part-urls', [
             'session_id' => $session['id'],
-            'part_number' => 1,
+            'part_numbers' => [1],
             'user_id' => '10',
         ])->assertForbidden();
     }

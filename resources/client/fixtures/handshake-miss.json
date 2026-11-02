@@ -1,0 +1,10 @@
+{
+    "challenge_id": "<id>",
+    "nonce": "<nonce>",
+    "ranges": [
+        {
+            "length": "<length>",
+            "offset": "<offset>"
+        }
+    ]
+}

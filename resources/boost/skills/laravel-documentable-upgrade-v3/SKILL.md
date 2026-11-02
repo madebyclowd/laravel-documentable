@@ -17,7 +17,7 @@ This upgrade skill is a one-time migration aid and will be removed in v3.1.
 Execute migration steps in this exact order:
 
 1. **Update package dependencies**
-   Run `composer require madebyclowd/laravel-documentable:^3.0`. While 3.x only has pre-release tags, use `^3.0@alpha`: Composer refuses `^3.0` under the default `minimum-stability`.
+   Run `composer require madebyclowd/laravel-documentable:^3.0`.
    Resolves dependencies for the 3.0 release. See UPGRADE.md heading [Requirements](UPGRADE.md#requirements) and [Migration order](UPGRADE.md#migration-order).
 
 2. **Scan code for removed or renamed v2 APIs**

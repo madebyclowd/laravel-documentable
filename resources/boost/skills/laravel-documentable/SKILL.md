@@ -60,7 +60,7 @@ $document = $service->attach($session, $invoice);
 
 ### HTTP multipart upload (>= 10MB)
 1. `POST /documents/multipart/initiate` with `{filename, document_type_id}` returns `{upload_id, session_id}`.
-2. For each part: `POST /documents/multipart/part-url` with `{session_id, part_number}` returns `{url}`.
+2. Presign parts: `POST /documents/multipart/part-urls` with `{session_id, part_numbers}` returns `{urls: {part_number: url}}`.
 3. `POST /documents/multipart/complete` with `{session_id, parts?}` completes the upload.
 4. If cancelled: `POST /documents/multipart/abort` with `{session_id}` drops the upload and bucket parts.
 

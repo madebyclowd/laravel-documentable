@@ -15,11 +15,71 @@ class ReadmeTest extends TestCase
 
     private string $readmePath;
 
+    /** @var list<string> */
+    private const DOCS = [
+        'concepts.md', 'authorization.md', 'uploads.md', 'browser-client.md', 'reading-documents.md',
+        'versions-and-retention.md', 'operations.md', 'configuration.md', 'security.md', 'testing.md',
+    ];
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->root = dirname(__DIR__, 2);
         $this->readmePath = $this->root.'/README.md';
+    }
+
+    /**
+     * The README and every page under docs/, concatenated: the facts checked below may live in any of them.
+     */
+    private function corpus(): string
+    {
+        $parts = [(string) file_get_contents($this->readmePath)];
+
+        foreach (self::DOCS as $doc) {
+            $parts[] = (string) file_get_contents($this->root.'/docs/'.$doc);
+        }
+
+        return implode("\n", $parts);
+    }
+
+    public function test_every_docs_page_exists_has_one_title_and_is_linked_from_the_readme(): void
+    {
+        $readme = (string) file_get_contents($this->readmePath);
+
+        foreach (self::DOCS as $doc) {
+            $path = $this->root.'/docs/'.$doc;
+            $this->assertFileExists($path);
+            $this->assertStringContainsString("docs/{$doc}", $readme, "README.md must link docs/{$doc}.");
+            $this->assertSame(1, preg_match_all('/^# [^#]/m', (string) preg_replace('/```.*?```/s', '', (string) file_get_contents($path))), "docs/{$doc} must have exactly one H1.");
+        }
+
+        $this->assertCount(count(self::DOCS), glob($this->root.'/docs/*.md') ?: [], 'docs/ must hold only the listed pages.');
+    }
+
+    public function test_every_image_the_readme_and_docs_show_exists(): void
+    {
+        $files = [$this->readmePath];
+        foreach (self::DOCS as $doc) {
+            $files[] = $this->root.'/docs/'.$doc;
+        }
+
+        $shown = 0;
+
+        foreach ($files as $file) {
+            preg_match_all('/(?:src|srcset)="([^"]+\.svg)"/', (string) file_get_contents($file), $matches);
+
+            foreach (array_unique($matches[1]) as $image) {
+                $shown++;
+                $this->assertFileExists(dirname($file).'/'.$image, basename($file).' shows a missing image.');
+            }
+        }
+
+        $this->assertGreaterThanOrEqual(10, $shown, 'The README and docs must show the upload-flow, session, multipart, handshake and retention diagrams.');
+    }
+
+    public function test_the_readme_stays_short_enough_to_read(): void
+    {
+        $this->assertLessThanOrEqual(220, count(explode("\n", (string) file_get_contents($this->readmePath))), 'Move detail into docs/ instead of growing the README.');
     }
 
     public function test_readme_headings_follow_target_structure_order(): void
@@ -35,18 +95,11 @@ class ReadmeTest extends TestCase
         }
 
         $expectedH2Headings = [
+            'Small on purpose',
             'Quick start (5 minutes)',
-            'Concepts',
-            'Authorization',
-            'Upload flows and the client',
-            'Reading documents',
-            'Versions and retention',
-            'Operations',
-            'Configuration reference',
-            'Security',
-            'Testing your app',
+            'Documentation',
             'AI agent context (Laravel Boost)',
-            'Upgrading',
+            'Upgrading from 2.x',
             'License',
         ];
 
@@ -59,7 +112,7 @@ class ReadmeTest extends TestCase
 
     public function test_all_artisan_commands_in_readme_are_registered(): void
     {
-        $content = (string) file_get_contents($this->readmePath);
+        $content = $this->corpus();
 
         // Match backticks `php artisan <command>` or code lines `php artisan <command>`
         $commands = [];
@@ -95,7 +148,7 @@ class ReadmeTest extends TestCase
 
     public function test_all_documentable_config_keys_in_backticks_exist(): void
     {
-        $content = (string) file_get_contents($this->readmePath);
+        $content = $this->corpus();
         $config = require $this->root.'/config/documentable.php';
 
         preg_match_all('/`documentable\.([a-z0-9_.]+)`/i', $content, $matches);
@@ -113,38 +166,40 @@ class ReadmeTest extends TestCase
 
     public function test_all_internal_anchor_links_and_relative_file_links_resolve(): void
     {
-        $content = (string) file_get_contents($this->readmePath);
-
-        // Internal anchor links: [text](#anchor)
-        preg_match_all('/\]\((#[a-z0-9_-]+)\)/i', $content, $anchorMatches);
-        $internalLinks = array_unique($anchorMatches[1]);
-
-        $headingSlugs = $this->extractHeadingSlugs($content);
-
-        foreach ($internalLinks as $link) {
-            $this->assertContains(
-                $link,
-                $headingSlugs,
-                "Internal anchor `{$link}` does not resolve to any heading in README.md."
-            );
+        $files = [$this->readmePath];
+        foreach (self::DOCS as $doc) {
+            $files[] = $this->root.'/docs/'.$doc;
         }
 
-        // Relative file links: [text](path/to/file)
-        preg_match_all('/\[[^\]]+\]\((?!https?:\/\/|mailto:|#)([^)#\s]+)(?:#[^\)]*)?\)/', $content, $fileMatches);
-        $relativeLinks = array_unique($fileMatches[1]);
+        foreach ($files as $file) {
+            $name = str_replace($this->root.'/', '', $file);
+            $content = (string) file_get_contents($file);
 
-        foreach ($relativeLinks as $relPath) {
-            $target = $this->root.'/'.ltrim($relPath, '/');
-            $this->assertFileExists(
-                $target,
-                "Relative file link `{$relPath}` in README.md does not exist."
-            );
+            // Links to a heading in the same file: [text](#anchor)
+            preg_match_all('/\]\((#[a-z0-9_-]+)\)/i', $content, $anchorMatches);
+            $headingSlugs = $this->extractHeadingSlugs($content);
+
+            foreach (array_unique($anchorMatches[1]) as $link) {
+                $this->assertContains($link, $headingSlugs, "Internal anchor `{$link}` does not resolve to any heading in {$name}.");
+            }
+
+            // Links to another file, optionally with a heading: [text](path/to/file.md#anchor)
+            preg_match_all('/\[[^\]]+\]\((?!https?:\/\/|mailto:|#)([^)#\s]+)(?:(#[^)\s]*))?\)/', $content, $fileMatches, PREG_SET_ORDER);
+
+            foreach ($fileMatches as $match) {
+                $target = realpath(dirname($file).'/'.$match[1]);
+                $this->assertNotFalse($target, "Relative file link `{$match[1]}` in {$name} does not exist.");
+
+                if (isset($match[2]) && str_ends_with($match[1], '.md')) {
+                    $this->assertContains($match[2], $this->extractHeadingSlugs((string) file_get_contents((string) $target)), "Anchor `{$match[2]}` in {$name} does not resolve in {$match[1]}.");
+                }
+            }
         }
     }
 
     public function test_no_stale_strings_or_process_words_appear(): void
     {
-        $content = (string) file_get_contents($this->readmePath);
+        $content = $this->corpus();
 
         $stalePatterns = [
             '/PermissiveDocumentAuthorizer/' => 'stale authorizer "PermissiveDocumentAuthorizer"',
@@ -201,7 +256,7 @@ class ReadmeTest extends TestCase
 
     public function test_readme_names_version_lifecycle_keys_and_command(): void
     {
-        $content = (string) file_get_contents($this->readmePath);
+        $content = $this->corpus();
 
         $this->assertStringContainsString('on_delete_latest', $content);
         $this->assertStringContainsString('versions_kept', $content);
@@ -212,7 +267,7 @@ class ReadmeTest extends TestCase
 
     public function test_code_samples_do_not_trigger_scanner_rules(): void
     {
-        $content = (string) file_get_contents($this->readmePath);
+        $content = $this->corpus();
 
         // Extract PHP code snippets
         preg_match_all('/```php\n(.*?)\n```/s', $content, $phpMatches);

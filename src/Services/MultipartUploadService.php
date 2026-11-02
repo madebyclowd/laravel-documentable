@@ -72,6 +72,27 @@ final class MultipartUploadService
     }
 
     /**
+     * Presign several parts of one open session. The session is checked once and no query runs per part: signing
+     * is local.
+     *
+     * @param  list<int>  $partNumbers
+     * @return array<int, string> the URL of each part, keyed by part number
+     */
+    public function presignParts(UploadSession $session, array $partNumbers): array
+    {
+        $this->assertOpenMultipart($session);
+
+        $driver = $this->drivers->forDisk($session->disk);
+        $urls = [];
+
+        foreach ($partNumbers as $partNumber) {
+            $urls[$partNumber] = $driver->presignPartUpload($session, $partNumber);
+        }
+
+        return $urls;
+    }
+
+    /**
      * The provider's authoritative list of parts that actually landed, for a resuming client.
      *
      * @return array<int, array{PartNumber: int, ETag: string}>
