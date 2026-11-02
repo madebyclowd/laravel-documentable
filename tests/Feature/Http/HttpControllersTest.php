@@ -310,7 +310,7 @@ class HttpControllersTest extends TestCase
         $this->assertNull($document->fresh()->deleted_at);
     }
 
-    public function test_multipart_part_url_via_http(): void
+    public function test_multipart_part_urls_via_http(): void
     {
         $type = $this->makeType(['code' => 'BIG', 'name' => 'Big']);
         $this->signIn(1);
@@ -320,13 +320,13 @@ class HttpControllersTest extends TestCase
             'document_type_id' => $type->id,
         ])->assertCreated()->json();
 
-        $response = $this->postJson('/documents/multipart/part-url', [
+        $response = $this->postJson('/documents/multipart/part-urls', [
             'session_id' => $initiate['id'],
-            'part_number' => 1,
+            'part_numbers' => [1],
         ]);
 
         $response->assertOk();
-        $this->assertStringContainsString(UploadSession::findOrFail($initiate['id'])->upload_id, $response->json('url'));
+        $this->assertStringContainsString(UploadSession::findOrFail($initiate['id'])->upload_id, $response->json('urls.1'));
     }
 
     public function test_multipart_initiate_denied_when_authorizer_rejects_initiating_the_upload(): void
@@ -386,9 +386,9 @@ class HttpControllersTest extends TestCase
 
         $this->app['auth']->forgetGuards();
 
-        $this->postJson('/documents/multipart/part-url', [
+        $this->postJson('/documents/multipart/part-urls', [
             'session_id' => $initiate['id'],
-            'part_number' => 1,
+            'part_numbers' => [1],
         ])->assertForbidden();
     }
 

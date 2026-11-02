@@ -47,6 +47,7 @@ final readonly class DocumentableConfig
      * @param  class-string<ModifiesUrlOptions>|null  $urlModifier
      * @param  class-string<ResolvesAttachMetadata>|null  $attachMetadataResolver
      * @param  list<string>  $retentionHold
+     * @param  array{attempts: int, base_delay_ms: int, max_delay_ms: int}  $clientRetry
      */
     private function __construct(
         public string $disk,
@@ -88,6 +89,8 @@ final readonly class DocumentableConfig
         public ?string $urlModifier = null,
         public ?string $attachMetadataResolver = null,
         public string $routePrefix = 'documents',
+        public int $clientMaxConcurrency = 4,
+        public array $clientRetry = ['attempts' => 3, 'base_delay_ms' => 500, 'max_delay_ms' => 8000],
     ) {}
 
     /**
@@ -137,6 +140,9 @@ final readonly class DocumentableConfig
 
         $doctor = $c['doctor'] ?? [];
         $scratchPrefix = self::string($doctor['scratch_prefix'] ?? 'documentable-doctor', 'doctor.scratch_prefix', 'Use a non-empty string such as documentable-doctor');
+
+        $client = $c['client'] ?? [];
+        $clientRetry = self::clientRetry($client['retry'] ?? []);
 
         $disks = self::arrayValue($c['disks'], 'disks');
         foreach ($disks as $diskName => $diskSettings) {
@@ -225,6 +231,8 @@ final readonly class DocumentableConfig
             doctorScratchPrefix: $scratchPrefix,
             retentionHold: $hold,
             urlModifier: self::implementing($c['url']['modifier'] ?? null, ModifiesUrlOptions::class, 'url.modifier'),
+            clientMaxConcurrency: self::int($client['max_concurrency'] ?? 4, 'client.max_concurrency', 1, '1 or more parallel part uploads'),
+            clientRetry: $clientRetry,
             routePrefix: self::routePrefix($c['route_prefix'] ?? 'documents'),
             attachMetadataResolver: self::implementing($c['attach']['metadata_resolver'] ?? null, ResolvesAttachMetadata::class, 'attach.metadata_resolver'),
         );
@@ -274,6 +282,10 @@ final readonly class DocumentableConfig
             'verification' => ['sync_hash_max_bytes' => 50 * 1024 * 1024, 'connection' => null, 'queue' => null],
             'url' => ['max_ttl_minutes' => 1440, 'modifier' => null],
             'attach' => ['metadata_resolver' => null],
+            'client' => [
+                'max_concurrency' => 4,
+                'retry' => ['attempts' => 3, 'base_delay_ms' => 500, 'max_delay_ms' => 8000],
+            ],
             'storage_path' => ['generator' => null],
             'disks' => [],
             'middleware' => ['api'],
@@ -315,7 +327,7 @@ final readonly class DocumentableConfig
 
     private static function isFixedSection(string $key): bool
     {
-        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'attach', 'listing', 'audit', 'doctor', 'retention'], true);
+        return in_array($key, ['multipart', 'lifecycle', 'verification', 'authorization', 'dedup', 'security', 'url', 'storage_path', 'attach', 'client', 'listing', 'audit', 'doctor', 'retention'], true);
     }
 
     /**
@@ -394,6 +406,24 @@ final readonly class DocumentableConfig
         }
 
         return $prefix;
+    }
+
+    /**
+     * @return array{attempts: int, base_delay_ms: int, max_delay_ms: int}
+     */
+    private static function clientRetry(mixed $retry): array
+    {
+        $retry = is_array($retry) ? $retry : [];
+
+        $attempts = self::int($retry['attempts'] ?? 3, 'client.retry.attempts', 0, '0 or more retries');
+        $base = self::int($retry['base_delay_ms'] ?? 500, 'client.retry.base_delay_ms', 1, '1 or more milliseconds');
+        $max = self::int($retry['max_delay_ms'] ?? 8000, 'client.retry.max_delay_ms', 1, '1 or more milliseconds');
+
+        if ($max < $base) {
+            throw new InvalidDocumentableConfig('client.retry.max_delay_ms', 'must not be less than base_delay_ms', 'Use a value at least base_delay_ms, such as 8000');
+        }
+
+        return ['attempts' => $attempts, 'base_delay_ms' => $base, 'max_delay_ms' => $max];
     }
 
     private static function bool(mixed $value, string $key): bool

@@ -13,7 +13,7 @@ use MadeByClowd\Documentable\Http\Requests\CompleteMultipartUploadRequest;
 use MadeByClowd\Documentable\Http\Requests\InitiateMultipartUploadRequest;
 use MadeByClowd\Documentable\Http\Requests\ListPartsRequest;
 use MadeByClowd\Documentable\Http\Requests\MultipartSessionStatusRequest;
-use MadeByClowd\Documentable\Http\Requests\PartUploadUrlRequest;
+use MadeByClowd\Documentable\Http\Requests\PartUploadUrlsRequest;
 use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Services\PartSizePlanner;
@@ -55,13 +55,14 @@ class MultipartUploadController extends Controller
         return response()->json(array_merge($session->toArray(), ['part_size' => $partSize]), 201);
     }
 
-    public function partUrl(PartUploadUrlRequest $request): JsonResponse
+    public function partUrls(PartUploadUrlsRequest $request): JsonResponse
     {
         $session = $this->ownedSession($request);
 
-        $url = $this->service->generatePartUploadUrl($session, $request->integer('part_number'));
+        /** @var list<int> $partNumbers */
+        $partNumbers = array_map(intval(...), $request->input('part_numbers'));
 
-        return response()->json(['url' => $url]);
+        return response()->json(['urls' => $this->service->generatePartUploadUrls($session, $partNumbers)]);
     }
 
     public function listParts(ListPartsRequest $request): JsonResponse

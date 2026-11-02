@@ -251,6 +251,54 @@ GET /documents/types
 
 Returns active document types for which `canInitiateUpload` returns `true`.
 
+### Client configuration
+
+Before initiating an upload, client uploaders can read server limits and concurrency settings:
+
+```http
+GET /documents/config
+```
+
+Response (`200 OK`):
+
+```json
+{
+  "threshold_bytes": 10485760,
+  "min_part_size": 5242880,
+  "max_parts": 10000,
+  "max_concurrency": 4,
+  "retry": {
+    "attempts": 3,
+    "base_delay_ms": 500,
+    "max_delay_ms": 8000
+  },
+  "sync_hash_max_bytes": 52428800,
+  "etag_strategy": "server-authoritative",
+  "types": [
+    {
+      "id": "9c0a1b2c-3d4e-5f6a-7b8c-9d0e1f2a3b4c",
+      "code": "passport",
+      "name": "Passport",
+      "max_bytes": 10485760,
+      "allowed_mimes": ["application/pdf"],
+      "allowed_extensions": ["pdf"],
+      "trust_extension_for_generic_mime": false,
+      "allows_multiple": false
+    }
+  ]
+}
+```
+
+The response includes:
+- `threshold_bytes`: Byte threshold where uploads switch from direct PUT to multipart.
+- `min_part_size`: Minimum part size in bytes for multipart uploads (5 MiB).
+- `max_parts`: Maximum number of parts allowed by the storage provider (10,000).
+- `max_concurrency`: Maximum parallel part uploads configured in `documentable.client.max_concurrency`.
+- `retry`: Retry policy for part uploads (`attempts`, `base_delay_ms`, `max_delay_ms`) from `documentable.client.retry`.
+- `sync_hash_max_bytes`: Byte threshold above which verification runs asynchronously in the queue.
+- `etag_strategy`: ETag completion strategy (`client` or `server-authoritative`).
+- `types`: Document types the authenticated user is authorized to upload to, with limits in bytes.
+
 ### Small files with presigned PUT
 
 For files below `multipart.threshold_bytes` (default 10MB):
@@ -326,17 +374,17 @@ For files at or above `multipart.threshold_bytes`:
    }
    ```
 
-2. Request presigned upload URLs for each part (numbered from 1):
+2. Request presigned upload URLs for part numbers in batches (up to 100 parts per request):
    ```http
-   POST /documents/multipart/part-url
+   POST /documents/multipart/part-urls
    Content-Type: application/json
 
    {
      "session_id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
-     "part_number": 1
+     "part_numbers": [1, 2]
    }
    ```
-   Response: `{ "url": "https://..." }`. The client sends a `PUT` with that part's bytes to the URL. Under `etag_strategy = client`, save the `ETag` header from each PUT response. Under `server-authoritative`, the server reads parts from storage directly.
+   Response: `{ "urls": { "1": "https://...", "2": "https://..." } }`. The client sends a `PUT` with each part's bytes to its corresponding URL. Under `etag_strategy = client`, save the `ETag` header from each PUT response. Under `server-authoritative`, the server reads parts from storage directly.
 
 3. Complete the upload:
    ```http
@@ -844,6 +892,16 @@ return [
         ],
         'object_metadata' => false,
         'content_type' => null,
+    ],
+
+    // Browser client concurrency and retry defaults
+    'client' => [
+        'max_concurrency' => 4,
+        'retry' => [
+            'attempts' => 3,
+            'base_delay_ms' => 500,
+            'max_delay_ms' => 8000,
+        ],
     ],
 
     // Tiered verification settings

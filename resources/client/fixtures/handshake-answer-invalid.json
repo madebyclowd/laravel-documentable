@@ -1,0 +1,8 @@
+{
+    "errors": {
+        "proof": [
+            "The provided proof is invalid."
+        ]
+    },
+    "message": "The provided proof is invalid."
+}

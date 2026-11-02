@@ -34,6 +34,8 @@ class DocumentableConfigTest extends TestCase
         $this->assertSame('hourly', $config->reaperFrequency);
         $this->assertSame('reject', $config->scanErrorPolicy);
         $this->assertNull($config->authorizerResolver);
+        $this->assertSame(4, $config->clientMaxConcurrency);
+        $this->assertSame(['attempts' => 3, 'base_delay_ms' => 500, 'max_delay_ms' => 8000], $config->clientRetry);
     }
 
     public function test_built_in_defaults_match_the_shipped_config_file(): void
@@ -168,6 +170,10 @@ class DocumentableConfigTest extends TestCase
             'unknown disk' => [['disk' => 'nope'], 'disk', 'config/filesystems.php'],
             'empty disk' => [['disk' => ''], 'disk', 'config/filesystems.php'],
             'unknown per-type disk' => [['types' => ['invoice' => ['name' => 'Invoice', 'disk' => 'nope']]], 'types.invoice.disk', 'config/filesystems.php'],
+            'client concurrency below one' => [['client' => ['max_concurrency' => 0]], 'client.max_concurrency', '1 or more'],
+            'client retry attempts negative' => [['client' => ['retry' => ['attempts' => -1]]], 'client.retry.attempts', '0 or more'],
+            'client retry base delay zero' => [['client' => ['retry' => ['base_delay_ms' => 0]]], 'client.retry.base_delay_ms', '1 or more'],
+            'client retry max delay below base' => [['client' => ['retry' => ['base_delay_ms' => 1000, 'max_delay_ms' => 500]]], 'client.retry.max_delay_ms', 'at least base_delay_ms'],
             'bad frequency' => [['lifecycle' => ['reaper_frequency' => 'whenever']], 'lifecycle.reaper_frequency', 'hourly'],
             'frequency needing an argument' => [['lifecycle' => ['reaper_frequency' => 'cron']], 'lifecycle.reaper_frequency', 'hourly'],
             'frequency not a string' => [['lifecycle' => ['reaper_frequency' => 60]], 'lifecycle.reaper_frequency', 'hourly'],

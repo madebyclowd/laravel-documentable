@@ -1,0 +1,21 @@
+{
+    "client_filename": "large-file.pdf",
+    "created_at": "<timestamp>",
+    "declared_hash": null,
+    "declared_mime": null,
+    "declared_size": 10485760,
+    "disk": "test_disk",
+    "document_type_id": "<id>",
+    "expires_at": "<timestamp>",
+    "id": "<id>",
+    "kind": "multipart",
+    "object_hash": "7b7e91620fcad8bcbe56ff58cabe69367a177f1d17ef8af32b87266678cae159",
+    "object_mime": "application/pdf",
+    "object_size": 10485760,
+    "owner_id": null,
+    "owner_type": null,
+    "status": "uploaded",
+    "storage_file_id": null,
+    "updated_at": "<timestamp>",
+    "user_id": "42"
+}

@@ -114,6 +114,66 @@ DB::transaction(function () use ($sessionIds, $application) {
 });
 ```
 
+### Single part URL route removed
+
+The single part presigning route `POST /documents/multipart/part-url` is removed. Uploaders request presigned URLs in batches through `POST /documents/multipart/part-urls` with an array of part numbers (`part_numbers[]`, up to 100 per request). Presigning is a local computation, so batching avoids one round-trip, one session lookup, and one rate-limit hit per part.
+
+Batching part URL signing reduces network overhead and database load on large uploads.
+
+**Before:**
+
+One request per part:
+
+```http
+POST /documents/multipart/part-url
+Content-Type: application/json
+
+{
+  "session_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "part_number": 1
+}
+```
+
+Response:
+
+```json
+{
+  "url": "https://storage.example.com/..."
+}
+```
+
+**After:**
+
+One batch request for up to 100 parts:
+
+```http
+POST /documents/multipart/part-urls
+Content-Type: application/json
+
+{
+  "session_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "part_numbers": [1, 2, 3]
+}
+```
+
+Response:
+
+```json
+{
+  "urls": {
+    "1": "https://storage.example.com/...",
+    "2": "https://storage.example.com/...",
+    "3": "https://storage.example.com/..."
+  }
+}
+```
+
+**Detect it:**
+Search your frontend upload code or API client for `multipart/part-url` that is not followed by `s` (for example `grep -rnE "multipart/part-url([^s]|$)" resources/js`).
+
+**Manual step:**
+Update client uploader code to call `POST /documents/multipart/part-urls` with `part_numbers` (up to 100 part numbers per request) and read the presigned URLs from the `urls` object keyed by part number.
+
 ### Authorization contract rewritten
 
 Authorization has two stages. `canInitiateUpload($user, $type)` runs when a session is started, before any owner exists, so it can only decide on the user and the document type. `canAttach($user, $source, $owner)` runs when the upload is attached to its owner, and it cannot be bypassed. Put rules that depend on the owner ("execution evidence follows the project's permissions, everything else needs an admin") in `canAttach`. A user who passes `canInitiateUpload` but fails `canAttach` has uploaded bytes that nothing refers to; the throttle and the expired-session cleanup bound that cost.

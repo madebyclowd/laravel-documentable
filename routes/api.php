@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
+use MadeByClowd\Documentable\Http\Controllers\ClientConfigController;
 use MadeByClowd\Documentable\Http\Controllers\DedupHandshakeController;
 use MadeByClowd\Documentable\Http\Controllers\DirectUploadController;
 use MadeByClowd\Documentable\Http\Controllers\DocumentController;
@@ -35,6 +36,7 @@ Route::prefix(app(DocumentableConfig::class)->routePrefix)
         Route::get('/', [DocumentController::class, 'index']);
         Route::post('/', [DocumentController::class, 'store']);
         Route::get('/types', [DocumentTypeController::class, 'index']);
+        Route::get('/config', [ClientConfigController::class, 'show']);
         Route::get('/{document}/url', [DocumentController::class, 'url']);
         Route::get('/{document}/download', [DocumentController::class, 'download']);
         Route::get('/{document}/view', [DocumentController::class, 'view']);
@@ -50,7 +52,7 @@ Route::prefix(app(DocumentableConfig::class)->routePrefix)
             ->middleware('throttle:'.config('documentable.dedup.throttle', 'documents-handshake'));
 
         Route::post('/multipart/initiate', [MultipartUploadController::class, 'initiate']);
-        Route::post('/multipart/part-url', [MultipartUploadController::class, 'partUrl']);
+        Route::post('/multipart/part-urls', [MultipartUploadController::class, 'partUrls']);
         Route::get('/multipart/parts', [MultipartUploadController::class, 'listParts']);
         Route::get('/multipart/status', [MultipartUploadController::class, 'status']);
         Route::post('/multipart/complete', [MultipartUploadController::class, 'complete']);
