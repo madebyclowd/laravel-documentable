@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 776" width="960" height="776" role="img" aria-labelledby="dedup-handshake-title dedup-handshake-desc">
+<title id="dedup-handshake-title">Deduplication handshake</title>
+<desc id="dedup-handshake-desc">Sequence diagram: the browser sends the file hash and size. The app answers with a nonce and byte ranges. The browser reads those bytes and sends a proof. If the proof matches, the app reuses the stored file and returns an uploaded session. Otherwise it answers 422 and the browser uploads the file normally.</desc>
+<defs>
+<marker id="dedup-handshake-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#A3A8B0"/></marker>
+<marker id="dedup-handshake-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#09B1EC"/></marker>
+</defs>
+<rect width="960" height="776" fill="#16171A"/>
+<line x1="240" y1="128" x2="240" y2="656" stroke="rgba(247,246,243,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="720" y1="128" x2="720" y2="656" stroke="rgba(247,246,243,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<rect x="716" y="176" width="8" height="48" fill="rgba(247,246,243,0.06)" stroke="#A3A8B0" stroke-width="0.8"/>
+<rect x="716" y="368" width="8" height="228" fill="rgba(247,246,243,0.06)" stroke="#A3A8B0" stroke-width="0.8"/>
+<line x1="240" y1="176" x2="716" y2="176" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#dedup-handshake-arrow)"/>
+<line x1="716" y1="208" x2="240" y2="208" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#dedup-handshake-arrow)"/>
+<path d="M 244 272 L 288 272 L 288 304 L 244 304" fill="none" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#dedup-handshake-arrow)"/>
+<line x1="240" y1="368" x2="716" y2="368" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#dedup-handshake-arrow)"/>
+<rect x="192" y="416" width="576" height="200" rx="4" fill="rgba(247,246,243,0.06)" fill-opacity="0.5" stroke="rgba(247,246,243,0.22)" stroke-width="1"/>
+<rect x="192" y="416" width="48" height="20" rx="2" fill="#16171A" stroke="rgba(247,246,243,0.22)" stroke-width="1"/>
+<text x="216" y="430" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.12em">ALT</text>
+<text x="252" y="430" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">[proof matches]</text>
+<line x1="716" y1="496" x2="240" y2="496" stroke="#09B1EC" stroke-width="2.4" marker-end="url(#dedup-handshake-arrow-accent)"/>
+<line x1="200" y1="528" x2="760" y2="528" stroke="rgba(247,246,243,0.22)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="204" y="546" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">[else]</text>
+<line x1="716" y1="592" x2="240" y2="592" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#dedup-handshake-arrow)"/>
+<rect x="428" y="152" width="104" height="16" rx="2" fill="#16171A"/>
+<text x="480" y="164" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">HASH + SIZE</text>
+<rect x="396" y="184" width="168" height="16" rx="2" fill="#16171A"/>
+<text x="480" y="196" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">NONCE + BYTE RANGES</text>
+<rect x="296" y="280" width="144" height="16" rx="2" fill="#16171A"/>
+<text x="368" y="292" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">READ THOSE BYTES</text>
+<rect x="452" y="344" width="56" height="16" rx="2" fill="#16171A"/>
+<text x="480" y="356" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PROOF</text>
+<rect x="360" y="472" width="240" height="16" rx="2" fill="#1C1D20"/>
+<text x="480" y="484" fill="#09B1EC" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">REUSE FILE, SESSION UPLOADED</text>
+<rect x="460" y="568" width="40" height="16" rx="2" fill="#1C1D20"/>
+<text x="480" y="580" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">422</text>
+<path d="M 480 650 L 480 594" fill="none" stroke="#09B1EC" stroke-opacity="0.6" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="480" cy="594" r="2" fill="#09B1EC"/>
+<text x="480" y="664" fill="#09B1EC" font-size="16" font-style="italic" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif" text-anchor="middle">A missing file gets a decoy challenge. Same 422.</text>
+<rect x="140" y="48" width="200" height="64" rx="6" fill="#16171A"/>
+<rect x="140" y="48" width="200" height="64" rx="6" fill="rgba(247,246,243,0.06)" stroke="rgba(247,246,243,0.45)" stroke-width="1"/>
+<text x="240" y="76" fill="#F7F6F3" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Browser</text>
+<text x="240" y="96" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">hashes the file</text>
+<rect x="620" y="48" width="200" height="64" rx="6" fill="#16171A"/>
+<rect x="620" y="48" width="200" height="64" rx="6" fill="rgba(9,177,236,0.12)" stroke="#09B1EC" stroke-width="1"/>
+<text x="720" y="76" fill="#F7F6F3" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Your Laravel app</text>
+<text x="720" y="96" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">rules + sessions</text>
+<line x1="56" y1="704" x2="904" y2="704" stroke="rgba(247,246,243,0.14)" stroke-width="0.8"/>
+<text x="56" y="728" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<line x1="56" y1="748" x2="88" y2="748" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#dedup-handshake-arrow)"/>
+<text x="100" y="752" fill="#A3A8B0" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Request</text>
+<line x1="216" y1="748" x2="248" y2="748" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#dedup-handshake-arrow)"/>
+<text x="260" y="752" fill="#A3A8B0" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Reply</text>
+<line x1="364" y1="748" x2="396" y2="748" stroke="#09B1EC" stroke-width="2.4" marker-end="url(#dedup-handshake-arrow-accent)"/>
+<text x="408" y="752" fill="#A3A8B0" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">File reused, no upload</text>
+</svg>

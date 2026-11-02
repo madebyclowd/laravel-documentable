@@ -59,6 +59,13 @@ Document types can configure automatic retention rules:
 
 Both axes operate together: a version is pruned only when it exceeds both count and age thresholds. A null axis never prunes on that dimension. If both are null, historical versions are retained indefinitely. The latest version is never pruned by retention.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/version-retention-dark.svg">
+    <img src="images/version-retention-light.svg" alt="Diagram of one document slot with six versions. With versions_kept 3 and versions_retain_days 90, v4 to v6 are inside the count, v3 is outside the count but newer than 90 days, and only v1 and v2 are outside both limits, so only they are pruned." width="900">
+  </picture>
+</p>
+
 ```php
 'types' => [
     'audit-log' => [

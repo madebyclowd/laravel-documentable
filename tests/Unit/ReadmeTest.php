@@ -56,15 +56,25 @@ class ReadmeTest extends TestCase
         $this->assertCount(count(self::DOCS), glob($this->root.'/docs/*.md') ?: [], 'docs/ must hold only the listed pages.');
     }
 
-    public function test_every_image_the_readme_shows_exists(): void
+    public function test_every_image_the_readme_and_docs_show_exists(): void
     {
-        preg_match_all('/(?:src|srcset)="(docs\/images\/[^"]+)"/', (string) file_get_contents($this->readmePath), $matches);
-
-        $this->assertNotEmpty($matches[1], 'README.md must show the upload-flow diagram.');
-
-        foreach (array_unique($matches[1]) as $image) {
-            $this->assertFileExists($this->root.'/'.$image);
+        $files = [$this->readmePath];
+        foreach (self::DOCS as $doc) {
+            $files[] = $this->root.'/docs/'.$doc;
         }
+
+        $shown = 0;
+
+        foreach ($files as $file) {
+            preg_match_all('/(?:src|srcset)="([^"]+\.svg)"/', (string) file_get_contents($file), $matches);
+
+            foreach (array_unique($matches[1]) as $image) {
+                $shown++;
+                $this->assertFileExists(dirname($file).'/'.$image, basename($file).' shows a missing image.');
+            }
+        }
+
+        $this->assertGreaterThanOrEqual(10, $shown, 'The README and docs must show the upload-flow, session, multipart, handshake and retention diagrams.');
     }
 
     public function test_the_readme_stays_short_enough_to_read(): void

@@ -18,6 +18,13 @@ A `DocumentType` defines rules for an upload category:
 
 All uploads run on server-managed `UploadSession` records. The client holds only the session ID. The server generates storage keys and keeps provider upload IDs private. An upload session progresses through five states: `initiated`, `uploaded`, `attached`, `expired`, and `aborted`.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/session-states-dark.svg">
+    <img src="images/session-states-light.svg" alt="State diagram. An upload session starts as initiated, becomes uploaded when the file is in the bucket, and ends as attached. From initiated or uploaded it can also end as expired or aborted. Attached, expired and aborted are final." width="900">
+  </picture>
+</p>
+
 ## Attach
 
 Once raw bytes reach storage and pass initial size and MIME checks, the session status is `uploaded`. Attaching the session to an owner model creates the `Document` record. Attach happens via `POST /documents/attach` over HTTP or through `DocumentService::attachStorageFile()` in PHP.

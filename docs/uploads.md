@@ -115,6 +115,13 @@ For files below `multipart.threshold_bytes` (default 10MB):
 
 For files at or above `multipart.threshold_bytes`:
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/multipart-resume-dark.svg">
+    <img src="images/multipart-resume-light.svg" alt="Sequence diagram. The browser starts a multipart session, gets signed part URLs and uploads the parts straight to the bucket. If the connection drops it asks which parts are done and continues. Then it completes the upload and the app joins the parts and returns the document." width="900">
+  </picture>
+</p>
+
 1. Initiate the multipart session:
    ```http
    POST /documents/multipart/initiate
@@ -180,6 +187,13 @@ GET /documents/multipart/parts?session_id=8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d
 ## Deduplication handshake
 
 To prevent hash oracle attacks when deduplicating files, clients perform a proof-of-possession handshake:
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/dedup-handshake-dark.svg">
+    <img src="images/dedup-handshake-light.svg" alt="Sequence diagram. The browser sends the file hash and size. The app answers with a nonce and byte ranges. The browser sends a proof of those bytes. If it matches, the app reuses the stored file and returns an uploaded session. Otherwise it answers 422 and the browser uploads the file normally." width="900">
+  </picture>
+</p>
 
 1. Request a challenge:
    ```http
