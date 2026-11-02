@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,6 +62,45 @@ export class FakeServer {
     hash?: string;
     partSize?: number;
   }>();
+
+  // Stored uploads by lower-case hex SHA-256 hash
+  storedUploads = new Map<string, Uint8Array>();
+
+  // Handshake challenges
+  challenges = new Map<string, {
+    challengeId: string;
+    nonce: string;
+    ranges: Array<{ offset: number; length: number }>;
+    isDecoy: boolean;
+    hash?: string;
+    size: number;
+  }>();
+
+  // Document records and polling queues
+  documents = new Map<string, Record<string, unknown>>();
+  documentStatusQueues = new Map<string, string[]>();
+  statusQueue?: string[];
+  defaultDocumentStatus = 'committed';
+
+  recordStoredUpload(hash: string, bytes: Uint8Array): void {
+    this.storedUploads.set(hash.toLowerCase(), bytes);
+  }
+
+  setDocumentStatus(status: string | string[], id?: string): void {
+    if (id) {
+      if (Array.isArray(status)) {
+        this.documentStatusQueues.set(id, [...status]);
+      } else {
+        this.documentStatusQueues.set(id, [status]);
+      }
+      if (this.documents.has(id)) {
+        const doc = this.documents.get(id)!;
+        doc.status = Array.isArray(status) ? status[0]! : status;
+      }
+    } else {
+      this.statusQueue = Array.isArray(status) ? [...status] : [status];
+    }
+  }
 
   idCounter = 1;
 
@@ -283,17 +323,27 @@ export class FakeServer {
         session.status = 'uploaded';
       }
 
+      const reassembled = this.getReassembledBody(sessionId);
+      if (reassembled.byteLength > 0) {
+        const hash = crypto.createHash('sha256').update(reassembled).digest('hex');
+        this.storedUploads.set(hash, reassembled);
+      }
+
       if (body.documentable_type) {
-        // Returns DocumentRecord
+        const docId = this.generateId('01DOC');
+        const queue = this.documentStatusQueues.get(docId) ?? this.statusQueue;
+        const status = queue && queue.length > 0 ? (queue.length > 1 ? queue.shift()! : queue[0]!) : this.defaultDocumentStatus;
+        const doc = {
+          id: docId,
+          client_filename: session?.filename ?? 'uploaded.file',
+          documentable_type: body.documentable_type,
+          documentable_id: body.documentable_id,
+          status,
+          storage_file: { id: this.generateId('01FIL') },
+        };
+        this.documents.set(docId, doc);
         return new Response(
-          JSON.stringify({
-            id: this.generateId('01DOC'),
-            client_filename: session?.filename ?? 'uploaded.file',
-            documentable_type: body.documentable_type,
-            documentable_id: body.documentable_id,
-            status: 'ready',
-            storage_file: { id: this.generateId('01FIL') },
-          }),
+          JSON.stringify(doc),
           { status: 201, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -408,16 +458,27 @@ export class FakeServer {
         session.status = 'uploaded';
       }
 
+      const reassembled = this.getReassembledBody(sessionId);
+      if (reassembled.byteLength > 0) {
+        const hash = crypto.createHash('sha256').update(reassembled).digest('hex');
+        this.storedUploads.set(hash, reassembled);
+      }
+
       if (body.documentable_type) {
+        const docId = this.generateId('01DOC');
+        const queue = this.documentStatusQueues.get(docId) ?? this.statusQueue;
+        const status = queue && queue.length > 0 ? (queue.length > 1 ? queue.shift()! : queue[0]!) : this.defaultDocumentStatus;
+        const doc = {
+          id: docId,
+          client_filename: session?.filename ?? 'multipart.file',
+          documentable_type: body.documentable_type,
+          documentable_id: body.documentable_id,
+          status,
+          storage_file: { id: this.generateId('01FIL') },
+        };
+        this.documents.set(docId, doc);
         return new Response(
-          JSON.stringify({
-            id: this.generateId('01DOC'),
-            client_filename: session?.filename ?? 'multipart.file',
-            documentable_type: body.documentable_type,
-            documentable_id: body.documentable_id,
-            status: 'ready',
-            storage_file: { id: this.generateId('01FIL') },
-          }),
+          JSON.stringify(doc),
           { status: 201, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -444,6 +505,149 @@ export class FakeServer {
         session.status = 'aborted';
       }
       return new Response(null, { status: 204 });
+    }
+
+    // 10. POST {baseUrl}/attach
+    if (method === 'POST' && pathname === `${this.baseUrl}/attach`) {
+      const body = (parsedBody ?? {}) as Record<string, unknown>;
+      const sessionId = String(body.session_id);
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        session.status = 'attached';
+      }
+      const docId = this.generateId('01DOC');
+      const queue = this.documentStatusQueues.get(docId) ?? this.statusQueue;
+      const status = queue && queue.length > 0 ? (queue.length > 1 ? queue.shift()! : queue[0]!) : this.defaultDocumentStatus;
+      const doc: Record<string, unknown> = {
+        id: docId,
+        client_filename: session?.filename ?? 'attached.file',
+        documentable_type: body.documentable_type,
+        documentable_id: body.documentable_id,
+        document_group_id: body.document_group_id ?? this.generateId('01GRP'),
+        status,
+        metadata: (body.metadata as Record<string, unknown>) ?? {},
+        storage_file: { id: this.generateId('01FIL') },
+      };
+      this.documents.set(docId, doc);
+      return new Response(JSON.stringify(doc), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // 11. POST {baseUrl}/handshake
+    if (method === 'POST' && pathname === `${this.baseUrl}/handshake`) {
+      const body = (parsedBody ?? {}) as Record<string, unknown>;
+      const size = Number(body.size);
+      const hash = String(body.hash).toLowerCase();
+      const challengeId = this.generateId('01CHAL');
+      const nonce = crypto.randomBytes(32).toString('hex');
+
+      const stored = this.storedUploads.get(hash);
+      const half = Math.floor(size / 2);
+      const r1Len = Math.min(16, half || 1);
+      const r2Len = Math.min(16, size - half || 1);
+      const ranges = [
+        { offset: 0, length: r1Len },
+        { offset: half, length: r2Len },
+      ];
+
+      if (stored && stored.byteLength === size) {
+        this.challenges.set(challengeId, { challengeId, nonce, ranges, isDecoy: false, hash, size });
+      } else {
+        this.challenges.set(challengeId, { challengeId, nonce, ranges, isDecoy: true, size });
+      }
+
+      return new Response(JSON.stringify({ challenge_id: challengeId, nonce, ranges }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // 12. POST {baseUrl}/handshake/answer
+    if (method === 'POST' && pathname === `${this.baseUrl}/handshake/answer`) {
+      const body = (parsedBody ?? {}) as Record<string, unknown>;
+      const challengeId = String(body.challenge_id);
+      const proof = String(body.proof).toLowerCase();
+      const challenge = this.challenges.get(challengeId);
+      const invalidFixture = loadFixture('handshake-answer-invalid.json');
+
+      if (!challenge || challenge.isDecoy || !challenge.hash) {
+        return new Response(JSON.stringify(invalidFixture), {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const stored = this.storedUploads.get(challenge.hash);
+      if (!stored) {
+        return new Response(JSON.stringify(invalidFixture), {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const slices = challenge.ranges.map(r => stored.subarray(r.offset, r.offset + r.length));
+      const concatenated = Buffer.concat(slices);
+      const expectedProof = crypto.createHash('sha256').update(challenge.nonce).update(concatenated).digest('hex');
+
+      if (proof !== expectedProof) {
+        return new Response(JSON.stringify(invalidFixture), {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const sessionId = this.generateId();
+      this.sessions.set(sessionId, {
+        id: sessionId,
+        kind: 'presigned',
+        status: 'uploaded',
+        typeId: 'type_doc',
+        filename: String(body.filename ?? 'file.pdf'),
+        size: challenge.size,
+        hash: challenge.hash,
+      });
+
+      return new Response(
+        JSON.stringify({
+          session_id: sessionId,
+          session: {
+            id: sessionId,
+            status: 'uploaded',
+            client_filename: body.filename ?? 'file.pdf',
+            object_size: challenge.size,
+          },
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 13. GET {baseUrl}/:document (show route)
+    const showPrefix = `${this.baseUrl}/`;
+    if (method === 'GET' && pathname.startsWith(showPrefix)) {
+      const rest = pathname.slice(showPrefix.length);
+      if (!rest.includes('/') && rest !== 'config' && rest !== 'types' && !rest.startsWith('multipart/')) {
+        const documentId = rest;
+        const showTemplate = loadFixture('document-show.json') as Record<string, unknown>;
+        const existing = this.documents.get(documentId);
+        const queue = this.documentStatusQueues.get(documentId) ?? this.statusQueue;
+        let status = (existing?.status as string) ?? this.defaultDocumentStatus;
+        if (queue && queue.length > 0) {
+          status = queue.length > 1 ? queue.shift()! : queue[0]!;
+          if (existing) existing.status = status;
+        }
+
+        return new Response(
+          JSON.stringify({
+            ...showTemplate,
+            ...(existing ?? {}),
+            id: documentId,
+            status,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     return new Response(JSON.stringify({ message: 'Route not found' }), {

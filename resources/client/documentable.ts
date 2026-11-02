@@ -11,6 +11,26 @@ export interface UploadOptions {
   onProgress?: (p: { loaded: number; total: number }) => void;
   signal?: AbortSignal;
   resumeSessionId?: string;                       // continue an interrupted multipart upload
+  dedup?: boolean;                                // default true: attempt proof-of-possession handshake before uploading
+  waitForProcessing?: boolean;                    // default true: poll show route while status is 'processing'
+  processingTimeoutMs?: number;                   // default 120000 ms
+  pollIntervalMs?: number;                        // default 2000 ms
+}
+
+export interface ClientRoutes {
+  config?: () => { url: string };
+  presign?: () => { url: string };
+  presignFinalize?: () => { url: string };
+  attach?: () => { url: string };
+  handshake?: () => { url: string };
+  handshakeAnswer?: () => { url: string };
+  multipartInitiate?: () => { url: string };
+  multipartPartUrls?: () => { url: string };
+  multipartParts?: () => { url: string };
+  multipartStatus?: () => { url: string };
+  multipartComplete?: () => { url: string };
+  multipartAbort?: () => { url: string };
+  show?: (params: { document: string }) => { url: string };
 }
 
 export interface ClientOptions {
@@ -19,6 +39,8 @@ export interface ClientOptions {
   headers?: () => Record<string, string> | Promise<Record<string, string>>; // auth, XSRF, etc, added to every server request
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
+  now?: () => number;
+  routes?: ClientRoutes;
 }
 
 export interface UploadResult {
@@ -35,7 +57,9 @@ export type UploadErrorCode =
   | 'validation'
   | 'forbidden'
   | 'server'
-  | 'part_failed';
+  | 'part_failed'
+  | 'rejected'
+  | 'processing_timeout';
 
 export class UploadError extends Error {
   readonly code: UploadErrorCode;
@@ -183,6 +207,11 @@ export async function hashBlob(blob: Blob, signal?: AbortSignal): Promise<string
   return sha.digest();
 }
 
+/** Computes lower-case hex sha256(nonce || concatenated range bytes) matching RangeProof::computeFromConcatenated. */
+export function computeRangeProof(nonce: string, concatenatedRanges: Uint8Array): string {
+  return new Sha256().update(nonce).update(concatenatedRanges).digest();
+}
+
 /** Uniform part sizing matching PartSizePlanner: >= 5 MiB, uniform rounded up to 1 MiB. */
 function computePartSize(totalBytes: number, minPartSize = 5 * 1024 * 1024): number {
   const ONE_MIB = 1024 * 1024;
@@ -191,6 +220,45 @@ function computePartSize(totalBytes: number, minPartSize = 5 * 1024 * 1024): num
 }
 
 const defaultSleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+function resolveUrl(
+  client: ClientOptions,
+  routeName: keyof ClientRoutes,
+  defaultPath: string,
+  routeParams?: { document: string },
+  queryParams?: Record<string, string>
+): string {
+  let url: string;
+  const routeFn = client.routes?.[routeName];
+  if (routeFn) {
+    url = (routeFn as (p?: { document: string }) => { url: string })(routeParams).url;
+  } else {
+    const baseUrl = (client.baseUrl ?? '/documents').replace(/\/+$/, '');
+    url = `${baseUrl}${defaultPath}`;
+  }
+  if (queryParams && Object.keys(queryParams).length > 0) {
+    const search = new URLSearchParams(queryParams).toString();
+    url += (url.includes('?') ? '&' : '?') + search;
+  }
+  return url;
+}
+
+function getXsrfHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const doc = (globalThis as unknown as { document?: { cookie?: string } }).document;
+  if (doc && typeof doc.cookie === 'string') {
+    headers['X-Requested-With'] = 'XMLHttpRequest';
+    const match = doc.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]*)/);
+    if (match && match[1]) {
+      try {
+        headers['X-XSRF-TOKEN'] = decodeURIComponent(match[1]);
+      } catch {
+        headers['X-XSRF-TOKEN'] = match[1];
+      }
+    }
+  }
+  return headers;
+}
 
 function attachPayload(options: UploadOptions, base: Record<string, unknown>): Record<string, unknown> {
   if (options.owner) {
@@ -204,20 +272,19 @@ function attachPayload(options: UploadOptions, base: Record<string, unknown>): R
 
 async function requestServer<T>(
   client: ClientOptions,
-  path: string,
+  url: string,
   method: 'GET' | 'POST',
   body?: unknown,
   signal?: AbortSignal
 ): Promise<T> {
   const fetchFn = client.fetch ?? globalThis.fetch;
-  const baseUrl = (client.baseUrl ?? '/documents').replace(/\/+$/, '');
-  const customHeaders = client.headers ? await client.headers() : {};
+  const customHeaders = client.headers ? await client.headers() : getXsrfHeaders();
   const headers: Record<string, string> = { Accept: 'application/json', ...customHeaders };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
 
   let res: Response;
   try {
-    res = await fetchFn(`${baseUrl}${path}`, {
+    res = await fetchFn(url, {
       method,
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -251,6 +318,141 @@ async function requestServer<T>(
   }
 
   return res.status === 204 ? (undefined as unknown as T) : ((await res.json()) as T);
+}
+
+async function waitForProcessingIfNeeded(
+  initialDoc: DocumentRecord,
+  options: UploadOptions,
+  client: ClientOptions
+): Promise<DocumentRecord> {
+  if (initialDoc.status !== 'processing' || options.waitForProcessing === false) {
+    return initialDoc;
+  }
+
+  const pollIntervalMs = options.pollIntervalMs ?? 2000;
+  const timeoutMs = options.processingTimeoutMs ?? 120000;
+  const sleepFn = client.sleep ?? defaultSleep;
+  const nowFn = client.now ?? Date.now;
+  const startTime = nowFn();
+
+  let doc = initialDoc;
+  while (doc.status === 'processing') {
+    if (options.signal?.aborted) {
+      throw new UploadError('aborted', 'Document processing wait was aborted');
+    }
+    if (nowFn() - startTime >= timeoutMs) {
+      throw new UploadError('processing_timeout', `Document processing timed out after ${timeoutMs}ms`);
+    }
+
+    await sleepFn(pollIntervalMs);
+
+    if (options.signal?.aborted) {
+      throw new UploadError('aborted', 'Document processing wait was aborted');
+    }
+    if (nowFn() - startTime >= timeoutMs) {
+      throw new UploadError('processing_timeout', `Document processing timed out after ${timeoutMs}ms`);
+    }
+
+    const showUrl = resolveUrl(client, 'show', `/${encodeURIComponent(initialDoc.id)}`, { document: initialDoc.id });
+    doc = await requestServer<DocumentRecord>(client, showUrl, 'GET', undefined, options.signal);
+
+    if (doc.status === 'rejected') {
+      throw new UploadError('rejected', 'Document was rejected during processing');
+    }
+    if (doc.status === 'committed') {
+      return doc;
+    }
+  }
+
+  return doc;
+}
+
+/** Finishes a dedup hit: attaches the stored session to the owner (when there is one) and waits for processing. */
+async function finishDedupHit(sessionId: string, options: UploadOptions, client: ClientOptions): Promise<UploadResult> {
+  if (!options.owner) return { sessionId };
+
+  const attachUrl = resolveUrl(client, 'attach', '/attach');
+  const attached = await requestServer<DocumentRecord>(client, attachUrl, 'POST', attachPayload(options, { session_id: sessionId }), options.signal);
+
+  return { sessionId, document: await waitForProcessingIfNeeded(attached, options, client) };
+}
+
+/**
+ * Asks the server whether it already holds these bytes. Resolves the session id on a hit and null on a miss. Only
+ * the handshake itself may fall back: what happens after a hit (attach, waiting) must fail loudly.
+ */
+async function tryDedupHandshake(
+  file: File | (Blob & { name: string }),
+  options: UploadOptions,
+  client: ClientOptions,
+  docType: DocumentTypeConfig,
+  hash: string
+): Promise<string | null> {
+  if (options.dedup === false || file.size === 0) {
+    return null;
+  }
+
+  try {
+    const handshakeBody: Record<string, unknown> = {
+      document_type_id: docType.id,
+      hash,
+      size: file.size,
+      filename: file.name,
+    };
+    if (options.owner) {
+      handshakeBody.documentable_type = options.owner.type;
+      handshakeBody.documentable_id = String(options.owner.id);
+    }
+
+    const challengeUrl = resolveUrl(client, 'handshake', '/handshake');
+    const challenge = await requestServer<{
+      challenge_id: string;
+      nonce: string;
+      ranges: Array<{ offset: number; length: number }>;
+    }>(client, challengeUrl, 'POST', handshakeBody, options.signal);
+
+    // Ranges that fall outside the file cannot be answered: treat as a miss
+    let totalRangeBytes = 0;
+    for (const r of challenge.ranges) {
+      if (r.offset < 0 || r.length <= 0 || r.offset + r.length > file.size) {
+        return null;
+      }
+      totalRangeBytes += r.length;
+    }
+
+    const concatenatedRanges = new Uint8Array(totalRangeBytes);
+    let offset = 0;
+    for (const r of challenge.ranges) {
+      if (options.signal?.aborted) throw new UploadError('aborted', 'Upload was aborted');
+      const sliceBuf = await file.slice(r.offset, r.offset + r.length).arrayBuffer();
+      concatenatedRanges.set(new Uint8Array(sliceBuf), offset);
+      offset += r.length;
+    }
+
+    const proof = computeRangeProof(challenge.nonce, concatenatedRanges);
+    const answerUrl = resolveUrl(client, 'handshakeAnswer', '/handshake/answer');
+    const answerRes = await requestServer<{ session_id: string }>(
+      client,
+      answerUrl,
+      'POST',
+      {
+        challenge_id: challenge.challenge_id,
+        proof,
+        filename: file.name,
+      },
+      options.signal
+    );
+
+    // Hit: the server already has the bytes, so the upload is skipped.
+    return answerRes.session_id;
+  } catch (err) {
+    if (err instanceof UploadError && err.code === 'aborted') {
+      throw err;
+    }
+    // HTTP 422 on the answer means MISS (a decoy and a wrong proof are deliberately indistinguishable).
+    // ANY other failure (network, 403, 429, 5xx) must also fall back to the normal upload.
+    return null;
+  }
 }
 
 async function uploadPartWithRetry(
@@ -310,7 +512,8 @@ export function createUploader(client: ClientOptions = {}): {
 
   function getConfig(signal?: AbortSignal): Promise<ClientConfig> {
     if (!configPromise) {
-      configPromise = requestServer<ClientConfig>(client, '/config', 'GET', undefined, signal).catch(err => {
+      const configUrl = resolveUrl(client, 'config', '/config');
+      configPromise = requestServer<ClientConfig>(client, configUrl, 'GET', undefined, signal).catch(err => {
         configPromise = null;
         throw err;
       });
@@ -339,6 +542,12 @@ export function createUploader(client: ClientOptions = {}): {
     }
 
     const hash = await hashBlob(file, options.signal);
+
+    const dedupSessionId = await tryDedupHandshake(file, options, client, docType, hash);
+    if (dedupSessionId !== null) {
+      return finishDedupHit(dedupSessionId, options, client);
+    }
+
     return file.size <= config.threshold_bytes
       ? uploadSinglePut(file, options, docType, hash)
       : uploadMultipart(file, options, config, docType, hash);
@@ -350,8 +559,9 @@ export function createUploader(client: ClientOptions = {}): {
     docType: DocumentTypeConfig,
     hash: string
   ): Promise<UploadResult> {
+    const presignUrl = resolveUrl(client, 'presign', '/presigned');
     const presign = await requestServer<{ session_id: string; url: string; headers: Record<string, string> }>(
-      client, '/presigned', 'POST', {
+      client, presignUrl, 'POST', {
         document_type_id: docType.id,
         filename: file.name,
         declared_size: file.size,
@@ -375,9 +585,14 @@ export function createUploader(client: ClientOptions = {}): {
     }
 
     options.onProgress?.({ loaded: file.size, total: file.size });
+    const finalizeUrl = resolveUrl(client, 'presignFinalize', '/presigned/finalize');
     const finalizeBody = attachPayload(options, { session_id: presign.session_id, expected_hash: hash });
-    const finalized = await requestServer<Record<string, unknown>>(client, '/presigned/finalize', 'POST', finalizeBody, options.signal);
-    return { sessionId: presign.session_id, document: options.owner ? (finalized as DocumentRecord) : undefined };
+    const finalized = await requestServer<Record<string, unknown>>(client, finalizeUrl, 'POST', finalizeBody, options.signal);
+    let doc: DocumentRecord | undefined;
+    if (options.owner) {
+      doc = await waitForProcessingIfNeeded(finalized as DocumentRecord, options, client);
+    }
+    return { sessionId: presign.session_id, document: doc };
   }
 
   async function uploadMultipart(
@@ -395,13 +610,15 @@ export function createUploader(client: ClientOptions = {}): {
     // 1. Resume check
     if (options.resumeSessionId) {
       try {
+        const statusUrl = resolveUrl(client, 'multipartStatus', '/multipart/status', undefined, { session_id: options.resumeSessionId });
         const status = await requestServer<{ exists: boolean; status: string | null }>(
-          client, `/multipart/status?session_id=${encodeURIComponent(options.resumeSessionId)}`, 'GET', undefined, options.signal
+          client, statusUrl, 'GET', undefined, options.signal
         );
         if (status.exists && status.status === 'initiated') {
           sessionId = options.resumeSessionId;
+          const partsUrl = resolveUrl(client, 'multipartParts', '/multipart/parts', undefined, { session_id: sessionId });
           const { parts } = await requestServer<{ parts: Array<{ PartNumber: number; ETag: string }> }>(
-            client, `/multipart/parts?session_id=${encodeURIComponent(sessionId)}`, 'GET', undefined, options.signal
+            client, partsUrl, 'GET', undefined, options.signal
           );
           for (const p of parts) {
             completedSet.add(p.PartNumber);
@@ -416,8 +633,9 @@ export function createUploader(client: ClientOptions = {}): {
     try {
       // 2. Initiate fresh session if not resumed
       if (!sessionId) {
+        const initUrl = resolveUrl(client, 'multipartInitiate', '/multipart/initiate');
         const init = await requestServer<{ id: string; part_size?: number }>(
-          client, '/multipart/initiate', 'POST', {
+          client, initUrl, 'POST', {
             document_type_id: docType.id,
             filename: file.name,
             declared_size: file.size,
@@ -454,8 +672,9 @@ export function createUploader(client: ClientOptions = {}): {
         while (!urlCache.has(pNum)) {
           if (!pendingBatch) {
             const needed = partsToUpload.filter(p => !urlCache.has(p)).slice(0, 100);
+            const partUrlsUrl = resolveUrl(client, 'multipartPartUrls', '/multipart/part-urls');
             pendingBatch = requestServer<{ urls: Record<string, string> }>(
-              client, '/multipart/part-urls', 'POST', { session_id: sessionId, part_numbers: needed }, inner.signal
+              client, partUrlsUrl, 'POST', { session_id: sessionId, part_numbers: needed }, inner.signal
             ).then(res => {
               for (const [k, v] of Object.entries(res.urls)) urlCache.set(Number(k), v);
               pendingBatch = null;
@@ -509,15 +728,21 @@ export function createUploader(client: ClientOptions = {}): {
         completedParts.sort((a, b) => a.PartNumber - b.PartNumber);
         completeBody.parts = completedParts;
       }
+      const completeUrl = resolveUrl(client, 'multipartComplete', '/multipart/complete');
       const completeRes = await requestServer<Record<string, unknown>>(
-        client, '/multipart/complete', 'POST', completeBody, options.signal
+        client, completeUrl, 'POST', completeBody, options.signal
       );
-      return { sessionId, document: options.owner ? (completeRes as DocumentRecord) : undefined };
+      let doc: DocumentRecord | undefined;
+      if (options.owner) {
+        doc = await waitForProcessingIfNeeded(completeRes as DocumentRecord, options, client);
+      }
+      return { sessionId, document: doc };
     } catch (err) {
       // Best-effort abort on failure; keep session if part_failed so caller can resume.
       if (sessionId && !(err instanceof UploadError && err.code === 'part_failed')) {
         try {
-          await requestServer(client, '/multipart/abort', 'POST', { session_id: sessionId });
+          const abortUrl = resolveUrl(client, 'multipartAbort', '/multipart/abort');
+          await requestServer(client, abortUrl, 'POST', { session_id: sessionId });
         } catch {
           // Never mask original failure
         }

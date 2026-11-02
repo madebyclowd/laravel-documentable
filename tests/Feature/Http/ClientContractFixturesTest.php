@@ -6,11 +6,14 @@ namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\UploadSession;
+use MadeByClowd\Documentable\Services\DocumentService;
 use MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver;
+use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\Support\AssertsClientFixtures;
 use MadeByClowd\Documentable\Tests\TestCase;
 
@@ -121,5 +124,16 @@ class ClientContractFixturesTest extends TestCase
             'proof' => hash('sha256', 'invalid proof'),
         ])->assertUnprocessable();
         $this->assertMatchesClientFixture('handshake-answer-invalid', $handshakeAnswerResponse);
+
+        // 10. GET /documents/{id} (document-show committed document)
+        $owner = TestModel::create(['name' => 'Owner']);
+        $document = $this->app->make(DocumentService::class)->upload(
+            UploadedFile::fake()->createWithContent('fixture-doc.pdf', "%PDF-1.4\ncontent"),
+            $type,
+            $owner,
+        );
+        $showResponse = $this->asUser(42)->getJson('/documents/'.$document->id)
+            ->assertOk();
+        $this->assertMatchesClientFixture('document-show', $showResponse);
     }
 }

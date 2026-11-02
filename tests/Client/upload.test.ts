@@ -550,4 +550,504 @@ describe('TypeScript client upload flow', () => {
     expect(partCount).toBeLessThanOrEqual(10000);
     expect(partSize).toBeGreaterThanOrEqual(5 * 1024 * 1024);
   });
+
+  describe('dedup handshake with proof of possession', () => {
+    it('hit: skips upload, calls attach when owner is set, returns document', async () => {
+      const server = new FakeServer();
+      const content = 'Pre-existing content for dedup test';
+      const fileBytes = new TextEncoder().encode(content);
+      const hash = crypto.createHash('sha256').update(fileBytes).digest('hex');
+      server.recordStoredUpload(hash, fileBytes);
+
+      const file = new File([content], 'existing.pdf', { type: 'application/pdf' });
+      const owner = { type: 'App\\Models\\User', id: 42 };
+
+      const result = await uploadFile(
+        file,
+        { type: 'passport', owner, dedup: true },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      expect(result.sessionId).toBeDefined();
+      expect(result.document).toBeDefined();
+      expect(result.document?.documentable_id).toBe('42');
+
+      // Zero storage PUTs must occur
+      const storagePuts = server.requests.filter(r => r.url.startsWith('https://storage.test/'));
+      expect(storagePuts.length).toBe(0);
+
+      // Verify handshake requests
+      const handshakeReq = server.requests.find(r => r.url === '/documents/handshake');
+      expect(handshakeReq).toBeDefined();
+      expect((handshakeReq!.body as Record<string, unknown>).hash).toBe(hash);
+      expect((handshakeReq!.body as Record<string, unknown>).size).toBe(file.size);
+
+      const answerReq = server.requests.find(r => r.url === '/documents/handshake/answer');
+      expect(answerReq).toBeDefined();
+      expect((answerReq!.body as Record<string, unknown>).proof).toBeDefined();
+
+      // Verify attach request
+      const attachReq = server.requests.find(r => r.url === '/documents/attach');
+      expect(attachReq).toBeDefined();
+      expect((attachReq!.body as Record<string, unknown>).session_id).toBe(result.sessionId);
+    });
+
+    it('hit followed by a refused attach fails the upload instead of uploading the file again', async () => {
+      const server = new FakeServer();
+      const content = 'Pre-existing content whose attach is refused';
+      const fileBytes = new TextEncoder().encode(content);
+      const hash = crypto.createHash('sha256').update(fileBytes).digest('hex');
+      server.recordStoredUpload(hash, fileBytes);
+      server.injectFailure({ urlPattern: '/documents/attach', status: 403 });
+
+      const file = new File([content], 'existing.pdf', { type: 'application/pdf' });
+
+      await expect(
+        uploadFile(file, { type: 'passport', owner: { type: 'App\\Models\\User', id: 42 } }, { baseUrl: '/documents', fetch: server.fetch })
+      ).rejects.toMatchObject({ code: 'forbidden' });
+
+      expect(server.requests.filter(r => r.url.startsWith('https://storage.test/')).length).toBe(0);
+      expect(server.requests.filter(r => r.url === '/documents/presigned').length).toBe(0);
+    });
+
+    it('hit without owner: skips upload and returns sessionId without calling attach', async () => {
+      const server = new FakeServer();
+      const content = 'Pre-existing content no owner';
+      const fileBytes = new TextEncoder().encode(content);
+      const hash = crypto.createHash('sha256').update(fileBytes).digest('hex');
+      server.recordStoredUpload(hash, fileBytes);
+
+      const file = new File([content], 'existing.pdf', { type: 'application/pdf' });
+
+      const result = await uploadFile(
+        file,
+        { type: 'passport', dedup: true },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      expect(result.sessionId).toBeDefined();
+      expect(result.document).toBeUndefined();
+
+      const storagePuts = server.requests.filter(r => r.url.startsWith('https://storage.test/'));
+      expect(storagePuts.length).toBe(0);
+
+      const attachReq = server.requests.find(r => r.url === '/documents/attach');
+      expect(attachReq).toBeUndefined();
+    });
+
+    it('miss/decoy: falls back to normal upload', async () => {
+      const server = new FakeServer();
+      const content = 'Brand new content not yet in storage';
+      const file = new File([content], 'new.pdf', { type: 'application/pdf' });
+
+      const result = await uploadFile(
+        file,
+        { type: 'passport' },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      expect(result.sessionId).toBeDefined();
+
+      // Handshake was attempted and answered (decoy 422)
+      expect(server.requests.some(r => r.url === '/documents/handshake')).toBe(true);
+      expect(server.requests.some(r => r.url === '/documents/handshake/answer')).toBe(true);
+
+      // Fell back to normal single PUT
+      const storagePuts = server.requests.filter(r => r.url.startsWith('https://storage.test/'));
+      expect(storagePuts.length).toBe(1);
+    });
+
+    it('wrong proof 422: falls back to normal upload', async () => {
+      const server = new FakeServer();
+      const content = 'Content for wrong proof fallback test';
+      const fileBytes = new TextEncoder().encode(content);
+      const hash = crypto.createHash('sha256').update(fileBytes).digest('hex');
+      server.recordStoredUpload(hash, fileBytes);
+
+      // Force 422 on handshake/answer
+      server.injectFailure({
+        urlPattern: '/handshake/answer',
+        status: 422,
+        body: { message: 'The provided proof is invalid.' },
+      });
+
+      const file = new File([content], 'wrong.pdf', { type: 'application/pdf' });
+
+      const result = await uploadFile(
+        file,
+        { type: 'passport' },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      expect(result.sessionId).toBeDefined();
+      // Storage PUT happened after fallback
+      const storagePuts = server.requests.filter(r => r.url.startsWith('https://storage.test/'));
+      expect(storagePuts.length).toBe(1);
+    });
+
+    it('handshake 429 or 500 falls back to normal upload', async () => {
+      const server = new FakeServer();
+      server.injectFailure({
+        urlPattern: '/handshake',
+        status: 429,
+        body: { message: 'Too many requests' },
+      });
+
+      const content = 'Content for 429 fallback test';
+      const file = new File([content], 'fallback.pdf', { type: 'application/pdf' });
+
+      const result = await uploadFile(
+        file,
+        { type: 'passport' },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      expect(result.sessionId).toBeDefined();
+      const storagePuts = server.requests.filter(r => r.url.startsWith('https://storage.test/'));
+      expect(storagePuts.length).toBe(1);
+    });
+
+    it('dedup: false makes zero handshake requests', async () => {
+      const server = new FakeServer();
+      const content = 'No dedup requested';
+      const file = new File([content], 'nodedup.pdf', { type: 'application/pdf' });
+
+      await uploadFile(
+        file,
+        { type: 'passport', dedup: false },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      const handshakeReqs = server.requests.filter(r => r.url.includes('/handshake'));
+      expect(handshakeReqs.length).toBe(0);
+    });
+
+    it('size 0 makes zero handshake requests', async () => {
+      const server = new FakeServer();
+      const file = new File([], 'empty.pdf', { type: 'application/pdf' });
+
+      await uploadFile(
+        file,
+        { type: 'passport' },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      const handshakeReqs = server.requests.filter(r => r.url.includes('/handshake'));
+      expect(handshakeReqs.length).toBe(0);
+    });
+
+    it('handshake abort propagates', async () => {
+      const server = new FakeServer();
+      const controller = new AbortController();
+
+      server.injectFailure({
+        urlPattern: '/handshake',
+        predicate: () => {
+          controller.abort();
+          return true;
+        },
+        delayMs: 10,
+      });
+
+      const content = 'Abort during handshake';
+      const file = new File([content], 'abort.pdf', { type: 'application/pdf' });
+
+      await expect(
+        uploadFile(
+          file,
+          { type: 'passport', signal: controller.signal },
+          { baseUrl: '/documents', fetch: server.fetch }
+        )
+      ).rejects.toMatchObject({
+        code: 'aborted',
+      });
+    });
+  });
+
+  describe('wait for processing', () => {
+    it('committed after N polls', async () => {
+      const server = new FakeServer();
+      let virtualTime = 0;
+
+      const file = new File(['small file for processing poll'], 'doc.pdf', { type: 'application/pdf' });
+
+      // Document initially processing, turns committed on 3rd poll
+      server.defaultDocumentStatus = 'processing';
+      server.setDocumentStatus(['processing', 'processing', 'committed']);
+
+      const result = await uploadFile(
+        file,
+        {
+          type: 'passport',
+          owner: { type: 'App\\Models\\User', id: 1 },
+          pollIntervalMs: 500,
+        },
+        {
+          baseUrl: '/documents',
+          fetch: server.fetch,
+          now: () => virtualTime,
+          sleep: async ms => { virtualTime += ms; },
+        }
+      );
+
+      expect(result.document).toBeDefined();
+      expect(result.document?.status).toBe('committed');
+
+      const showRequests = server.requests.filter(r => r.method === 'GET' && r.url.startsWith('/documents/01DOC'));
+      expect(showRequests.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('rejected throws UploadError with code "rejected"', async () => {
+      const server = new FakeServer();
+      let virtualTime = 0;
+
+      const file = new File(['file destined to be rejected'], 'doc.pdf', { type: 'application/pdf' });
+      server.defaultDocumentStatus = 'processing';
+      server.setDocumentStatus(['processing', 'rejected']);
+
+      await expect(
+        uploadFile(
+          file,
+          {
+            type: 'passport',
+            owner: { type: 'App\\Models\\User', id: 1 },
+            pollIntervalMs: 200,
+          },
+          {
+            baseUrl: '/documents',
+            fetch: server.fetch,
+            now: () => virtualTime,
+            sleep: async ms => { virtualTime += ms; },
+          }
+        )
+      ).rejects.toMatchObject({
+        code: 'rejected',
+      });
+    });
+
+    it('timeout throws UploadError with code "processing_timeout"', async () => {
+      const server = new FakeServer();
+      let virtualTime = 0;
+
+      const file = new File(['stuck file'], 'doc.pdf', { type: 'application/pdf' });
+      server.defaultDocumentStatus = 'processing';
+
+      await expect(
+        uploadFile(
+          file,
+          {
+            type: 'passport',
+            owner: { type: 'App\\Models\\User', id: 1 },
+            pollIntervalMs: 1000,
+            processingTimeoutMs: 3000,
+          },
+          {
+            baseUrl: '/documents',
+            fetch: server.fetch,
+            now: () => virtualTime,
+            sleep: async ms => { virtualTime += ms; },
+          }
+        )
+      ).rejects.toMatchObject({
+        code: 'processing_timeout',
+      });
+    });
+
+    it('abort during polling wait propagates', async () => {
+      const server = new FakeServer();
+      const controller = new AbortController();
+      let virtualTime = 0;
+
+      const file = new File(['file to abort during poll'], 'doc.pdf', { type: 'application/pdf' });
+      server.defaultDocumentStatus = 'processing';
+
+      await expect(
+        uploadFile(
+          file,
+          {
+            type: 'passport',
+            owner: { type: 'App\\Models\\User', id: 1 },
+            pollIntervalMs: 1000,
+            signal: controller.signal,
+          },
+          {
+            baseUrl: '/documents',
+            fetch: server.fetch,
+            now: () => virtualTime,
+            sleep: async ms => {
+              virtualTime += ms;
+              controller.abort();
+            },
+          }
+        )
+      ).rejects.toMatchObject({
+        code: 'aborted',
+      });
+    });
+
+    it('waitForProcessing: false returns processing document untouched without polling', async () => {
+      const server = new FakeServer();
+      const file = new File(['file no wait'], 'doc.pdf', { type: 'application/pdf' });
+      server.defaultDocumentStatus = 'processing';
+
+      const result = await uploadFile(
+        file,
+        {
+          type: 'passport',
+          owner: { type: 'App\\Models\\User', id: 1 },
+          waitForProcessing: false,
+        },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      expect(result.document?.status).toBe('processing');
+      const showRequests = server.requests.filter(r => r.method === 'GET' && r.url.startsWith('/documents/01DOC'));
+      expect(showRequests.length).toBe(0);
+    });
+
+    it('no polling when document status is already committed', async () => {
+      const server = new FakeServer();
+      const file = new File(['already committed'], 'doc.pdf', { type: 'application/pdf' });
+      server.defaultDocumentStatus = 'committed';
+
+      const result = await uploadFile(
+        file,
+        {
+          type: 'passport',
+          owner: { type: 'App\\Models\\User', id: 1 },
+        },
+        { baseUrl: '/documents', fetch: server.fetch }
+      );
+
+      expect(result.document?.status).toBe('committed');
+      const showRequests = server.requests.filter(r => r.method === 'GET' && r.url.startsWith('/documents/01DOC'));
+      expect(showRequests.length).toBe(0);
+    });
+  });
+
+  describe('XSRF and request headers', () => {
+    it('sends X-XSRF-TOKEN and X-Requested-With on server requests when document.cookie exists', async () => {
+      const server = new FakeServer();
+      const content = 'XSRF test file';
+      const file = new File([content], 'xsrf.pdf', { type: 'application/pdf' });
+
+      // Stub globalThis.document
+      const originalDoc = (globalThis as unknown as { document?: unknown }).document;
+      (globalThis as unknown as { document: { cookie: string } }).document = {
+        cookie: 'foo=bar; XSRF-TOKEN=test%3Dtoken%2B123; baz=qux',
+      };
+
+      try {
+        await uploadFile(
+          file,
+          { type: 'passport' },
+          { baseUrl: '/documents', fetch: server.fetch }
+        );
+
+        // Check server request headers
+        const configReq = server.requests.find(r => r.url === '/documents/config');
+        expect(configReq).toBeDefined();
+        expect(configReq!.headers['x-requested-with']).toBe('XMLHttpRequest');
+        expect(configReq!.headers['x-xsrf-token']).toBe('test=token+123');
+
+        // Storage PUT must NEVER have these headers
+        const storageReq = server.requests.find(r => r.url.startsWith('https://storage.test/'));
+        expect(storageReq).toBeDefined();
+        expect(storageReq!.headers['x-requested-with']).toBeUndefined();
+        expect(storageReq!.headers['x-xsrf-token']).toBeUndefined();
+      } finally {
+        if (originalDoc === undefined) {
+          delete (globalThis as unknown as { document?: unknown }).document;
+        } else {
+          (globalThis as unknown as { document: unknown }).document = originalDoc;
+        }
+      }
+    });
+
+    it('headers callback replaces default headers entirely', async () => {
+      const server = new FakeServer();
+      const content = 'Headers callback test';
+      const file = new File([content], 'callback.pdf', { type: 'application/pdf' });
+
+      const originalDoc = (globalThis as unknown as { document?: unknown }).document;
+      (globalThis as unknown as { document: { cookie: string } }).document = {
+        cookie: 'XSRF-TOKEN=secret',
+      };
+
+      try {
+        await uploadFile(
+          file,
+          { type: 'passport' },
+          {
+            baseUrl: '/documents',
+            fetch: server.fetch,
+            headers: () => ({ 'Authorization': 'Bearer custom-token' }),
+          }
+        );
+
+        const configReq = server.requests.find(r => r.url === '/documents/config');
+        expect(configReq).toBeDefined();
+        expect(configReq!.headers['authorization']).toBe('Bearer custom-token');
+        // Default XSRF/Requested-With replaced
+        expect(configReq!.headers['x-requested-with']).toBeUndefined();
+        expect(configReq!.headers['x-xsrf-token']).toBeUndefined();
+      } finally {
+        if (originalDoc === undefined) {
+          delete (globalThis as unknown as { document?: unknown }).document;
+        } else {
+          (globalThis as unknown as { document: unknown }).document = originalDoc;
+        }
+      }
+    });
+  });
+
+  describe('routes option', () => {
+    it('overrides default path with route URL, and appends query strings with ? or &', async () => {
+      const server = new FakeServer();
+      const file = new File(['small file for routes'], 'routes.pdf', { type: 'application/pdf' });
+
+      await uploadFile(
+        file,
+        { type: 'passport' },
+        {
+          baseUrl: '/documents',
+          fetch: server.fetch,
+          routes: {
+            config: () => ({ url: '/documents/config' }), // default path
+            presign: () => ({ url: '/documents/presigned' }), // default path
+            presignFinalize: () => ({ url: '/documents/presigned/finalize' }),
+          },
+        }
+      );
+
+      expect(server.requests.some(r => r.url === '/documents/config')).toBe(true);
+      expect(server.requests.some(r => r.url === '/documents/presigned')).toBe(true);
+    });
+
+    it('uses custom route URL for multipart status with query string appended', async () => {
+      const server = new FakeServer();
+      const file = new File([new Uint8Array(11 * 1024 * 1024)], 'large.pdf', { type: 'application/pdf' });
+
+      // Test with custom route that has existing query param
+      const customUrl = '/documents/multipart/status';
+      await uploadFile(
+        file,
+        {
+          type: 'archive',
+          resumeSessionId: '01RESUMESESSIONID00000000',
+        },
+        {
+          baseUrl: '/documents',
+          fetch: server.fetch,
+          routes: {
+            multipartStatus: () => ({ url: `${customUrl}?foo=bar` }),
+          },
+        }
+      );
+
+      const statusReq = server.requests.find(r => r.url.startsWith(customUrl));
+      expect(statusReq).toBeDefined();
+      expect(statusReq!.url).toContain('foo=bar&session_id=01RESUMESESSIONID00000000');
+    });
+  });
 });

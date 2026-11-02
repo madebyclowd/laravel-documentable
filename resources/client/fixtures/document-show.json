@@ -1,0 +1,23 @@
+{
+    "client_filename": "fixture-doc.pdf",
+    "created_at": "<timestamp>",
+    "created_by": null,
+    "deleted_at": null,
+    "deleted_by": null,
+    "document_group_id": "<id>",
+    "document_type_id": "<id>",
+    "documentable_id": "1",
+    "documentable_type": "test_model",
+    "expires_at": null,
+    "id": "<id>",
+    "is_latest": true,
+    "latest_marker": "<id>",
+    "metadata": {
+        "mime_type": "application/pdf",
+        "size": 16
+    },
+    "status": "committed",
+    "storage_file_id": "<id>",
+    "updated_at": "<timestamp>",
+    "version": 1
+}

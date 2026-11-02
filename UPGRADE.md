@@ -174,6 +174,18 @@ Search your frontend upload code or API client for `multipart/part-url` that is 
 **Manual step:**
 Update client uploader code to call `POST /documents/multipart/part-urls` with `part_numbers` (up to 100 part numbers per request) and read the presigned URLs from the `urls` object keyed by part number.
 
+### Replace a hand-written uploader
+
+Instead of updating custom upload implementations to adapt to the new batched part URLs (and removing calls to the former single `part-url` route), applications may optionally delete their hand-written uploader entirely and adopt the official TypeScript client helper.
+
+Publish the helper with:
+
+```bash
+php artisan vendor:publish --tag=documentable-client
+```
+
+The published client (`resources/js/vendor/documentable/documentable.ts`) handles configuration discovery, chunk calculation, hashing, dedup handshake with proof of possession, batched part URLs, retry with exponential backoff, and processing status polling.
+
 ### Authorization contract rewritten
 
 Authorization has two stages. `canInitiateUpload($user, $type)` runs when a session is started, before any owner exists, so it can only decide on the user and the document type. `canAttach($user, $source, $owner)` runs when the upload is attached to its owner, and it cannot be bypassed. Put rules that depend on the owner ("execution evidence follows the project's permissions, everything else needs an admin") in `canAttach`. A user who passes `canInitiateUpload` but fails `canAttach` has uploaded bytes that nothing refers to; the throttle and the expired-session cleanup bound that cost.

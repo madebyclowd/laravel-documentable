@@ -113,6 +113,27 @@ jobs:
       - name: Audit dependencies for known advisories
         run: composer audit
 
+  client:
+    runs-on: ubuntu-latest
+    name: TypeScript client
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
   backward-compatibility:
     runs-on: ubuntu-latest
     name: Backward compatibility vs 2.x (report only)
