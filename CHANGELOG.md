@@ -7,6 +7,17 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0-alpha.11] - 2026-11-02
+
+### Removed
+- `POST /documents/multipart/part-url` is replaced by `POST /documents/multipart/part-urls`, which signs up to 100 parts in one request with one session load. Clients that asked for one URL per part must send `part_numbers[]` instead; see the upgrade guide.
+
+### Added
+- `GET /documents/config` tells a browser uploader what the server already knows: the multipart threshold, part size bounds, upload concurrency, the retry policy, the hashing limit and the types the caller may upload to. The concurrency and retry policy come from the new `client` config section.
+- The TypeScript client keeps a multipart session after a lost connection and tells the caller its id. `onSession(id)` fires once the session exists, and `error.sessionId` is set when the session was kept, so an app can save the id and pass it back as `resumeSessionId`. Signing part URLs and reading session status and parts are now retried with the configured backoff, and a failed request waits for the browser's `online` event while it reports offline. `initiate` and `complete` are not retried. A refusal or the caller's own abort still aborts the session.
+- `GET /documents/{document}` returns a document with its status, so a client can wait for a `processing` document to turn `committed` or `rejected`. It is gated by `canView`.
+- A dependency-free TypeScript upload client, published with `php artisan vendor:publish --tag=documentable-client`. `uploadFile()` hashes the file incrementally, answers the dedup handshake with a proof of possession, uploads by presigned PUT or multipart with parallel parts, retry, resume and abort, waits for a `processing` document, and accepts Wayfinder route functions.
+
 ## [3.0.0-alpha.10] - 2026-11-01
 
 ### Changed
@@ -324,3 +335,5 @@ Initial release.
 [3.0.0-alpha.9]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.8...v3.0.0-alpha.9
 
 [3.0.0-alpha.10]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.9...v3.0.0-alpha.10
+
+[3.0.0-alpha.11]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.10...v3.0.0-alpha.11
