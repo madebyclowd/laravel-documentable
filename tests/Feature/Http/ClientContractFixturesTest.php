@@ -70,7 +70,7 @@ class ClientContractFixturesTest extends TestCase
         $initiateResponse = $this->asUser(42)->postJson('/documents/multipart/initiate', [
             'document_type_id' => $type->id,
             'filename' => 'large-file.pdf',
-            'declared_size' => 10485760,
+            'declared_size' => 5242881, // one byte past the minimum part size: two parts, the smallest upload that has them
         ])->assertCreated();
         $this->assertMatchesClientFixture('multipart-initiate', $initiateResponse);
 
@@ -87,7 +87,7 @@ class ClientContractFixturesTest extends TestCase
 
         // Upload parts through FakeMultipartUploadDriver
         FakeMultipartUploadDriver::uploadPart($uploadId, 1, "%PDF-1.4\n".str_repeat('a', 5242880 - 9));
-        FakeMultipartUploadDriver::uploadPart($uploadId, 2, str_repeat('b', 5242880));
+        FakeMultipartUploadDriver::uploadPart($uploadId, 2, 'b');
 
         // 4. GET /documents/multipart/parts
         $partsResponse = $this->asUser(42)->getJson('/documents/multipart/parts?session_id='.$sessionId)
@@ -134,6 +134,7 @@ class ClientContractFixturesTest extends TestCase
         );
         $showResponse = $this->asUser(42)->getJson('/documents/'.$document->id)
             ->assertOk();
-        $this->assertMatchesClientFixture('document-show', $showResponse);
+        // The owner's key is an auto-increment id, and PostgreSQL does not reset a sequence between tests.
+        $this->assertMatchesClientFixture('document-show', [...$showResponse->json(), 'documentable_id' => '<owner id>']);
     }
 }

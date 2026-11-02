@@ -6,7 +6,7 @@
     "deleted_by": null,
     "document_group_id": "<id>",
     "document_type_id": "<id>",
-    "documentable_id": "1",
+    "documentable_id": "<owner id>",
     "documentable_type": "test_model",
     "expires_at": null,
     "id": "<id>",
