@@ -10,6 +10,9 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use MadeByClowd\Documentable\Enums\UploadSessionStatus;
+use MadeByClowd\Documentable\Http\Controllers\ClientConfigController;
+use MadeByClowd\Documentable\Http\Controllers\DocumentController;
+use MadeByClowd\Documentable\Http\Controllers\MultipartUploadController;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\UploadSession;
@@ -18,6 +21,7 @@ use MadeByClowd\Documentable\Tests\Fixtures\ConfigurableAuthorizer;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
+use ReflectionMethod;
 
 /**
  * The HTTP contract of the session flows: a client holds a session id and nothing else, only the session's own
@@ -362,6 +366,42 @@ class SessionEndpointsTest extends TestCase
 
         $this->assertNotEmpty($response->json('errors'));
         $this->assertSame([], array_values(array_filter(array_keys($response->json('errors')), fn (string $key) => ! str_starts_with($key, 'part_numbers'))), 'Only the part numbers are at fault.');
+    }
+
+    public function test_part_urls_need_a_session_id_and_a_real_part_number(): void
+    {
+        $id = $this->initiateMultipart($this->type());
+
+        $this->asUser(42)->postJson('/documents/multipart/part-urls', ['part_numbers' => [1]])
+            ->assertUnprocessable()->assertJsonValidationErrors('session_id');
+        $this->asUser(42)->postJson('/documents/multipart/part-urls', ['session_id' => $id, 'part_numbers' => [null]])
+            ->assertUnprocessable()->assertJsonValidationErrors('part_numbers.0');
+    }
+
+    public function test_a_null_user_id_is_accepted_and_numeric_strings_are_part_numbers(): void
+    {
+        $id = $this->initiateMultipart($this->type());
+
+        $this->asUser(42)->postJson('/documents/multipart/part-urls', ['session_id' => $id, 'part_numbers' => ['1', '2'], 'user_id' => null])
+            ->assertOk()->assertJsonStructure(['urls' => ['1', '2']]);
+    }
+
+    public function test_part_urls_are_refused_once_the_upload_is_completed(): void
+    {
+        $id = $this->initiateMultipart($this->type());
+        $upload = UploadSession::findOrFail($id)->upload_id;
+        FakeMultipartUploadDriver::uploadPart($upload, 1, 'hello');
+        $this->asUser(42)->postJson('/documents/multipart/complete', ['session_id' => $id])->assertOk();
+
+        $this->asUser(42)->postJson('/documents/multipart/part-urls', ['session_id' => $id, 'part_numbers' => [1]])
+            ->assertUnprocessable()->assertJsonValidationErrors('session_id');
+    }
+
+    public function test_the_new_controller_actions_are_public_entry_points(): void
+    {
+        foreach ([[ClientConfigController::class, 'show'], [DocumentController::class, 'show'], [MultipartUploadController::class, 'partUrls']] as [$class, $method]) {
+            $this->assertTrue((new ReflectionMethod($class, $method))->isPublic(), "{$class}::{$method} must be public.");
+        }
     }
 
     public function test_the_single_part_route_is_gone(): void
