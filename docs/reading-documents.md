@@ -81,6 +81,20 @@ return (new DocumentResource($document))->withUrl();
 return DocumentResource::collection($documents)->withUrl();
 ```
 
+## List, fetch, link and delete over HTTP
+
+```http
+GET /documents?documentable_type=invoice&documentable_id=42
+GET /documents/{document}
+GET /documents/{document}/url?disposition=attachment&expires_in_minutes=10
+DELETE /documents/{document}
+```
+
+- `GET /documents` lists the owner's documents. `documentable_type` and `documentable_id` are required. `document_type_id` and `page` are optional. The page size is `documentable.listing.per_page` (50 by default). The response is `{ "data": ..., "meta": ... }`, with the latest version of each group, grouped by document type and then by group. `canViewMany` decides which documents the user sees.
+- `GET /documents/{document}` returns one document, including its `status`. Clients use it to wait for a `processing` document. It asks `canView`.
+- `GET /documents/{document}/url` returns `{ "url": "..." }`. `disposition` is `inline` (the default) or `attachment`. `expires_in_minutes` is 5 by default and at most `documentable.url.max_ttl_minutes`.
+- `DELETE /documents/{document}` soft-deletes the document and answers `204`. It asks `canDelete`, and `on_delete_latest` decides what happens to the version history.
+
 ## Download links
 
 Stable HTTP endpoints for viewing and downloading documents:

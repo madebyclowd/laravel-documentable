@@ -63,6 +63,11 @@ return [
         'storage_file_grace_hours' => 24,
     ],
 
+    // Stamps server-side metadata on every attach. A class implementing ResolvesAttachMetadata, or null
+    'attach' => [
+        'metadata_resolver' => null,
+    ],
+
     // Authorization resolver contract
     'authorization' => [
         'resolver' => null, // Required in production

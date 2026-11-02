@@ -72,8 +72,8 @@ Both axes operate together: a version is pruned only when it exceeds both count 
         'name' => 'Audit Log',
         'disk' => 's3',
         'requires_versioning' => true,
-        'versions_kept' => 10,           // Retain at least 10 versions
-        'versions_retain_days' => 30,    // Retain versions up to 30 days old
+        'versions_kept' => 10,           // Keep the 10 newest versions
+        'versions_retain_days' => 30,    // Also keep anything newer than 30 days
     ],
 ],
 ```
@@ -93,7 +93,7 @@ To protect specific documents or entire groups from being pruned, add their IDs 
 
 ## Pruning versions (`documents:prune-versions`)
 
-Run the prune command on a schedule to evaluate retention rules and permanently remove expired historical versions:
+When a new version is attached to a type that has a retention rule, the package queues a job that prunes that group. Run the prune command on a schedule as well, to evaluate the rules for every group and permanently remove expired historical versions:
 
 ```bash
 # Preview versions eligible for pruning:
@@ -102,7 +102,7 @@ php artisan documents:prune-versions --dry-run
 # Prune versions for all document types:
 php artisan documents:prune-versions
 
-# Prune versions for a specific type:
+# Prune versions for a specific type (code or ID):
 php artisan documents:prune-versions --type=audit-log
 ```
 

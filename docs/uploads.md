@@ -60,6 +60,10 @@ The response includes:
 - `etag_strategy`: ETag completion strategy (`client` or `server-authoritative`).
 - `types`: Document types the authenticated user is authorized to upload to, with limits in bytes.
 
+## Upload through your server
+
+`POST /documents` accepts a `multipart/form-data` upload with a `file` field and a `document_type_id`. Add `documentable_type` and `documentable_id` to attach it in the same request. The request answers `201` with the document. Without an owner it answers `201` with an upload session to attach later. Use it when you cannot send files straight to the bucket. The bytes pass through PHP, so `upload_max_filesize` and `post_max_size` apply, and the direct flows below avoid that.
+
 ## Small files with presigned PUT
 
 For files below `multipart.threshold_bytes` (default 10MB):
@@ -72,13 +76,14 @@ For files below `multipart.threshold_bytes` (default 10MB):
    {
      "document_type_id": "9c0a1b2c-3d4e-5f6a-7b8c-9d0e1f2a3b4c",
      "filename": "invoice.pdf",
-     "file_size": 1048576
+     "declared_size": 1048576
    }
    ```
+   `declared_size`, `declared_mime` and `declared_hash` are optional. On finalize the server compares `declared_size` and `declared_hash` with the stored object and refuses a mismatch. It records `declared_mime` but ignores it: it decides the type from the file's bytes.
    Response (`200 OK`):
    ```json
    {
-     "session_id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+     "session_id": "01J9ZK3M8Q4N7V2R6T5B1C3D5E",
      "url": "https://storage.example.com/invoices/...",
      "headers": {},
      "expires_at": "2026-10-31T20:00:00+00:00"
@@ -93,7 +98,7 @@ For files below `multipart.threshold_bytes` (default 10MB):
    Content-Type: application/json
 
    {
-     "session_id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+     "session_id": "01J9ZK3M8Q4N7V2R6T5B1C3D5E",
      "expected_hash": "a1b2c3d4..."
    }
    ```
@@ -104,7 +109,7 @@ For files below `multipart.threshold_bytes` (default 10MB):
    Content-Type: application/json
 
    {
-     "session_id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+     "session_id": "01J9ZK3M8Q4N7V2R6T5B1C3D5E",
      "documentable_type": "invoice",
      "documentable_id": "42"
    }
@@ -133,12 +138,14 @@ For files at or above `multipart.threshold_bytes`:
      "declared_size": 104857600
    }
    ```
-   Response (`201 Created`):
+   Response (`201 Created`) is the upload session. These are the fields to use, and the response carries more:
    ```json
    {
-     "id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+     "id": "01J9ZK3M8Q4N7V2R6T5B1C3D5E",
+     "kind": "multipart",
      "part_size": 10485760,
-     "status": "initiated"
+     "status": "initiated",
+     "expires_at": "2026-10-31T20:00:00+00:00"
    }
    ```
 
@@ -148,7 +155,7 @@ For files at or above `multipart.threshold_bytes`:
    Content-Type: application/json
 
    {
-     "session_id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+     "session_id": "01J9ZK3M8Q4N7V2R6T5B1C3D5E",
      "part_numbers": [1, 2]
    }
    ```
@@ -160,13 +167,15 @@ For files at or above `multipart.threshold_bytes`:
    Content-Type: application/json
 
    {
-     "session_id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d",
+     "session_id": "01J9ZK3M8Q4N7V2R6T5B1C3D5E",
      "expected_hash": "e3b0c44...",
      "parts": [{"PartNumber": 1, "ETag": "\"hash\""}]
    }
    ```
 
-4. Attach via `POST /documents/attach` (or include `documentable_type` and `documentable_id` in `/complete`).
+The response is the session in `uploaded` status. If the request also carries `documentable_type` and `documentable_id`, the server attaches in the same call and returns the new `Document` (`201 Created`).
+
+4. Otherwise attach via `POST /documents/attach`.
 
 If an upload fails or the user cancels, call abort:
 ```http
@@ -174,14 +183,14 @@ POST /documents/multipart/abort
 Content-Type: application/json
 
 {
-  "session_id": "8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+  "session_id": "01J9ZK3M8Q4N7V2R6T5B1C3D5E"
 }
 ```
 
 To resume after a network interruption, check session status and uploaded parts. The [browser client](browser-client.md#connection-loss-and-resuming) does this when you pass `resumeSessionId`:
 ```http
-GET /documents/multipart/status?session_id=8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d
-GET /documents/multipart/parts?session_id=8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d
+GET /documents/multipart/status?session_id=01J9ZK3M8Q4N7V2R6T5B1C3D5E
+GET /documents/multipart/parts?session_id=01J9ZK3M8Q4N7V2R6T5B1C3D5E
 ```
 
 ## Deduplication handshake

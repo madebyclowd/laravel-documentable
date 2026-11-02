@@ -165,11 +165,14 @@ GET /documents/{document}
 
 Returns the document JSON with its current `status` (`committed`, `processing`, or `rejected`), matching the shape returned by attach and multipart complete.
 
-## Frontend integration notes
+## Writing your own client
+
+The helper does all of this already. Follow these notes only if you write your own client.
+
 
 - Compare `file.size` against `multipart.threshold_bytes` on the client. Route to `/documents/presigned` below the threshold and `/documents/multipart/initiate` at or above it.
 - Responses return raw JSON bodies without status envelopes.
-- S3 requires minimum 5MB part sizes except for the final part. 5MB to 10MB parts are recommended.
+- Use the `part_size` that `/multipart/initiate` returns. The server plans it from the declared size, with a 5 MiB minimum (except for the last part) and at most 10,000 parts.
 - Under `etag_strategy = client`, capture the `ETag` response header from each part PUT.
 - Call `/documents/multipart/abort` when an upload is cancelled to release bucket storage immediately.
 - Retry failed part PUTs before abandoning the upload.

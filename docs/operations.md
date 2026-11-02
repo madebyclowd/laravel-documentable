@@ -18,7 +18,7 @@ The reaper expires stalled upload sessions and aborts dangling provider multipar
 php artisan documents:clean-orphaned
 ```
 
-- Run on a schedule via `config('documentable.lifecycle.reaper_frequency')` (default `hourly`).
+- The package schedules this command itself, at `documentable.lifecycle.reaper_frequency` (default `hourly`). Your app must run Laravel's scheduler (`php artisan schedule:run` every minute) for it to fire.
 - Pass `--hours=N` to override the age threshold.
 - Pass `--storage-files` to retry deleting unreferenced stored files.
 - Pass `--bucket` to inspect untracked objects directly in your bucket under type prefixes (add `--apply` to delete).
@@ -37,6 +37,8 @@ Preview and apply automated integrity repairs:
 php artisan documents:repair --dry-run
 php artisan documents:repair --apply
 ```
+
+`php artisan documents:verify --repair` fixes drift while it reports it.
 
 ## Bucket configuration
 
@@ -62,7 +64,7 @@ This table compares multipart behavior across S3-compatible providers:
 | Backblaze B2 | 5 MB | 10,000 | no | variable | accepted | yes | lifecycle rule required |
 | DO Spaces | 5 MiB | 10,000 | no | variable | accepted | yes | lifecycle rule required |
 
-The Cloudflare R2 and MinIO / RustFS rows were checked against real buckets. The other rows come from provider documentation and have not been run against a real bucket.
+The AWS S3, Cloudflare R2 and MinIO / RustFS rows were checked against real buckets. The other rows come from provider documentation and have not been run against a real bucket.
 
 ## Behind a proxy
 
@@ -84,5 +86,5 @@ A dedicated client signs download and upload URLs for that host, while server-si
 1. Run `php artisan documents:sync-types` on every deploy next to `php artisan migrate`.
 2. Set `'throw' => true` on the disk configuration in `config/filesystems.php`.
 3. Run `php artisan documents:configure-bucket-lifecycle {disk}` once per bucket.
-4. Define a rate limiter for `documentable.throttle` in `AppServiceProvider`.
+4. Rate limits: if you have not defined the limiters named by `documentable.throttle` and `documentable.dedup.throttle`, the package registers one of 60 requests per minute for each, keyed by user or IP. Define your own in `AppServiceProvider` to change that.
 5. Ensure a queue worker is active to process background verification for documents in `processing` status.

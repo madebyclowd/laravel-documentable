@@ -34,7 +34,7 @@ Once raw bytes reach storage and pass initial size and MIME checks, the session 
 - `allows_multiple = false` (single slot): the owner has one document slot of this type. Uploading a replacement targets that slot.
 - `allows_multiple = true` (multi-slot): the owner can hold multiple independent document groups. Each group has its own `document_group_id`.
 - `requires_versioning = true`: subsequent uploads to the same slot increment the version number (`version = 1, 2, 3...`) and update the latest pointer.
-- `requires_versioning = false`: new uploads replace the active document in place.
+- `requires_versioning = false`: a new upload soft-deletes the previous document and starts again at version 1. No history is kept.
 
 ## Document statuses
 
@@ -47,7 +47,7 @@ Documents transition through three statuses:
 
 | Term | Meaning |
 |---|---|
-| Disk | Flysystem disk name in `config/filesystems.php`. Requires an S3-compatible service: AWS S3, Cloudflare R2, MinIO, or DigitalOcean Spaces. |
+| Disk | Flysystem disk name in `config/filesystems.php`. Requires an S3-compatible service, such as AWS S3, Cloudflare R2 or MinIO. |
 | DocumentType | A named category of upload with rules: maximum size, allowed formats, disk, prefix, and retention policies. |
 | Documentable | The Eloquent model that owns documents (`Invoice`, `User`, `Project`). Uses the `Documentable` trait. |
 | Dedup (deduplication) | Storing identical file contents once by SHA-256 hash and sharing the `StorageFile` across documents within the configured scope. |
