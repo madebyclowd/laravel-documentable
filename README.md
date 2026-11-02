@@ -23,7 +23,7 @@ $service->getUrl($document, now()->addMinutes(5));  // a private link that expir
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/upload-flow-dark.svg">
-    <img src="docs/images/upload-flow-light.svg" alt="The browser asks your Laravel app for an upload and gets a presigned URL. It then sends the file straight to the bucket, so the file never passes through PHP. The app checks the file in the bucket and attaches it to the model." width="900">
+    <img src="docs/images/upload-flow-light.svg" alt="Sequence diagram. The browser asks your Laravel app for an upload and gets a presigned URL. It sends the file straight to the bucket while PHP stays idle, then asks the app to attach it. The app checks the file in the bucket and returns the document." width="900">
   </picture>
 </p>
 

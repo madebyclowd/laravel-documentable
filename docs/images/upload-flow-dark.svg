@@ -1,19 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" font-family="Nunito, Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
-<title id="t">How an upload travels</title>
-<desc id="d">The browser asks your Laravel app for an upload, gets a presigned URL, sends the file straight to the bucket, then asks the app to attach it. The app checks the file in the bucket. The file never passes through the app.</desc>
-<rect width="960" height="420" rx="22" fill="#16171A"/>
-<text x="40" y="52" font-size="22" font-weight="800" fill="#F7F6F3">The file never touches your PHP server</text>
-<text x="40" y="78" font-size="14" fill="#A3A8B0">Your app hands out permission. The bucket receives the bytes.</text>
-<rect x="40" y="120" width="200" height="150" rx="16" fill="#202125" stroke="#34363C" stroke-width="1.5"/><rect x="68" y="120" width="144" height="5" rx="2.5" fill="#09B1EC"/><text x="140" y="188" text-anchor="middle" font-size="20" font-weight="800" fill="#F7F6F3">Browser</text><text x="140" y="214" text-anchor="middle" font-size="13.5" fill="#A3A8B0">Vue, React, Inertia</text>
-<rect x="380" y="120" width="200" height="150" rx="16" fill="#202125" stroke="#34363C" stroke-width="1.5"/><rect x="408" y="120" width="144" height="5" rx="2.5" fill="#09B1EC"/><text x="480" y="188" text-anchor="middle" font-size="20" font-weight="800" fill="#F7F6F3">Your Laravel app</text><text x="480" y="214" text-anchor="middle" font-size="13.5" fill="#A3A8B0">Rules, sessions, models</text>
-<rect x="720" y="120" width="200" height="150" rx="16" fill="#202125" stroke="#34363C" stroke-width="1.5"/><rect x="748" y="120" width="144" height="5" rx="2.5" fill="#09B1EC"/><text x="820" y="188" text-anchor="middle" font-size="20" font-weight="800" fill="#F7F6F3">Your bucket</text><text x="820" y="214" text-anchor="middle" font-size="13.5" fill="#A3A8B0">S3, R2, MinIO</text>
-<line x1="250" y1="168" x2="360" y2="168" stroke="#F7F6F3" stroke-width="2.5" stroke-linecap="round"/><polygon points="370,168 360,162 360,174" fill="#F7F6F3"/><circle cx="264" cy="151" r="0" fill="none"/><text x="310.0" y="159" text-anchor="middle" font-size="13.5" font-weight="600" fill="#F7F6F3">1  Ask to upload</text>
-<line x1="370" y1="206" x2="260" y2="206" stroke="#F7F6F3" stroke-width="2.5" stroke-linecap="round"/><polygon points="250,206 260,200 260,212" fill="#F7F6F3"/><circle cx="356" cy="189" r="0" fill="none"/><text x="310.0" y="197" text-anchor="middle" font-size="13.5" font-weight="600" fill="#F7F6F3">2  Presigned URL</text>
-<line x1="250" y1="244" x2="360" y2="244" stroke="#F7F6F3" stroke-width="2.5" stroke-linecap="round"/><polygon points="370,244 360,238 360,250" fill="#F7F6F3"/><circle cx="264" cy="227" r="0" fill="none"/><text x="310.0" y="235" text-anchor="middle" font-size="13.5" font-weight="600" fill="#F7F6F3">4  Attach it</text>
-<line x1="590" y1="206" x2="700" y2="206" stroke="#F7F6F3" stroke-width="2.5" stroke-linecap="round"/><polygon points="710,206 700,200 700,212" fill="#F7F6F3"/><circle cx="604" cy="189" r="0" fill="none"/><text x="650.0" y="197" text-anchor="middle" font-size="13.5" font-weight="600" fill="#F7F6F3">5  Check the file</text>
-<path d="M140,270 C140,372 820,372 820,278" fill="none" stroke="#09B1EC" stroke-width="5" stroke-linecap="round"/>
-<polygon points="820,272 810,286 830,286" fill="#09B1EC"/>
-<rect x="310" y="334" width="340" height="40" rx="20" fill="#FFB020"/>
-<text x="480" y="360" text-anchor="middle" font-size="15.5" font-weight="800" fill="#16171A">3  The file goes straight to the bucket</text>
-<text x="480" y="402" text-anchor="middle" font-size="12.5" fill="#A3A8B0">Large files upload in parts and can resume. The app only ever sees a session id.</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 672" width="960" height="672" role="img" aria-labelledby="upload-flow-title upload-flow-desc">
+<title id="upload-flow-title">How an upload travels</title>
+<desc id="upload-flow-desc">Sequence diagram: the browser asks the Laravel app for an upload and gets a presigned URL, sends the file straight to the bucket while the app stays idle, then asks the app to attach it. The app checks the file in the bucket and returns the document.</desc>
+<defs>
+<marker id="upload-flow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#A3A8B0"/></marker>
+<marker id="upload-flow-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#09B1EC"/></marker>
+</defs>
+<rect width="960" height="672" fill="#16171A"/>
+<line x1="160" y1="128" x2="160" y2="584" stroke="rgba(247,246,243,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="480" y1="128" x2="480" y2="584" stroke="rgba(247,246,243,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<line x1="800" y1="128" x2="800" y2="584" stroke="rgba(247,246,243,0.22)" stroke-width="1" stroke-dasharray="3,3"/>
+<rect x="476" y="176" width="8" height="48" fill="rgba(247,246,243,0.06)" stroke="#A3A8B0" stroke-width="0.8"/>
+<rect x="476" y="448" width="8" height="100" fill="rgba(247,246,243,0.06)" stroke="#A3A8B0" stroke-width="0.8"/>
+<rect x="796" y="288" width="8" height="96" fill="rgba(247,246,243,0.06)" stroke="#A3A8B0" stroke-width="0.8"/>
+<rect x="796" y="480" width="8" height="36" fill="rgba(247,246,243,0.06)" stroke="#A3A8B0" stroke-width="0.8"/>
+<line x1="160" y1="176" x2="476" y2="176" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#upload-flow-arrow)"/>
+<line x1="476" y1="224" x2="160" y2="224" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#upload-flow-arrow)"/>
+<line x1="160" y1="288" x2="796" y2="288" stroke="#09B1EC" stroke-width="2.4" marker-end="url(#upload-flow-arrow-accent)"/>
+<line x1="796" y1="384" x2="160" y2="384" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#upload-flow-arrow)"/>
+<line x1="160" y1="448" x2="476" y2="448" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#upload-flow-arrow)"/>
+<line x1="484" y1="480" x2="796" y2="480" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#upload-flow-arrow)"/>
+<line x1="796" y1="512" x2="484" y2="512" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#upload-flow-arrow)"/>
+<line x1="476" y1="544" x2="160" y2="544" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#upload-flow-arrow)"/>
+<rect x="260" y="152" width="120" height="16" rx="2" fill="#16171A"/>
+<text x="320" y="164" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ASK TO UPLOAD</text>
+<rect x="260" y="200" width="120" height="16" rx="2" fill="#16171A"/>
+<text x="320" y="212" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PRESIGNED URL</text>
+<rect x="584" y="264" width="112" height="16" rx="2" fill="#16171A"/>
+<text x="640" y="276" fill="#09B1EC" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PUT THE FILE</text>
+<rect x="608" y="360" width="64" height="16" rx="2" fill="#16171A"/>
+<text x="640" y="372" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">200 OK</text>
+<rect x="276" y="424" width="88" height="16" rx="2" fill="#16171A"/>
+<text x="320" y="436" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ATTACH IT</text>
+<rect x="592" y="456" width="96" height="16" rx="2" fill="#16171A"/>
+<text x="640" y="468" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CHECK FILE</text>
+<rect x="584" y="488" width="112" height="16" rx="2" fill="#16171A"/>
+<text x="640" y="500" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">FILE IS FINE</text>
+<rect x="280" y="520" width="80" height="16" rx="2" fill="#16171A"/>
+<text x="320" y="532" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">DOCUMENT</text>
+<path d="M 640 316 L 640 292" fill="none" stroke="#09B1EC" stroke-opacity="0.6" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="640" cy="292" r="2" fill="#09B1EC"/>
+<text x="640" y="336" fill="#09B1EC" font-size="16" font-style="italic" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif" text-anchor="middle">PHP never sees these bytes</text>
+<rect x="60" y="48" width="200" height="64" rx="6" fill="#16171A"/>
+<rect x="60" y="48" width="200" height="64" rx="6" fill="rgba(247,246,243,0.06)" stroke="rgba(247,246,243,0.45)" stroke-width="1"/>
+<text x="160" y="76" fill="#F7F6F3" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Browser</text>
+<text x="160" y="96" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">Vue, React, Inertia</text>
+<rect x="380" y="48" width="200" height="64" rx="6" fill="#16171A"/>
+<rect x="380" y="48" width="200" height="64" rx="6" fill="rgba(247,246,243,0.06)" stroke="rgba(247,246,243,0.45)" stroke-width="1"/>
+<text x="480" y="76" fill="#F7F6F3" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Your Laravel app</text>
+<text x="480" y="96" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">rules + sessions</text>
+<rect x="700" y="48" width="200" height="64" rx="6" fill="#16171A"/>
+<rect x="700" y="48" width="200" height="64" rx="6" fill="rgba(9,177,236,0.12)" stroke="#09B1EC" stroke-width="1"/>
+<text x="800" y="76" fill="#F7F6F3" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Your bucket</text>
+<text x="800" y="96" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">S3, R2, MinIO</text>
+<line x1="56" y1="608" x2="904" y2="608" stroke="rgba(247,246,243,0.14)" stroke-width="0.8"/>
+<text x="56" y="632" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<line x1="56" y1="652" x2="88" y2="652" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#upload-flow-arrow)"/>
+<text x="100" y="656" fill="#A3A8B0" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Request</text>
+<line x1="216" y1="652" x2="248" y2="652" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#upload-flow-arrow)"/>
+<text x="260" y="656" fill="#A3A8B0" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Reply</text>
+<line x1="364" y1="652" x2="396" y2="652" stroke="#09B1EC" stroke-width="2.4" marker-end="url(#upload-flow-arrow-accent)"/>
+<text x="408" y="656" fill="#A3A8B0" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">The file itself</text>
 </svg>
