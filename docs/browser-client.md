@@ -43,7 +43,8 @@ async function handleFileSelect(event: Event) {
 | `documentGroupId` | `string` | `undefined` | Attach as a new version of this existing document group; it must already belong to the same owner and type. |
 | `onProgress` | `(p: { loaded: number; total: number }) => void` | `undefined` | Callback receiving loaded and total byte counts. |
 | `signal` | `AbortSignal` | `undefined` | Signal to abort in-flight hashing, uploads, or polling waits. |
-| `resumeSessionId` | `string` | `undefined` | Multipart upload session ID to resume after interruption. |
+| `resumeSessionId` | `string` | `undefined` | Multipart upload session ID to resume after interruption. See [Connection loss and resuming](#connection-loss-and-resuming). |
+| `onSession` | `(sessionId: string) => void` | `undefined` | Multipart uploads only. Called once the session exists, for a new session and for a resumed one. Store the id to resume later. |
 | `dedup` | `boolean` | `true` | When true, attempts a proof-of-possession handshake before uploading bytes. |
 | `waitForProcessing` | `boolean` | `true` | Polls the show route while the attached document status is `processing`. |
 | `processingTimeoutMs` | `number` | `120000` | Maximum milliseconds to wait for a `processing` document. |
@@ -59,6 +60,8 @@ async function handleFileSelect(event: Event) {
 | `fetch` | `typeof fetch` | `globalThis.fetch` | Fetch implementation used for all HTTP requests. |
 | `headers` | `() => Record<string, string> \| Promise<Record<string, string>>` | auto-detected | Headers added to server requests. In browsers, defaults to `X-Requested-With: XMLHttpRequest` and `X-XSRF-TOKEN` (decoded from the `XSRF-TOKEN` cookie). Providing a callback replaces this default entirely. Storage PUT requests never receive application headers. |
 | `routes` | `ClientRoutes` | `undefined` | Custom route mapping for Wayfinder or non-standard route names. |
+| `isOnline` | `() => boolean` | `navigator.onLine` | Tells the helper whether the browser is online. Returns `true` where there is no `navigator`. |
+| `waitForOnline` | `(signal?: AbortSignal) => Promise<void>` | waits for the window `online` event | Called when a request fails while `isOnline()` is `false`. |
 
 ## Route mapping (`routes`)
 
@@ -98,17 +101,51 @@ Query strings for GET endpoints (such as `session_id`) are automatically appende
 | `file_too_large` | File size exceeds `max_bytes` allowed for the document type. |
 | `type_not_allowed` | File extension is not in `allowed_extensions` for the document type. |
 | `unknown_type` | Document type identifier was not found in the client configuration. |
-| `network` | A network request failed or disconnected. |
+| `network` | A network request failed or disconnected. When a multipart session was kept, `error.sessionId` holds its id. |
 | `validation` | Server validation failed (HTTP 422). Form errors are available on `error.errors`. |
 | `forbidden` | Authorization failed (HTTP 401 or 403). |
 | `server` | Storage or application server returned an unexpected error. |
-| `part_failed` | A multipart chunk upload failed after exhausting retries. |
+| `part_failed` | A multipart chunk upload failed after exhausting retries. `error.sessionId` holds the kept session id. |
 | `rejected` | The document failed background verification and transitioned to `rejected`. |
 | `processing_timeout` | Document processing did not complete within `processingTimeoutMs`. |
 
-## Resuming an upload
+## Connection loss and resuming
 
-If a page reload or network drop interrupts a multipart upload, pass `resumeSessionId` with the previous session ID. The helper checks `GET /documents/multipart/status` and `GET /documents/multipart/parts`, skips parts that already uploaded, and uploads the rest.
+What the helper does when the connection drops, and what it leaves to your app.
+
+**It retries on its own**
+- A part upload that fails with a network error, a 5xx or a 429 is retried with exponential backoff and jitter. The numbers come from `documentable.client.retry`, which `GET /documents/config` reports. The defaults are 3 retries with delays of at most 0.5, 1 and 2 seconds, so a lost connection that the browser does not report survives about 3.5 seconds at most. Raise `attempts` and `max_delay_ms` if your users upload over weak connections.
+- Signing part URLs and reading session status and parts are retried the same way. They are safe to repeat.
+- A 4xx other than 429 is not retried, because repeating a refusal does not help.
+- While the browser reports it is offline (`navigator.onLine` is `false`), a failed request waits for the window `online` event instead of using up attempts. A connection that drops without the browser noticing falls back to the retries above.
+
+**It does not retry everything**
+- `initiate` and `complete` are not retried. A second `initiate` after a lost reply could leave a stray session, and `complete` must not run twice.
+- A small file uploads with one `PUT`. If it fails, the whole file starts again. There is nothing to resume.
+
+**It keeps the session, and tells you its id**
+- After a network error, a 5xx, a 429 or an exhausted part, the helper keeps the multipart session on the server and sets `error.sessionId`. It calls `onSession(id)` as soon as the session exists.
+- After a refusal (403, 422, a type or size error) or your own abort, the helper aborts the session. `error.sessionId` is not set.
+- A kept session expires after `documentable.multipart.session_ttl_hours` (24 hours by default). After that, a resume starts a new upload.
+
+**Resuming is yours to trigger.** The helper does not save the session id, so a page reload forgets it. Save it yourself, then pass it back with the same file:
+
+```ts
+const key = `upload:${file.name}:${file.size}`;
+
+try {
+  await uploadFile(file, {
+    type: 'archive',
+    resumeSessionId: localStorage.getItem(key) ?? undefined,
+    onSession: id => localStorage.setItem(key, id),
+  });
+  localStorage.removeItem(key);
+} catch (error) {
+  // Keep the saved id when the error has a sessionId: the next attempt continues from the finished parts.
+}
+```
+
+On resume the helper calls `GET /documents/multipart/status` and `GET /documents/multipart/parts`, skips the parts the bucket already has, and uploads the rest. If the session is missing, expired or no longer open, it starts a new upload. Use the same file: the helper cannot check that it is.
 
 ## Deduplication handshake
 

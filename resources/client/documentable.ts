@@ -11,6 +11,7 @@ export interface UploadOptions {
   onProgress?: (p: { loaded: number; total: number }) => void;
   signal?: AbortSignal;
   resumeSessionId?: string;                       // continue an interrupted multipart upload
+  onSession?: (sessionId: string) => void;        // multipart only: called once the session exists. Store the id to resume after a reload
   dedup?: boolean;                                // default true: attempt proof-of-possession handshake before uploading
   waitForProcessing?: boolean;                    // default true: poll show route while status is 'processing'
   processingTimeoutMs?: number;                   // default 120000 ms
@@ -40,6 +41,8 @@ export interface ClientOptions {
   sleep?: (ms: number) => Promise<void>;
   random?: () => number;
   now?: () => number;
+  isOnline?: () => boolean;                       // default: navigator.onLine, true where there is no navigator
+  waitForOnline?: (signal?: AbortSignal) => Promise<void>; // default: waits for the window 'online' event
   routes?: ClientRoutes;
 }
 
@@ -65,6 +68,8 @@ export class UploadError extends Error {
   readonly code: UploadErrorCode;
   readonly status?: number;
   readonly errors?: Record<string, string[]>;
+  /** Set when a multipart session was kept: pass it as `resumeSessionId` to continue. */
+  sessionId?: string;
 
   constructor(code: UploadErrorCode, message?: string, options?: { status?: number; errors?: Record<string, string[]> }) {
     super(message ?? code);
@@ -455,6 +460,76 @@ async function tryDedupHandshake(
   }
 }
 
+function defaultIsOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
+function defaultWaitForOnline(signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      resolve();
+      return;
+    }
+    const done = () => {
+      window.removeEventListener('online', onOnline);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onOnline = () => { done(); resolve(); };
+    const onAbort = () => { done(); reject(new UploadError('aborted', 'Upload was aborted')); };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    window.addEventListener('online', onOnline, { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Runs a request that is safe to repeat (signing part URLs, reading session status and parts) and tries it again
+ * after a dropped connection or a 5xx/429, with the server's backoff. While the browser says it is offline it waits
+ * for it to come back instead of using up attempts. initiate and complete are not run through this: repeating them
+ * after a lost reply could leave a stray session or complete twice.
+ */
+async function repeatable<T>(
+  client: ClientOptions,
+  retryPolicy: { attempts: number; base_delay_ms: number; max_delay_ms: number },
+  signal: AbortSignal | undefined,
+  run: () => Promise<T>
+): Promise<T> {
+  const sleepFn = client.sleep ?? defaultSleep;
+  const randomFn = client.random ?? Math.random;
+  const isOnline = client.isOnline ?? defaultIsOnline;
+  const waitForOnline = client.waitForOnline ?? defaultWaitForOnline;
+  const maxTries = 1 + retryPolicy.attempts;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      const transient = err instanceof UploadError
+        && (err.code === 'network' || (err.code === 'server' && (err.status === undefined || err.status >= 500 || err.status === 429)));
+      if (!transient) throw err;
+      if (err instanceof UploadError && err.code === 'network' && !isOnline()) {
+        await waitForOnline(signal);
+        attempt--;
+        continue;
+      }
+      if (attempt >= maxTries - 1) throw err;
+      const delayCap = Math.min(retryPolicy.max_delay_ms, retryPolicy.base_delay_ms * Math.pow(2, attempt));
+      await sleepFn(delayCap * randomFn());
+    }
+  }
+}
+
+/** Failures that leave a multipart session worth resuming: the connection or the server, not a refusal. */
+function keepsSession(err: unknown): boolean {
+  if (!(err instanceof UploadError)) return false;
+  return err.code === 'part_failed'
+    || err.code === 'network'
+    || (err.code === 'server' && (err.status === undefined || err.status >= 500 || err.status === 429));
+}
+
 async function uploadPartWithRetry(
   fetchFn: typeof fetch,
   url: string,
@@ -463,7 +538,9 @@ async function uploadPartWithRetry(
   etagStrategy: string,
   signal?: AbortSignal,
   sleepFn = defaultSleep,
-  randomFn = Math.random
+  randomFn = Math.random,
+  isOnline = defaultIsOnline,
+  waitForOnline = defaultWaitForOnline
 ): Promise<string | undefined> {
   const maxTries = 1 + retryPolicy.attempts;
   let lastStatus: number | undefined;
@@ -492,6 +569,12 @@ async function uploadPartWithRetry(
       if (err instanceof UploadError) throw err;
       if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
         throw new UploadError('aborted', 'Part upload aborted');
+      }
+      // The browser says it is offline: wait for it to come back instead of using up an attempt.
+      if (!isOnline()) {
+        await waitForOnline(signal);
+        attempt--;
+        continue;
       }
     }
 
@@ -611,15 +694,16 @@ export function createUploader(client: ClientOptions = {}): {
     if (options.resumeSessionId) {
       try {
         const statusUrl = resolveUrl(client, 'multipartStatus', '/multipart/status', undefined, { session_id: options.resumeSessionId });
-        const status = await requestServer<{ exists: boolean; status: string | null }>(
+        const status = await repeatable(client, config.retry, options.signal, () => requestServer<{ exists: boolean; status: string | null }>(
           client, statusUrl, 'GET', undefined, options.signal
-        );
+        ));
         if (status.exists && status.status === 'initiated') {
           sessionId = options.resumeSessionId;
+          options.onSession?.(sessionId);
           const partsUrl = resolveUrl(client, 'multipartParts', '/multipart/parts', undefined, { session_id: sessionId });
-          const { parts } = await requestServer<{ parts: Array<{ PartNumber: number; ETag: string }> }>(
+          const { parts } = await repeatable(client, config.retry, options.signal, () => requestServer<{ parts: Array<{ PartNumber: number; ETag: string }> }>(
             client, partsUrl, 'GET', undefined, options.signal
-          );
+          ));
           for (const p of parts) {
             completedSet.add(p.PartNumber);
             completedParts.push({ PartNumber: p.PartNumber, ETag: p.ETag.replace(/^"|"$/g, '').trim() });
@@ -644,6 +728,7 @@ export function createUploader(client: ClientOptions = {}): {
           }, options.signal
         );
         sessionId = init.id;
+        options.onSession?.(sessionId);
         if (init.part_size) partSize = init.part_size;
       }
 
@@ -673,9 +758,9 @@ export function createUploader(client: ClientOptions = {}): {
           if (!pendingBatch) {
             const needed = partsToUpload.filter(p => !urlCache.has(p)).slice(0, 100);
             const partUrlsUrl = resolveUrl(client, 'multipartPartUrls', '/multipart/part-urls');
-            pendingBatch = requestServer<{ urls: Record<string, string> }>(
+            pendingBatch = repeatable(client, config.retry, inner.signal, () => requestServer<{ urls: Record<string, string> }>(
               client, partUrlsUrl, 'POST', { session_id: sessionId, part_numbers: needed }, inner.signal
-            ).then(res => {
+            )).then(res => {
               for (const [k, v] of Object.entries(res.urls)) urlCache.set(Number(k), v);
               pendingBatch = null;
             }).catch(err => {
@@ -702,7 +787,7 @@ export function createUploader(client: ClientOptions = {}): {
               const end = Math.min(start + partSize, file.size);
               const etag = await uploadPartWithRetry(
                 fetchFn, url, file.slice(start, end), config.retry, config.etag_strategy,
-                inner.signal, client.sleep, client.random
+                inner.signal, client.sleep, client.random, client.isOnline, client.waitForOnline
               );
               if (etag !== undefined) completedParts.push({ PartNumber: pNum, ETag: etag });
               loadedBytes += end - start;
@@ -738,8 +823,11 @@ export function createUploader(client: ClientOptions = {}): {
       }
       return { sessionId, document: doc };
     } catch (err) {
-      // Best-effort abort on failure; keep session if part_failed so caller can resume.
-      if (sessionId && !(err instanceof UploadError && err.code === 'part_failed')) {
+      // A lost connection or a failing server leaves a session worth resuming: keep it and hand the id to the caller.
+      // Anything else (a refusal, a validation error, the caller's own abort) ends the session.
+      if (sessionId && keepsSession(err)) {
+        (err as UploadError).sessionId = sessionId;
+      } else if (sessionId) {
         try {
           const abortUrl = resolveUrl(client, 'multipartAbort', '/multipart/abort');
           await requestServer(client, abortUrl, 'POST', { session_id: sessionId });

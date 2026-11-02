@@ -9,7 +9,7 @@
 
 **Let users upload files to your Laravel app, store them in S3, R2 or MinIO, and keep every version, without sending a single byte through your PHP server.**
 
-Laravel Documentable attaches documents (PDFs, scans, contracts, photos) to any Eloquent model. The browser uploads straight to your bucket with a presigned URL. Big files upload in parts and can resume. A file you upload twice is stored once. Old versions are kept, then deleted on the schedule you choose.
+Laravel Documentable attaches documents (PDFs, scans, contracts, photos) to any Eloquent model. The browser uploads straight to your bucket with a presigned URL. Big files upload in parts, and an interrupted upload can continue from the parts that finished. A file you upload twice is stored once. Old versions are kept, then deleted on the schedule you choose.
 
 ```bash
 composer require madebyclowd/laravel-documentable
@@ -36,7 +36,7 @@ Documentable is the middle option. It handles one thing, business documents that
 | Feature | What it does |
 |---|---|
 | Direct to bucket | The browser sends the file to the bucket. PHP's `upload_max_filesize`, `post_max_size` and request timeout do not apply to it. |
-| Resumable big files | A 2 GB upload that drops at 90% continues from the last finished part. |
+| Resumable big files | After a drop, a multipart upload continues from the parts that finished. Your app stores the session id and passes it back. |
 | Same file, stored once | Files with the same SHA-256 share one stored copy. A user cannot claim a file by guessing its hash, because the server asks for proof that they hold the bytes. |
 | Versions and retention | A new passport scan keeps the old one. You set how many versions or how many days to keep. |
 | File checks | The server reads the file type from the bytes, not the file name, so a `.exe` renamed to `.pdf` is refused. |
@@ -45,7 +45,7 @@ Documentable is the middle option. It handles one thing, business documents that
 | Any S3-compatible bucket | AWS S3, Cloudflare R2, MinIO and DigitalOcean Spaces. |
 | No admin UI | You build your own screens on plain Eloquent models and a small HTTP API. |
 
-The package also ships an optional TypeScript upload helper that hashes files, retries, resumes and reports progress, so your Vue, React or Inertia front end does not need its own version of that code.
+The package also ships an optional TypeScript upload helper that hashes files, retries failed parts, resumes with a saved session id and reports progress, so your Vue, React or Inertia front end does not need its own version of that code.
 
 ### Is it for you?
 

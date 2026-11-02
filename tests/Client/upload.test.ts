@@ -1050,4 +1050,119 @@ describe('TypeScript client upload flow', () => {
       expect(statusReq!.url).toContain('foo=bar&session_id=01RESUMESESSIONID00000000');
     });
   });
+  describe('interrupted connections', () => {
+    const bigFile = () => new File([new Uint8Array(12 * 1024 * 1024)], 'large.pdf', { type: 'application/pdf' });
+    const client = (server: FakeServer, extra: Record<string, unknown> = {}) => ({
+      baseUrl: '/documents',
+      fetch: server.fetch,
+      sleep: async () => {},
+      random: () => 0,
+      ...extra,
+    });
+    const drop = () => new TypeError('Failed to fetch');
+    const aborts = (server: FakeServer) => server.requests.filter(r => r.url === '/documents/multipart/abort');
+
+    it('hands the multipart session id to onSession, for a new session and for a resumed one', async () => {
+      const server = new FakeServer();
+      const seen: string[] = [];
+
+      const first = await uploadFile(bigFile(), { type: 'archive', onSession: id => seen.push(id) }, client(server));
+      expect(seen).toEqual([first.sessionId]);
+
+      const resumedSeen: string[] = [];
+      const sessionId = '01RESUMEONSESSION0000001';
+      server.sessions.set(sessionId, { id: sessionId, kind: 'multipart', status: 'initiated', typeId: 'type_archive', filename: 'large.pdf', size: 12 * 1024 * 1024, partSize: 5 * 1024 * 1024 });
+      server.partBodies.set(sessionId, new Map([[1, new Uint8Array(5 * 1024 * 1024)]]));
+      server.partETags.set(sessionId, new Map([[1, 'seeded-etag-1']]));
+      await uploadFile(bigFile(), { type: 'archive', dedup: false, resumeSessionId: sessionId, onSession: id => resumedSeen.push(id) }, client(server));
+      expect(resumedSeen).toEqual([sessionId]);
+    });
+
+    it('a part that keeps failing keeps the session and puts its id on the error', async () => {
+      const server = new FakeServer();
+      for (let i = 0; i < 4; i++) server.injectFailure({ urlPattern: /\/1$/, status: 500 });
+      const seen: string[] = [];
+
+      const error = await uploadFile(bigFile(), { type: 'archive', onSession: id => seen.push(id) }, client(server)).catch(e => e);
+
+      expect(error).toBeInstanceOf(UploadError);
+      expect(error.code).toBe('part_failed');
+      expect(error.sessionId).toBe(seen[0]);
+      expect(aborts(server)).toHaveLength(0);
+    });
+
+    it('retries the part-url request when the connection drops once', async () => {
+      const server = new FakeServer();
+      server.injectFailure({ urlPattern: '/multipart/part-urls', error: drop() });
+      const delays: number[] = [];
+
+      const result = await uploadFile(bigFile(), { type: 'archive' }, client(server, { sleep: async (ms: number) => { delays.push(ms); } }));
+
+      expect(result.sessionId).toBeTruthy();
+      expect(delays.length).toBeGreaterThanOrEqual(1);
+      expect(server.requests.filter(r => r.url === '/documents/multipart/part-urls').length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('part-url requests that keep failing end as a network error that keeps the session', async () => {
+      const server = new FakeServer();
+      for (let i = 0; i < 4; i++) server.injectFailure({ urlPattern: '/multipart/part-urls', error: drop() });
+      const seen: string[] = [];
+
+      const error = await uploadFile(bigFile(), { type: 'archive', onSession: id => seen.push(id) }, client(server)).catch(e => e);
+
+      expect(error.code).toBe('network');
+      expect(error.sessionId).toBe(seen[0]);
+      expect(aborts(server)).toHaveLength(0);
+    });
+
+    it('a connection lost while completing keeps the session so the caller can resume', async () => {
+      const server = new FakeServer();
+      server.injectFailure({ urlPattern: '/multipart/complete', error: drop() });
+      const seen: string[] = [];
+
+      const error = await uploadFile(bigFile(), { type: 'archive', onSession: id => seen.push(id) }, client(server)).catch(e => e);
+
+      expect(error.code).toBe('network');
+      expect(error.sessionId).toBe(seen[0]);
+      expect(aborts(server)).toHaveLength(0);
+      expect(server.requests.filter(r => r.url === '/documents/multipart/complete')).toHaveLength(1);
+    });
+
+    it('does not retry initiate, because a second attempt could leave a stray session behind', async () => {
+      const server = new FakeServer();
+      server.injectFailure({ urlPattern: '/multipart/initiate', error: drop() });
+
+      const error = await uploadFile(bigFile(), { type: 'archive' }, client(server)).catch(e => e);
+
+      expect(error.code).toBe('network');
+      expect(error.sessionId).toBeUndefined();
+      expect(server.requests.filter(r => r.url === '/documents/multipart/initiate')).toHaveLength(1);
+    });
+
+    it('still aborts the session when storage refuses the upload, and gives no id to resume', async () => {
+      const server = new FakeServer();
+      server.injectFailure({ urlPattern: 'https://storage.test/multipart/', status: 403 });
+
+      const error = await uploadFile(bigFile(), { type: 'archive' }, client(server)).catch(e => e);
+
+      expect(error.code).toBe('forbidden');
+      expect(error.sessionId).toBeUndefined();
+      expect(aborts(server)).toHaveLength(1);
+    });
+
+    it('while the browser reports offline, a failed part waits for it instead of using up its attempts', async () => {
+      const server = new FakeServer();
+      for (let i = 0; i < 6; i++) server.injectFailure({ urlPattern: /\/1$/, error: drop() });
+      let offlineChecks = 0;
+      let waits = 0;
+
+      const result = await uploadFile(bigFile(), { type: 'archive' }, client(server, {
+        isOnline: () => ++offlineChecks > 6,
+        waitForOnline: async () => { waits++; },
+      }));
+
+      expect(result.sessionId).toBeTruthy();
+      expect(waits).toBe(6);
+    });
+  });
 });

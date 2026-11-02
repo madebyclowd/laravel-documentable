@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 896" width="960" height="896" role="img" aria-labelledby="multipart-resume-title multipart-resume-desc">
 <title id="multipart-resume-title">Multipart upload with resume</title>
-<desc id="multipart-resume-desc">Sequence diagram: the browser starts a multipart session, asks for signed part URLs, and uploads the parts straight to the bucket in parallel. If the connection drops it asks which parts are done and continues. It then completes the upload and the app joins the parts and returns the document.</desc>
+<desc id="multipart-resume-desc">Sequence diagram: the browser starts a multipart session, asks for signed part URLs, and uploads the parts straight to the bucket in parallel. If the connection drops and the app resumes, it asks which parts are done and continues. It then completes the upload and the app joins the parts and returns the document.</desc>
 <defs>
 <marker id="multipart-resume-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#A3A8B0"/></marker>
 <marker id="multipart-resume-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#09B1EC"/></marker>
@@ -24,7 +24,7 @@
 <rect x="104" y="464" width="432" height="128" rx="4" fill="rgba(247,246,243,0.06)" fill-opacity="0.5" stroke="rgba(247,246,243,0.22)" stroke-width="1"/>
 <rect x="104" y="464" width="48" height="20" rx="2" fill="#16171A" stroke="rgba(247,246,243,0.22)" stroke-width="1"/>
 <text x="128" y="478" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.12em">OPT</text>
-<text x="164" y="478" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">[connection dropped]</text>
+<text x="164" y="478" fill="#A3A8B0" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">[you resume after a drop]</text>
 <line x1="160" y1="536" x2="476" y2="536" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>
 <line x1="476" y1="568" x2="160" y2="568" stroke="#A3A8B0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#multipart-resume-arrow)"/>
 <line x1="160" y1="648" x2="476" y2="648" stroke="#A3A8B0" stroke-width="1.2" marker-end="url(#multipart-resume-arrow)"/>

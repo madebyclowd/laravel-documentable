@@ -118,7 +118,7 @@ For files at or above `multipart.threshold_bytes`:
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="images/multipart-resume-dark.svg">
-    <img src="images/multipart-resume-light.svg" alt="Sequence diagram. The browser starts a multipart session, gets signed part URLs and uploads the parts straight to the bucket. If the connection drops it asks which parts are done and continues. Then it completes the upload and the app joins the parts and returns the document." width="900">
+    <img src="images/multipart-resume-light.svg" alt="Sequence diagram. The browser starts a multipart session, gets signed part URLs and uploads the parts straight to the bucket. If the connection drops, your app can resume: the browser asks which parts are done and uploads the rest. Then it completes the upload and the app joins the parts and returns the document." width="900">
   </picture>
 </p>
 
@@ -178,7 +178,7 @@ Content-Type: application/json
 }
 ```
 
-To resume after a network interruption, check session status and uploaded parts:
+To resume after a network interruption, check session status and uploaded parts. The [browser client](browser-client.md#connection-loss-and-resuming) does this when you pass `resumeSessionId`:
 ```http
 GET /documents/multipart/status?session_id=8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d
 GET /documents/multipart/parts?session_id=8a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d
