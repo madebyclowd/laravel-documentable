@@ -47,7 +47,11 @@ class AggregateChangesetsTest extends TestCase
             'next alpha increments the counter' => ['v3.0.0-alpha.1', 'patch', 'alpha', '3.0.0-alpha.2'],
             'a higher bump does not move the alpha target' => ['v3.0.0-alpha.4', 'major', 'alpha', '3.0.0-alpha.5'],
             'alpha to rc restarts the counter' => ['v3.0.0-alpha.4', 'patch', 'rc', '3.0.0-rc.1'],
-            'stable after a prerelease uses the bump' => ['v3.0.0-rc.2', 'minor', 'stable', '3.1.0'],
+            'stable after an alpha graduates to the alpha target' => ['v3.0.0-alpha.11', 'patch', 'stable', '3.0.0'],
+            'stable after an rc graduates whatever the bump' => ['v3.0.0-rc.2', 'minor', 'stable', '3.0.0'],
+            'a higher bump does not move the graduation' => ['v3.0.0-alpha.11', 'major', 'stable', '3.0.0'],
+            'an unset channel graduates too' => ['v3.0.0-alpha.11', 'patch', '', '3.0.0'],
+            'stable after a stable still bumps' => ['v3.0.0', 'patch', 'stable', '3.0.1'],
         ];
     }
 
