@@ -107,6 +107,19 @@ class DocumentController extends Controller
         return response()->json($document->load('storageFile'), 201);
     }
 
+    /**
+     * One document with its status, for a client waiting for a `processing` document to turn `committed` or
+     * `rejected`. Same shape as what attach and complete return.
+     */
+    public function show(Request $request, Document $document): JsonResponse
+    {
+        if (! $this->authorizer->canView($request->user(), $document)) {
+            abort(403);
+        }
+
+        return response()->json($document);
+    }
+
     public function url(UrlRequest $request, Document $document): JsonResponse
     {
         $url = $this->generateUrl(

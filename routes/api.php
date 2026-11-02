@@ -37,6 +37,7 @@ Route::prefix(app(DocumentableConfig::class)->routePrefix)
         Route::post('/', [DocumentController::class, 'store']);
         Route::get('/types', [DocumentTypeController::class, 'index']);
         Route::get('/config', [ClientConfigController::class, 'show']);
+        Route::get('/{document}', [DocumentController::class, 'show']);
         Route::get('/{document}/url', [DocumentController::class, 'url']);
         Route::get('/{document}/download', [DocumentController::class, 'download']);
         Route::get('/{document}/view', [DocumentController::class, 'view']);
