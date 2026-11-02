@@ -7,6 +7,11 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0] - 2026-11-02
+
+### Changed
+- First stable release of 3.x. It graduates `3.0.0-alpha.11` unchanged: every change in the alpha entries below is part of 3.0.0. Upgrading from 2.x follows `UPGRADE.md`, and `php artisan documents:upgrade-check --code` finds the removed v2 APIs in your code.
+
 ## [3.0.0-alpha.11] - 2026-11-02
 
 ### Removed
@@ -337,3 +342,5 @@ Initial release.
 [3.0.0-alpha.10]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.9...v3.0.0-alpha.10
 
 [3.0.0-alpha.11]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.10...v3.0.0-alpha.11
+
+[3.0.0]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.11...v3.0.0
