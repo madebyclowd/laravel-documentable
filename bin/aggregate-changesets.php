@@ -10,7 +10,7 @@
  * Set PRERELEASE_CHANNEL (for example `alpha`) on a release branch such as 3.x to produce prerelease
  * versions: the first one targets the bumped version (3.0.0-alpha.1), each later one increments the
  * counter (3.0.0-alpha.2) until a run without the variable, or with the value `stable`, cuts the stable
- * version.
+ * version: the version the prereleases were heading for (3.0.0), whatever the bump.
  *
  * Exits with status 1 (and nothing on stdout) if there are no pending
  * changesets — that's the signal to the calling workflow that there's
@@ -122,6 +122,12 @@ function nextPrereleaseVersion(string $latestTag, string $bumpLevel, string $cha
 
 function bumpVersion(string $latestTag, string $bumpLevel): string
 {
+    // A prerelease already points at the version it is heading for, so the stable release is that version,
+    // whatever the pending changesets ask for. Bumping it again would skip 3.0.0 for 3.0.1.
+    if (preg_match('/^v?(\d+\.\d+\.\d+)-[0-9A-Za-z.]+$/', $latestTag, $m)) {
+        return $m[1];
+    }
+
     sscanf(ltrim($latestTag, 'v'), '%d.%d.%d', $major, $minor, $patch);
     $major ??= 0;
     $minor ??= 0;
