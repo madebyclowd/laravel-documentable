@@ -270,7 +270,7 @@ class StampMetadata implements ResolvesAttachMetadata
 }
 ```
 
-It runs for every transport. Its keys replace the client's, and `size`, `mime_type` and `original_filename` are always set by the package. It only adds keys: to refuse an attach, deny it in `canAttach`.
+It runs for every transport. Its keys replace the client's. The package always sets `size` and `mime_type` last, so neither the client nor the resolver can change them. It sets `original_filename` only when it had to normalize the file name, and it discards an `original_filename` that a client sends. It only adds keys: to refuse an attach, deny it in `canAttach`.
 
 ## Direct service calls
 
