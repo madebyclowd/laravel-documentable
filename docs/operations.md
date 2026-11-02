@@ -62,6 +62,8 @@ This table compares multipart behavior across S3-compatible providers:
 | Backblaze B2 | 5 MB | 10,000 | no | variable | accepted | yes | lifecycle rule required |
 | DO Spaces | 5 MiB | 10,000 | no | variable | accepted | yes | lifecycle rule required |
 
+The Cloudflare R2 and MinIO / RustFS rows were checked against real buckets. The other rows come from provider documentation and have not been run against a real bucket.
+
 ## Behind a proxy
 
 When clients reach storage at a different address than your application servers do, configure `presign_endpoint` under `disks` in `config/documentable.php`:

@@ -42,7 +42,7 @@ Documentable is the middle option. It handles one thing, business documents that
 | File checks | The server reads the file type from the bytes, not the file name, so a `.exe` renamed to `.pdf` is refused. |
 | Authorizer required | Every action asks your authorizer. In production the app does not boot without one. |
 | Cleanup | Commands delete half-finished uploads and bucket files that no document points to. You schedule them. |
-| Any S3-compatible bucket | AWS S3, Cloudflare R2, MinIO and DigitalOcean Spaces. |
+| S3-compatible buckets | Runs on the S3 API. Tested against real Cloudflare R2 and RustFS (MinIO-compatible) buckets. Other providers use the same API, so check the [provider table](docs/operations.md#provider-notes) before relying on one. |
 | No admin UI | You build your own screens on plain Eloquent models and a small HTTP API. |
 
 The package also ships an optional TypeScript upload helper that hashes files, retries failed parts, resumes with a saved session id and reports progress, so your Vue, React or Inertia front end does not need its own version of that code.
