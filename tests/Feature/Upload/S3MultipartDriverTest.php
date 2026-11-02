@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Upload;
 
 use Aws\CommandInterface;
@@ -7,7 +9,9 @@ use Aws\MockHandler;
 use Aws\Result;
 use Aws\S3\Exception\S3Exception;
 use MadeByClowd\Documentable\Drivers\S3MultipartDriver;
+use MadeByClowd\Documentable\Exceptions\MultipartPartTooSmallException;
 use MadeByClowd\Documentable\Exceptions\MultipartUploadNotFoundException;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Tests\TestCase;
 use Psr\Http\Message\RequestInterface;
 
@@ -25,7 +29,17 @@ class S3MultipartDriverTest extends TestCase
     {
         $this->setUpDisk(['handler' => $handler]);
 
-        return new S3MultipartDriver;
+        return $this->app->make(S3MultipartDriver::class);
+    }
+
+    protected function makeSession(string $path = 'uploads/a.bin', string $uploadId = 'upload-123', string $disk = 's3_driver_test'): UploadSession
+    {
+        $session = new UploadSession;
+        $session->disk = $disk;
+        $session->path = $path;
+        $session->upload_id = $uploadId;
+
+        return $session;
     }
 
     /**
@@ -45,7 +59,7 @@ class S3MultipartDriverTest extends TestCase
         ], $overrides));
     }
 
-    public function test_create_builds_multipart_upload_with_bucket_key_and_metadata(): void
+    public function test_create_builds_multipart_upload_without_metadata_or_content_type_by_default(): void
     {
         $this->setUpDisk();
         $handler = new MockHandler;
@@ -64,11 +78,50 @@ class S3MultipartDriverTest extends TestCase
         $this->assertSame(['upload_id' => 'upload-123'], $result);
         $this->assertSame('test-bucket', $captured['Bucket']);
         $this->assertSame('uploads/a.bin', $captured['Key']);
-        $this->assertSame('a.bin', $captured['Metadata']['original_filename']);
+        $this->assertArrayNotHasKey('Metadata', $captured->toArray());
+        $this->assertArrayNotHasKey('ContentType', $captured->toArray());
         $this->assertArrayNotHasKey('ChecksumAlgorithm', $captured->toArray());
     }
 
-    public function test_create_adds_native_checksum_algorithm_when_configured(): void
+    public function test_create_sends_url_encoded_metadata_when_configured(): void
+    {
+        $this->setUpDisk();
+        config()->set('documentable.multipart.object_metadata', true);
+
+        $handler = new MockHandler;
+        $captured = null;
+
+        $handler->append(function (CommandInterface $command) use (&$captured) {
+            $captured = $command;
+
+            return new Result(['UploadId' => 'upload-meta']);
+        });
+
+        $this->makeDriver($handler)->create('s3_driver_test', 'uploads/a.bin', 'résumé doc.pdf');
+
+        $this->assertSame(rawurlencode('résumé doc.pdf'), $captured['Metadata']['original_filename']);
+    }
+
+    public function test_create_sends_content_type_when_configured(): void
+    {
+        $this->setUpDisk();
+        config()->set('documentable.multipart.content_type', 'application/pdf');
+
+        $handler = new MockHandler;
+        $captured = null;
+
+        $handler->append(function (CommandInterface $command) use (&$captured) {
+            $captured = $command;
+
+            return new Result(['UploadId' => 'upload-ct']);
+        });
+
+        $this->makeDriver($handler)->create('s3_driver_test', 'uploads/a.bin', 'a.bin');
+
+        $this->assertSame('application/pdf', $captured['ContentType']);
+    }
+
+    public function test_create_never_asks_for_a_provider_checksum_even_if_the_removed_setting_is_present(): void
     {
         $this->setUpDisk();
         config()->set('documentable.multipart.use_native_checksum', true);
@@ -79,13 +132,12 @@ class S3MultipartDriverTest extends TestCase
         $handler->append(function (CommandInterface $command) use (&$captured) {
             $captured = $command;
 
-            return new Result(['UploadId' => 'upload-checksum']);
+            return new Result(['UploadId' => 'upload-1']);
         });
 
-        $driver = $this->makeDriver($handler);
-        $driver->create('s3_driver_test', 'uploads/a.bin', 'a.bin');
+        $this->makeDriver($handler)->create('s3_driver_test', 'uploads/a.bin', 'a.bin');
 
-        $this->assertSame('SHA256', $captured['ChecksumAlgorithm']);
+        $this->assertArrayNotHasKey('ChecksumAlgorithm', $captured->toArray());
     }
 
     public function test_create_applies_aes256_server_side_encryption(): void
@@ -136,7 +188,7 @@ class S3MultipartDriverTest extends TestCase
         $this->setUpDisk();
         $driver = $this->makeDriver(new MockHandler);
 
-        $url = $driver->presignPartUpload('s3_driver_test', 'uploads/a.bin', 'upload-123', 2);
+        $url = $driver->presignPartUpload($this->makeSession(), 2);
 
         $this->assertStringContainsString('test-bucket', $url);
         $this->assertStringContainsString('uploads/a.bin', $url);
@@ -144,12 +196,14 @@ class S3MultipartDriverTest extends TestCase
         $this->assertStringContainsString('uploadId=upload-123', $url);
     }
 
-    public function test_presign_part_upload_swaps_host_when_temporary_url_configured(): void
+    public function test_presign_part_upload_uses_presign_endpoint_when_configured(): void
     {
-        $this->setUpDisk(['handler' => new MockHandler, 'temporary_url' => 'https://public.example.com']);
-        $driver = new S3MultipartDriver;
+        $this->setUpDisk(['handler' => new MockHandler]);
+        config()->set('documentable.disks.s3_driver_test.presign_endpoint', 'https://public.example.com');
+        config()->set('documentable.disks.s3_driver_test.presign_use_path_style', true);
+        $driver = $this->app->make(S3MultipartDriver::class);
 
-        $url = $driver->presignPartUpload('s3_driver_test', 'uploads/a.bin', 'upload-123', 2);
+        $url = $driver->presignPartUpload($this->makeSession(), 2);
 
         $this->assertStringStartsWith('https://public.example.com', $url);
         $this->assertStringContainsString('uploads/a.bin', $url);
@@ -169,7 +223,7 @@ class S3MultipartDriverTest extends TestCase
         ]));
 
         $driver = $this->makeDriver($handler);
-        $parts = $driver->listParts('s3_driver_test', 'uploads/a.bin', 'upload-123');
+        $parts = $driver->listParts($this->makeSession());
 
         $this->assertSame([
             ['PartNumber' => 1, 'ETag' => '"etag-1"'],
@@ -194,10 +248,21 @@ class S3MultipartDriverTest extends TestCase
         );
 
         $driver = $this->makeDriver($handler);
-        $parts = $driver->listParts('s3_driver_test', 'uploads/a.bin', 'upload-123');
+        $parts = $driver->listParts($this->makeSession());
 
         $this->assertSame([1, 2], array_column($parts, 'PartNumber'));
         $this->assertSame(0, count($handler));
+    }
+
+    public function test_list_parts_maps_no_such_upload(): void
+    {
+        $this->setUpDisk();
+        $handler = new MockHandler;
+        $handler->append(fn (CommandInterface $command) => new S3Exception('gone', $command, ['code' => 'NoSuchUpload']));
+
+        $this->expectException(MultipartUploadNotFoundException::class);
+
+        $this->makeDriver($handler)->listParts($this->makeSession());
     }
 
     public function test_complete_calls_complete_multipart_upload_with_parts(): void
@@ -213,13 +278,50 @@ class S3MultipartDriverTest extends TestCase
         });
 
         $driver = $this->makeDriver($handler);
-        $driver->complete('s3_driver_test', 'uploads/a.bin', 'upload-123', [
+        $driver->complete($this->makeSession(), [
             ['PartNumber' => 1, 'ETag' => '"etag-1"'],
         ]);
 
         $this->assertSame('test-bucket', $captured['Bucket']);
         $this->assertSame('upload-123', $captured['UploadId']);
         $this->assertSame([['PartNumber' => 1, 'ETag' => '"etag-1"']], $captured['MultipartUpload']['Parts']);
+    }
+
+    public function test_complete_sends_parts_as_a_list_even_when_the_caller_keys_them_by_part_number(): void
+    {
+        $this->setUpDisk();
+        $handler = new MockHandler;
+        $captured = null;
+
+        $handler->append(function (CommandInterface $command) use (&$captured) {
+            $captured = $command;
+
+            return new Result([]);
+        });
+
+        $driver = $this->makeDriver($handler);
+        $driver->complete($this->makeSession(), [
+            2 => ['PartNumber' => 2, 'ETag' => '"etag-2"'],
+            1 => ['PartNumber' => 1, 'ETag' => '"etag-1"'],
+        ]);
+
+        $parts = $captured['MultipartUpload']['Parts'];
+
+        $this->assertTrue(array_is_list($parts));
+        $this->assertSame([2, 1], array_column($parts, 'PartNumber'));
+    }
+
+    public function test_complete_maps_entity_too_small(): void
+    {
+        $this->setUpDisk();
+        $handler = new MockHandler;
+        $handler->append(fn (CommandInterface $command) => new S3Exception('too small', $command, ['code' => 'EntityTooSmall']));
+
+        $this->expectException(MultipartPartTooSmallException::class);
+
+        $this->makeDriver($handler)->complete($this->makeSession(), [
+            ['PartNumber' => 1, 'ETag' => '"etag-1"'],
+        ]);
     }
 
     public function test_abort_calls_abort_multipart_upload(): void
@@ -235,7 +337,7 @@ class S3MultipartDriverTest extends TestCase
         });
 
         $driver = $this->makeDriver($handler);
-        $driver->abort('s3_driver_test', 'uploads/a.bin', 'upload-123');
+        $driver->abort($this->makeSession());
 
         $this->assertSame('test-bucket', $captured['Bucket']);
         $this->assertSame('uploads/a.bin', $captured['Key']);
@@ -250,7 +352,7 @@ class S3MultipartDriverTest extends TestCase
 
         $this->expectException(MultipartUploadNotFoundException::class);
 
-        $this->makeDriver($handler)->abort('s3_driver_test', 'uploads/a.bin', 'upload-123');
+        $this->makeDriver($handler)->abort($this->makeSession());
     }
 
     public function test_abort_lets_other_provider_errors_through(): void
@@ -261,34 +363,6 @@ class S3MultipartDriverTest extends TestCase
 
         $this->expectException(S3Exception::class);
 
-        $this->makeDriver($handler)->abort('s3_driver_test', 'uploads/a.bin', 'upload-123');
-    }
-
-    public function test_retrieve_checksum_decodes_base64_sha256_to_hex(): void
-    {
-        $this->setUpDisk();
-        $rawChecksum = hash('sha256', 'hello world', true);
-
-        $handler = new MockHandler;
-        $handler->append(new Result([
-            'ChecksumSHA256' => base64_encode($rawChecksum),
-        ]));
-
-        $driver = $this->makeDriver($handler);
-        $checksum = $driver->retrieveChecksum('s3_driver_test', 'uploads/a.bin');
-
-        $this->assertSame(bin2hex($rawChecksum), $checksum);
-    }
-
-    public function test_retrieve_checksum_returns_null_when_provider_has_none(): void
-    {
-        $this->setUpDisk();
-        $handler = new MockHandler;
-        $handler->append(new Result([]));
-
-        $driver = $this->makeDriver($handler);
-        $checksum = $driver->retrieveChecksum('s3_driver_test', 'uploads/a.bin');
-
-        $this->assertNull($checksum);
+        $this->makeDriver($handler)->abort($this->makeSession());
     }
 }

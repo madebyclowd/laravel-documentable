@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" width="960" height="480" role="img" aria-labelledby="version-retention-title version-retention-desc">
+<title id="version-retention-title">Version retention</title>
+<desc id="version-retention-desc">Diagram of one document slot with six versions, v1 oldest and v6 latest. With versions_kept 3 and versions_retain_days 90, v4 to v6 are inside the count, v3 is outside the count but newer than 90 days, and only v1 and v2 are outside both limits, so only they are pruned.</desc>
+<defs>
+<marker id="version-retention-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5B6068"/></marker>
+<marker id="version-retention-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#09B1EC"/></marker>
+</defs>
+<rect width="960" height="480" fill="#F7F6F3"/>
+<rect x="64" y="160" width="112" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="64" y="160" width="112" height="64" rx="6" fill="none" stroke="rgba(22,23,26,0.22)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="120" y="188" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">v1</text>
+<text x="120" y="208" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">400 days</text>
+<rect x="208" y="160" width="112" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="208" y="160" width="112" height="64" rx="6" fill="none" stroke="rgba(22,23,26,0.22)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="264" y="188" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">v2</text>
+<text x="264" y="208" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">200 days</text>
+<rect x="352" y="160" width="112" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="352" y="160" width="112" height="64" rx="6" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="408" y="188" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">v3</text>
+<text x="408" y="208" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">60 days</text>
+<rect x="496" y="160" width="112" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="496" y="160" width="112" height="64" rx="6" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="552" y="188" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">v4</text>
+<text x="552" y="208" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">30 days</text>
+<rect x="640" y="160" width="112" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="640" y="160" width="112" height="64" rx="6" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="696" y="188" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">v5</text>
+<text x="696" y="208" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">10 days</text>
+<rect x="784" y="160" width="112" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="784" y="160" width="112" height="64" rx="6" fill="rgba(9,177,236,0.12)" stroke="#09B1EC" stroke-width="1"/>
+<text x="840" y="188" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">v6</text>
+<text x="840" y="208" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">today</text>
+<path d="M 408 108 L 408 160" fill="none" stroke="#07739F" stroke-opacity="0.6" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="408" cy="160" r="2" fill="#07739F"/>
+<text x="408" y="100" fill="#07739F" font-size="16" font-style="italic" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif" text-anchor="middle">v3 is past the count but inside the age, so it stays</text>
+<path d="M 64 256 L 64 264 L 320 264 L 320 256" fill="none" stroke="#5B6068" stroke-width="1.2" stroke-dasharray="4,3"/>
+<text x="192" y="288" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PRUNED</text>
+<path d="M 496 256 L 496 264 L 896 264 L 896 256" fill="none" stroke="#5B6068" stroke-width="1.2"/>
+<text x="696" y="288" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">COUNT: 3 NEWEST</text>
+<path d="M 352 312 L 352 320 L 896 320 L 896 312" fill="none" stroke="#5B6068" stroke-width="1.2"/>
+<text x="624" y="344" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">AGE: UNDER 90 DAYS</text>
+<text x="480" y="392" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">versions_kept = 3, versions_retain_days = 90</text>
+<line x1="56" y1="420" x2="904" y2="420" stroke="rgba(22,23,26,0.14)" stroke-width="0.8"/>
+<text x="56" y="444" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<rect x="56" y="456" width="32" height="16" rx="3" fill="rgba(9,177,236,0.12)" stroke="#09B1EC" stroke-width="1"/>
+<text x="100" y="468" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Latest</text>
+<rect x="200" y="456" width="32" height="16" rx="3" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="244" y="468" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Kept</text>
+<rect x="312" y="456" width="32" height="16" rx="3" fill="none" stroke="rgba(22,23,26,0.45)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="356" y="468" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Pruned</text>
+</svg>

@@ -8,7 +8,8 @@ Thumbs.db
 /.idea/
 /.vscode/
 composer.lock
-/docs/
 /references/
 AGENTS.local.md
 CLAUDE.local.md
+/build/
+/node_modules/

@@ -1,16 +1,17 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Console\Commands;
 
 use Illuminate\Console\Command;
 use MadeByClowd\Documentable\Models\Document;
 
 /**
- * Drift-detector for the versioning invariant (latest_marker = document_group_id
- * exactly when is_latest = true, NULL otherwise) — same spirit as the
- * reference package's counter-drift `sequence:verify --repair`. Should never
- * find anything if DocumentService is the only writer; exists as a
- * defense-in-depth sanity check for direct DB manipulation / data imports.
+ * Drift-detector for the versioning invariant: `latest_marker` is set exactly when `is_latest` is true and NULL
+ * otherwise. The marker value is the document type id for a single-slot type and the group id for a multi-slot
+ * one. Should never find anything if DocumentService is the only writer; exists as a defense-in-depth sanity
+ * check for direct DB manipulation and data imports.
  */
 class VerifyDocumentIntegrityCommand extends Command
 {

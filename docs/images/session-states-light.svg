@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 432" width="960" height="432" role="img" aria-labelledby="session-states-title session-states-desc">
+<title id="session-states-title">Upload session states</title>
+<desc id="session-states-desc">State diagram: an upload session starts as initiated, becomes uploaded once the file is in the bucket, and ends as attached. From initiated or uploaded it can also end as expired or aborted. Attached, expired and aborted are final.</desc>
+<defs>
+<marker id="session-states-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5B6068"/></marker>
+<marker id="session-states-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#09B1EC"/></marker>
+</defs>
+<rect width="960" height="432" fill="#F7F6F3"/>
+<g transform="translate(0,-48)">
+<circle cx="40" cy="128" r="6" fill="#16171A"/>
+<line x1="46" y1="128" x2="120" y2="128" stroke="#5B6068" stroke-width="1.2" marker-end="url(#session-states-arrow)"/>
+<rect x="51" y="104" width="64" height="16" rx="2" fill="#F7F6F3"/>
+<text x="83" y="116" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CREATE</text>
+<line x1="304" y1="128" x2="408" y2="128" stroke="#5B6068" stroke-width="1.2" marker-end="url(#session-states-arrow)"/>
+<rect x="308" y="104" width="96" height="16" rx="2" fill="#F7F6F3"/>
+<text x="356" y="116" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">FILE IS IN</text>
+<line x1="592" y1="128" x2="696" y2="128" stroke="#09B1EC" stroke-width="2.4" marker-end="url(#session-states-arrow-accent)"/>
+<rect x="612" y="104" width="64" height="16" rx="2" fill="#F7F6F3"/>
+<text x="644" y="116" fill="#07739F" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ATTACH</text>
+<line x1="212" y1="160" x2="212" y2="280" stroke="#5B6068" stroke-width="1.2" marker-end="url(#session-states-arrow)"/>
+<rect x="220" y="212" width="112" height="16" rx="2" fill="#F7F6F3"/>
+<text x="276" y="224" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TTL OR ABORT</text>
+<line x1="500" y1="160" x2="500" y2="280" stroke="#5B6068" stroke-width="1.2" marker-end="url(#session-states-arrow)"/>
+<rect x="508" y="212" width="112" height="16" rx="2" fill="#F7F6F3"/>
+<text x="564" y="224" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TTL OR ABORT</text>
+<rect x="184" y="280" width="544" height="108" rx="8" fill="none" stroke="rgba(22,23,26,0.45)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="200" y="300" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">FINAL, NO WAY BACK</text>
+<rect x="208" y="312" width="240" height="56" rx="6" fill="#F7F6F3"/>
+<rect x="208" y="312" width="240" height="56" rx="6" fill="none" stroke="rgba(22,23,26,0.22)" stroke-width="1"/>
+<text x="328" y="336" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Expired</text>
+<text x="328" y="356" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">the TTL ran out</text>
+<rect x="464" y="312" width="240" height="56" rx="6" fill="#F7F6F3"/>
+<rect x="464" y="312" width="240" height="56" rx="6" fill="none" stroke="rgba(22,23,26,0.22)" stroke-width="1"/>
+<text x="584" y="336" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Aborted</text>
+<text x="584" y="356" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">someone cancelled it</text>
+<rect x="120" y="96" width="184" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="120" y="96" width="184" height="64" rx="6" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="212" y="124" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Initiated</text>
+<text x="212" y="144" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">waiting for bytes</text>
+<rect x="408" y="96" width="184" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="408" y="96" width="184" height="64" rx="6" fill="rgba(22,23,26,0.06)" stroke="rgba(22,23,26,0.45)" stroke-width="1"/>
+<text x="500" y="124" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Uploaded</text>
+<text x="500" y="144" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">bytes in the bucket</text>
+<rect x="696" y="96" width="184" height="64" rx="6" fill="#F7F6F3"/>
+<rect x="696" y="96" width="184" height="64" rx="6" fill="rgba(9,177,236,0.12)" stroke="#09B1EC" stroke-width="1"/>
+<text x="788" y="124" fill="#16171A" font-size="16" font-weight="600" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" text-anchor="middle">Attached</text>
+<text x="788" y="144" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" text-anchor="middle">final, has a Document</text>
+<path d="M 744 340 L 730 340" fill="none" stroke="#07739F" stroke-opacity="0.6" stroke-width="1" stroke-dasharray="4,3"/>
+<circle cx="730" cy="340" r="2" fill="#07739F"/>
+<text x="840" y="344" fill="#07739F" font-size="16" font-style="italic" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif" text-anchor="middle">Three states are final</text>
+<line x1="56" y1="420" x2="904" y2="420" stroke="rgba(22,23,26,0.14)" stroke-width="0.8"/>
+<text x="56" y="444" fill="#5B6068" font-size="12" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+<line x1="56" y1="464" x2="88" y2="464" stroke="#5B6068" stroke-width="1.2" marker-end="url(#session-states-arrow)"/>
+<text x="100" y="468" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Moves to</text>
+<rect x="200" y="456" width="32" height="16" rx="3" fill="rgba(9,177,236,0.12)" stroke="#09B1EC" stroke-width="1"/>
+<text x="244" y="468" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Happy path</text>
+<rect x="352" y="456" width="32" height="16" rx="3" fill="none" stroke="rgba(22,23,26,0.45)" stroke-width="1" stroke-dasharray="4,3"/>
+<text x="396" y="468" fill="#5B6068" font-size="12" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">Left unfinished</text>
+</g>
+</svg>

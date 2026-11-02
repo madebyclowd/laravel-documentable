@@ -1,19 +1,24 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess;
+use MadeByClowd\Documentable\Http\Requests\AttachUploadRequest;
 use MadeByClowd\Documentable\Http\Requests\FinalizeUploadRequest;
 use MadeByClowd\Documentable\Http\Requests\PresignUploadRequest;
+use MadeByClowd\Documentable\Models\UploadSession;
 use MadeByClowd\Documentable\Services\DocumentService;
+use MadeByClowd\Documentable\ValueObjects\AttachOptions;
+use MadeByClowd\Documentable\ValueObjects\UploadSessionData;
 
 /**
- * Direct/presigned single-PUT path for files under multipart.threshold_bytes
- * — separate from MultipartUploadController, which handles the
- * initiate/part-url/complete/abort session lifecycle. Small files skip
- * multipart because its per-part round trips only add overhead below the
- * threshold.
+ * Direct/presigned single-PUT path for files under multipart.threshold_bytes, and the attach step every
+ * session-based upload ends with. Separate from MultipartUploadController, which handles the
+ * initiate/part-url/complete/abort lifecycle.
  */
 class DirectUploadController extends Controller
 {
@@ -26,37 +31,89 @@ class DirectUploadController extends Controller
     {
         $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
 
-        if (! $this->authorizer->canUpload($request->user(), $type, null)) {
+        if (! $this->authorizer->canInitiateUpload($request->user(), $type)) {
             abort(403);
         }
 
-        $presigned = $this->service->createPresignedUpload($type, $request->string('filename')->toString());
+        $started = $this->service->initiatePresignedUpload(
+            $type,
+            $request->string('filename')->toString(),
+            $this->sessionUserKey($request),
+            $this->declared($request)
+        );
 
-        return response()->json($presigned);
+        return response()->json([
+            'session_id' => $started['session']->id,
+            'url' => $started['url'],
+            'headers' => $started['headers'],
+            'expires_at' => $started['session']->expires_at->toIso8601String(),
+        ]);
     }
 
+    /**
+     * Without owner fields the session ends `uploaded` and is returned. With them it is attached in the same
+     * call and the document is returned.
+     */
     public function finalize(FinalizeUploadRequest $request): JsonResponse
     {
-        $type = $this->resolveDocumentType($request->string('document_type_id')->toString());
-        $documentable = $this->resolveDocumentable(
+        $session = $this->resolveSession($request, $request->string('session_id')->toString());
+
+        $this->authorizeSession($request, $session);
+
+        $session = $this->service->finalizeDirectUpload($session, $request->input('expected_hash'));
+
+        if (! $request->filled('documentable_type')) {
+            return response()->json($session);
+        }
+
+        return $this->attachResponse($request, $session);
+    }
+
+    public function attach(AttachUploadRequest $request): JsonResponse
+    {
+        $session = $this->resolveSession($request, $request->string('session_id')->toString());
+
+        $this->authorizeSession($request, $session);
+
+        return $this->attachResponse($request, $session);
+    }
+
+    private function attachResponse(Request $request, UploadSession $session): JsonResponse
+    {
+        $owner = $this->resolveDocumentable(
             $request->string('documentable_type')->toString(),
             $request->string('documentable_id')->toString()
         );
 
-        if (! $this->authorizer->canUpload($request->user(), $type, $documentable)) {
+        if (! $this->authorizer->canAttach($request->user(), $session, $owner)) {
             abort(403);
         }
 
-        $document = $this->service->finalizeDirectUpload(
-            $request->string('path')->toString(),
-            $type,
-            $documentable,
-            $request->string('filename')->toString(),
-            $request->input('expected_hash'),
-            $request->input('metadata', []),
+        $document = $this->service->attach($session, $owner, new AttachOptions(
+            (array) $request->input('metadata', []),
             $request->input('document_group_id')
-        );
+        ));
 
         return response()->json($document->load('storageFile'), 201);
+    }
+
+    /**
+     * Follow-up calls on a session are asked of the session itself, which carries its type and the user it was
+     * started for.
+     */
+    private function authorizeSession(Request $request, UploadSession $session): void
+    {
+        if (! $this->authorizer->canFinalize($request->user(), $session)) {
+            abort(403);
+        }
+    }
+
+    private function declared(Request $request): UploadSessionData
+    {
+        return new UploadSessionData(
+            $request->filled('declared_size') ? $request->integer('declared_size') : null,
+            $request->input('declared_mime'),
+            $request->input('declared_hash'),
+        );
     }
 }

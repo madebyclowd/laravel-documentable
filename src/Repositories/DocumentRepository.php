@@ -1,9 +1,14 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Repositories;
 
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
+use MadeByClowd\Documentable\Enums\DocumentStatus;
 use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Models\DocumentType;
 
 class DocumentRepository
 {
@@ -16,8 +21,11 @@ class DocumentRepository
      * Find the latest document for an owner+type. Pass $documentGroupId to scope
      * to one specific group/slot (needed once a type `allows_multiple`); omit it
      * for single-slot types where at most one group can ever exist.
+     *
+     * With `$lock` the row is read `FOR UPDATE`, so two uploads that version the same document take turns. It
+     * only holds inside a transaction.
      */
-    public function findLatest(string $documentableType, string $documentableId, string $documentTypeId, ?string $documentGroupId = null): ?Document
+    public function findLatest(string $documentableType, string $documentableId, string $documentTypeId, ?string $documentGroupId = null, bool $lock = false): ?Document
     {
         $query = Document::where('documentable_type', $documentableType)
             ->where('documentable_id', $documentableId)
@@ -28,7 +36,25 @@ class DocumentRepository
             $query->where('document_group_id', $documentGroupId);
         }
 
+        if ($lock) {
+            $query->lockForUpdate();
+        }
+
         return $query->first();
+    }
+
+    /**
+     * Whether this owner already has the group for this type, soft-deleted versions included. A client-supplied
+     * group id is only meaningful if it names a slot the owner really holds.
+     */
+    public function groupExistsForOwner(string $documentableType, string $documentableId, string $documentTypeId, string $documentGroupId): bool
+    {
+        return Document::withTrashed()
+            ->where('documentable_type', $documentableType)
+            ->where('documentable_id', $documentableId)
+            ->where('document_type_id', $documentTypeId)
+            ->where('document_group_id', $documentGroupId)
+            ->exists();
     }
 
     /**
@@ -70,6 +96,29 @@ class DocumentRepository
     }
 
     /**
+     * One page of the rows `findAllLatestForOwnerGrouped()` returns, cut in SQL. The order (type, then group,
+     * then id) is total, so a row never moves between pages while the owner's documents are unchanged.
+     *
+     * @return LengthAwarePaginator<int, Document>
+     */
+    public function paginateLatestForOwnerGrouped(string $documentableType, string $documentableId, ?string $documentTypeId, int $perPage, int $page): LengthAwarePaginator
+    {
+        $query = Document::where('documentable_type', $documentableType)
+            ->where('documentable_id', $documentableId)
+            ->whereNotNull('latest_marker')
+            ->with('storageFile')
+            ->orderBy('document_type_id')
+            ->orderBy('document_group_id')
+            ->orderBy('id');
+
+        if ($documentTypeId !== null) {
+            $query->where('document_type_id', $documentTypeId);
+        }
+
+        return $query->paginate($perPage, ['*'], 'page', $page);
+    }
+
+    /**
      * Full version chain for one group, oldest first.
      *
      * @return Collection<int, Document>
@@ -83,6 +132,37 @@ class DocumentRepository
         }
 
         return $query->get();
+    }
+
+    /**
+     * Give the slot back to the document a refused one replaced: the newest other usable document of its group,
+     * brought back from the trash when the type keeps no history (a replacement there restarts at version 1, so
+     * the version number cannot identify the predecessor). Does nothing when the group had no other document.
+     */
+    public function restorePreviousLatest(Document $refused, DocumentType $type): ?Document
+    {
+        $previous = Document::withTrashed()
+            ->where('document_group_id', $refused->document_group_id)
+            ->whereKeyNot($refused->id)
+            ->where('status', DocumentStatus::Committed->value)
+            ->orderByDesc('created_at')
+            ->orderByDesc('version')
+            ->first();
+
+        if ($previous === null) {
+            return null;
+        }
+
+        if ($previous->trashed()) {
+            $previous->restore();
+        }
+
+        $previous->update([
+            'is_latest' => true,
+            'latest_marker' => $type->allows_multiple ? $previous->document_group_id : $type->id,
+        ]);
+
+        return $previous;
     }
 
     public function findById(string $id): Document

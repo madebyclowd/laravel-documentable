@@ -1,20 +1,46 @@
 <?php
 
+declare(strict_types=1);
+
 namespace MadeByClowd\Documentable\Tests\Feature\Console;
 
+use Aws\MockHandler;
+use Aws\Result;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
 use MadeByClowd\Documentable\Console\Commands\InstallCommand;
 use MadeByClowd\Documentable\Models\Document;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Models\StorageFile;
 use MadeByClowd\Documentable\Tests\Fixtures\TestModel;
 use MadeByClowd\Documentable\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class ArtisanCommandsTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function tearDown(): void
+    {
+        $this->removePublishedMigrations();
+
+        parent::tearDown();
+    }
+
+    /**
+     * `documents:install` publishes the package migrations into Testbench's shared skeleton. A leftover copy
+     * shadows the package's own migration of the same name, so a later schema change would silently not apply
+     * to the test database.
+     */
+    private function removePublishedMigrations(): void
+    {
+        foreach (glob(dirname(__DIR__, 3).'/database/migrations/*.php') ?: [] as $migration) {
+            @unlink(base_path('database/migrations/'.basename($migration)));
+        }
+    }
 
     public function test_sync_types_creates_document_types_from_config(): void
     {
@@ -151,7 +177,7 @@ class ArtisanCommandsTest extends TestCase
 
     public function test_install_command_runs_end_to_end_without_error(): void
     {
-        $this->artisan('documents:install')
+        $this->artisan('documents:install', ['--key-type' => 'string'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
             ->expectsChoice(
                 "How does your app handle logging in users? This decides which security setup we\n".
@@ -191,11 +217,16 @@ class ArtisanCommandsTest extends TestCase
                 'code-first',
                 ['code-first', 'db-only']
             )
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
             )
             ->assertExitCode(0);
     }
@@ -208,7 +239,7 @@ class ArtisanCommandsTest extends TestCase
         // no-op. Testbench's config_path() is a shared, regenerable skeleton path.
         @unlink(config_path('documentable.php'));
 
-        $this->artisan('documents:install')
+        $this->artisan('documents:install', ['--key-type' => 'string'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
             ->expectsChoice(
                 "How does your app handle logging in users? This decides which security setup we\n".
@@ -248,11 +279,16 @@ class ArtisanCommandsTest extends TestCase
                 'code-first',
                 ['code-first', 'db-only']
             )
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
             )
             ->assertExitCode(0);
 
@@ -267,14 +303,8 @@ class ArtisanCommandsTest extends TestCase
     {
         @unlink(config_path('documentable.php'));
 
-        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'monolith'])
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'monolith', '--authorizer' => 'none'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
-            )
             ->assertExitCode(0);
 
         $published = file_get_contents(config_path('documentable.php'));
@@ -287,14 +317,8 @@ class ArtisanCommandsTest extends TestCase
     {
         @unlink(config_path('documentable.php'));
 
-        $this->artisan('documents:install', ['--no-interaction' => true])
+        $this->artisan('documents:install', ['--no-interaction' => true, '--authorizer' => 'none'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
-            ->expectsConfirmation(
-                "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                'document — fine for local development, not fine for production.',
-                'no'
-            )
             ->expectsOutputToContain("defaulting to 'separate-api'")
             ->assertExitCode(0);
 
@@ -315,6 +339,146 @@ class ArtisanCommandsTest extends TestCase
     {
         $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--etag-strategy' => 'bogus'])
             ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->assertExitCode(1);
+    }
+
+    public function test_install_command_key_type_option_is_written_to_the_config_and_applied_to_the_running_app(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--key-type' => 'uuid', '--authorizer' => 'none'])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->assertExitCode(0);
+
+        $this->assertStringContainsString("'key_type' => 'uuid'", file_get_contents(config_path('documentable.php')));
+        $this->assertSame('uuid', $this->app->make(DocumentableConfig::class)->keyType);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_asks_for_the_key_type_when_interactive(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--shape' => 'separate-api', '--etag-strategy' => 'server-authoritative', '--types' => 'code-first'])
+            ->expectsChoice(
+                "What type is the primary key of the models that will own documents?\n".
+                "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+                "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+                "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+                '                use the column index, and PostgreSQL needs no casts.',
+                'ulid',
+                ['int', 'uuid', 'ulid', 'string']
+            )
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
+            )
+            ->assertExitCode(0);
+
+        $this->assertStringContainsString("'key_type' => 'ulid'", file_get_contents(config_path('documentable.php')));
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_offers_doctor_when_interactive_and_default_disk_is_s3(): void
+    {
+        @unlink(config_path('documentable.php'));
+        config()->set('documentable.disk', 's3_install_test');
+        config()->set('filesystems.disks.s3_install_test', [
+            'driver' => 's3',
+            'bucket' => 'test-bucket',
+            'region' => 'us-east-1',
+            'key' => 'k',
+            'secret' => 's',
+        ]);
+
+        $this->artisan('documents:install', ['--shape' => 'separate-api', '--etag-strategy' => 'server-authoritative', '--types' => 'code-first'])
+            ->expectsChoice(
+                "What type is the primary key of the models that will own documents?\n".
+                "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+                "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+                "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+                '                use the column index, and PostgreSQL needs no casts.',
+                'ulid',
+                ['int', 'uuid', 'ulid', 'string']
+            )
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
+            )
+            ->expectsConfirmation('Would you like to run `php artisan documents:doctor s3_install_test` to check bucket connectivity?', 'no')
+            ->assertExitCode(0);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_runs_the_doctor_when_the_offer_is_accepted(): void
+    {
+        @unlink(config_path('documentable.php'));
+        $mock = new MockHandler;
+        for ($i = 0; $i < 60; $i++) {
+            $mock->append(new Result);
+        }
+        Http::fake(['*' => Http::response('', 200)]);
+        config()->set('documentable.disk', 's3_install_test');
+        config()->set('filesystems.disks.s3_install_test', [
+            'driver' => 's3',
+            'bucket' => 'test-bucket',
+            'region' => 'us-east-1',
+            'key' => 'k',
+            'secret' => 's',
+            'handler' => $mock,
+        ]);
+
+        $this->artisan('documents:install', ['--shape' => 'separate-api', '--etag-strategy' => 'server-authoritative', '--types' => 'code-first'])
+            ->expectsChoice(
+                "What type is the primary key of the models that will own documents?\n".
+                "  string (default) — Safe for any mix of key types. Pick this if your owners differ\n".
+                "                (an int User and a uuid Invoice, say) or you are not sure.\n".
+                "  int | uuid | ulid — Pick the one type ALL your owner models share. Queries then\n".
+                '                use the column index, and PostgreSQL needs no casts.',
+                'ulid',
+                ['int', 'uuid', 'ulid', 'string']
+            )
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsChoice(
+                "How do you want to control who's allowed to upload, view and delete documents?\n".
+                "Until you do, every request is denied, and a production boot refuses to start.\n".
+                "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                "              quickest way to start, and it works with Laravel policies too.\n".
+                "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                "              not fit Gates.\n".
+                '  none — Skip this; write your own before going to production.',
+                'none',
+                ['gates', 'class', 'none']
+            )
+            ->expectsConfirmation('Would you like to run `php artisan documents:doctor s3_install_test` to check bucket connectivity?', 'yes')
+            ->expectsOutputToContain('Running diagnostics for disk [s3_install_test]...')
+            ->assertExitCode(0);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    public function test_install_command_invalid_key_type_option_fails_fast(): void
+    {
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--key-type' => 'bigint'])
             ->assertExitCode(1);
     }
 
@@ -340,7 +504,7 @@ class ArtisanCommandsTest extends TestCase
         $this->app->useAppPath($fakeAppPath);
 
         try {
-            $this->artisan('documents:install')
+            $this->artisan('documents:install', ['--key-type' => 'string'])
                 ->expectsConfirmation('Run the new database migrations now?', 'yes')
                 ->expectsChoice(
                     "How does your app handle logging in users? This decides which security setup we\n".
@@ -380,21 +544,113 @@ class ArtisanCommandsTest extends TestCase
                     'db-only',
                     ['code-first', 'db-only']
                 )
-                ->expectsConfirmation(
-                    "Generate a starting point for controlling who's allowed to upload/view/delete\n".
-                    "documents? Without this, the default setup lets ANYONE upload, view, or delete ANY\n".
-                    'document — fine for local development, not fine for production.',
-                    'yes'
+                ->expectsChoice(
+                    "How do you want to control who's allowed to upload, view and delete documents?\n".
+                    "Until you do, every request is denied, and a production boot refuses to start.\n".
+                    "  gates (default) — A starter file of Gate::define() checks, one per action. The\n".
+                    "              quickest way to start, and it works with Laravel policies too.\n".
+                    "  class — A starter class implementing AuthorizesDocumentAccess, for rules that do\n".
+                    "              not fit Gates.\n".
+                    '  none — Skip this; write your own before going to production.',
+                    'gates',
+                    ['gates', 'class', 'none']
                 )
                 ->expectsOutputToContain("Leave config('documentable.types') empty and manage the document_types table directly.")
                 ->expectsOutputToContain('Open the authorizer file we just generated in app/Documentable and fill in your real ownership/role checks.')
                 ->assertExitCode(0);
 
-            $this->assertFileExists($fakeAppPath.'/Documentable/AppDocumentAuthorizer.php');
+            $this->assertFileExists($fakeAppPath.'/Documentable/AppDocumentGates.php');
         } finally {
             File::deleteDirectory($fakeAppPath);
             @unlink(config_path('documentable.php'));
         }
+    }
+
+    public function test_install_command_invalid_authorizer_option_fails_fast(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', [
+            '--no-interaction' => true,
+            '--shape' => 'separate-api',
+            '--etag-strategy' => 'server-authoritative',
+            '--types' => 'code-first',
+            '--authorizer' => 'bogus',
+        ])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsOutputToContain("Invalid --authorizer value: 'bogus'. Expected 'gates', 'class' or 'none'.")
+            ->assertExitCode(1);
+
+        @unlink(config_path('documentable.php'));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function authorizerOptions(): array
+    {
+        return [
+            'gates' => ['gates', 'AppDocumentGates.php'],
+            'class' => ['class', 'AppDocumentAuthorizer.php'],
+        ];
+    }
+
+    #[DataProvider('authorizerOptions')]
+    public function test_install_command_authorizer_option_scaffolds_that_style_without_asking(string $style, string $file): void
+    {
+        @unlink(config_path('documentable.php'));
+        $fakeAppPath = sys_get_temp_dir().'/documentable-install-test-'.uniqid();
+        File::ensureDirectoryExists($fakeAppPath);
+        $this->app->useAppPath($fakeAppPath);
+
+        try {
+            $this->artisan('documents:install', [
+                '--no-interaction' => true,
+                '--shape' => 'separate-api',
+                '--etag-strategy' => 'server-authoritative',
+                '--types' => 'code-first',
+                '--authorizer' => $style,
+            ])
+                ->expectsConfirmation('Run the new database migrations now?', 'no')
+                ->expectsOutputToContain('Open the authorizer file we just generated in app/Documentable')
+                ->assertExitCode(0);
+
+            $this->assertFileExists($fakeAppPath.'/Documentable/'.$file);
+        } finally {
+            File::deleteDirectory($fakeAppPath);
+            @unlink(config_path('documentable.php'));
+        }
+    }
+
+    public function test_install_command_scaffolds_the_gates_authorizer_by_default_when_not_interactive(): void
+    {
+        @unlink(config_path('documentable.php'));
+        $fakeAppPath = sys_get_temp_dir().'/documentable-install-test-'.uniqid();
+        File::ensureDirectoryExists($fakeAppPath);
+        $this->app->useAppPath($fakeAppPath);
+
+        try {
+            $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api'])
+                ->expectsConfirmation('Run the new database migrations now?', 'no')
+                ->assertExitCode(0);
+
+            $this->assertFileExists($fakeAppPath.'/Documentable/AppDocumentGates.php');
+        } finally {
+            File::deleteDirectory($fakeAppPath);
+            @unlink(config_path('documentable.php'));
+        }
+    }
+
+    public function test_install_command_skipping_the_authorizer_says_every_request_stays_denied(): void
+    {
+        @unlink(config_path('documentable.php'));
+
+        $this->artisan('documents:install', ['--no-interaction' => true, '--shape' => 'separate-api', '--authorizer' => 'none'])
+            ->expectsConfirmation('Run the new database migrations now?', 'no')
+            ->expectsOutputToContain('until you do, every request is denied')
+            ->assertExitCode(0);
+
+        @unlink(config_path('documentable.php'));
     }
 
     public function test_write_config_value_is_a_noop_when_config_file_missing(): void

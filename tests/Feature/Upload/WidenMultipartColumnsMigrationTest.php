@@ -5,14 +5,28 @@ declare(strict_types=1);
 namespace MadeByClowd\Documentable\Tests\Feature\Upload;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use MadeByClowd\Documentable\Models\DocumentType;
-use MadeByClowd\Documentable\Models\MultipartUpload;
 use MadeByClowd\Documentable\Tests\TestCase;
 
 class WidenMultipartColumnsMigrationTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * Upload sessions replaced `multipart_uploads`, so a fresh install drops it again. These tests are about
+     * the table an upgrading app still has, so each one rebuilds it the way the original migrations left it.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Schema::dropIfExists('multipart_uploads');
+        (require __DIR__.'/../../../database/migrations/2026_07_05_000004_create_multipart_uploads_table.php')->up();
+        $this->migration()->up();
+    }
 
     protected function migration(): object
     {
@@ -98,8 +112,10 @@ class WidenMultipartColumnsMigrationTest extends TestCase
         $type = DocumentType::create([
             'code' => 'BIG', 'name' => 'Big', 'max_size_mb' => 10, 'disk' => 'test_disk', 'path_prefix' => 'docs',
         ]);
-        $session = MultipartUpload::create([
-            'path' => 'docs/abc', 'upload_id' => 'upload-1', 'user_id' => 'user-1', 'document_type_id' => $type->id,
+        $id = (string) Str::uuid();
+
+        DB::table('multipart_uploads')->insert([
+            'id' => $id, 'path' => 'docs/abc', 'upload_id' => 'upload-1', 'user_id' => 'user-1', 'document_type_id' => $type->id,
         ]);
 
         $this->migration()->up();
@@ -108,6 +124,6 @@ class WidenMultipartColumnsMigrationTest extends TestCase
         $this->assertSame('text', $this->columnTypes()['upload_id']);
         $this->assertContains(['user_id'], $this->indexColumns());
         $this->assertNotContains(['path', 'upload_id', 'user_id'], $this->indexColumns());
-        $this->assertSame('upload-1', $session->fresh()->upload_id);
+        $this->assertSame('upload-1', DB::table('multipart_uploads')->where('id', $id)->value('upload_id'));
     }
 }

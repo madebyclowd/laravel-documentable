@@ -1,0 +1,103 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MadeByClowd\Documentable\Services;
+
+use LogicException;
+use MadeByClowd\Documentable\Config\DocumentableConfig;
+use MadeByClowd\Documentable\Enums\DocumentStatus;
+use MadeByClowd\Documentable\Exceptions\DiskDoesNotSupportTemporaryUrlsException;
+use MadeByClowd\Documentable\Exceptions\DocumentNotReady;
+use MadeByClowd\Documentable\Models\Document;
+use MadeByClowd\Documentable\Models\StorageFile;
+use MadeByClowd\Documentable\ValueObjects\UrlOptions;
+
+/**
+ * Signs time-limited download URLs and builds the `Content-Disposition` value that goes with them.
+ *
+ * @internal
+ */
+final class UrlSigner
+{
+    public function __construct(
+        private readonly AccessLogger $accessLogger,
+        private readonly Presigner $presigner,
+    ) {}
+
+    /**
+     * @throws DocumentNotReady when the document is still being verified, or was refused
+     * @throws DiskDoesNotSupportTemporaryUrlsException when the document's disk cannot sign temporary URLs
+     */
+    public function sign(Document $document, UrlOptions $options): string
+    {
+        $modifierClass = app(DocumentableConfig::class)->urlModifier;
+        if ($modifierClass !== null) {
+            $options = app($modifierClass)->modify($options, $document);
+        }
+
+        $storageFile = $document->storageFile ?? throw new LogicException("Document {$document->id} has no storage file to sign a URL for.");
+
+        if ($document->status !== DocumentStatus::Committed) {
+            throw new DocumentNotReady($document->id, $document->status);
+        }
+
+        $url = $this->presigner->download(
+            $storageFile->disk,
+            $storageFile->path,
+            $options->expiration(),
+            self::contentDisposition($options->disposition, $options->filename ?? $document->client_filename),
+            $this->contentTypeFor($options, $storageFile)
+        );
+
+        $this->accessLogger->log($document, $options->disposition === 'attachment' ? 'download' : 'view');
+
+        return $url;
+    }
+
+    /**
+     * Objects are stored without a `Content-Type` of their own, so an inline image or PDF would download instead
+     * of previewing. The type the upload was verified as is declared for it, but only when it is one a browser may
+     * render inline: anything else, HTML above all, is left to the provider's default.
+     */
+    private function contentTypeFor(UrlOptions $options, StorageFile $storageFile): ?string
+    {
+        if ($options->contentType !== null || $options->disposition !== 'inline') {
+            return $options->contentType;
+        }
+
+        return in_array($storageFile->mime_type, UrlOptions::INLINE_MIMES, true) ? $storageFile->mime_type : null;
+    }
+
+    /**
+     * The `Content-Disposition` value for a download (RFC 6266): a plain ASCII `filename` every client
+     * understands, plus `filename*` (RFC 5987, UTF-8, percent-encoded) when the real name has anything else, so a
+     * browser saves "résumé.pdf" as written.
+     */
+    public static function contentDisposition(string $disposition, string $filename): string
+    {
+        $ascii = self::sanitizeHeaderFilename($filename);
+        $value = $disposition.'; filename="'.($ascii === '' ? 'download' : $ascii).'"';
+
+        $clean = (string) preg_replace('/[\x00-\x1F\x7F"]/', '', $filename);
+
+        if ($clean !== '' && ! mb_check_encoding($clean, 'ASCII')) {
+            $value .= "; filename*=UTF-8''".rawurlencode($clean);
+        }
+
+        return $value;
+    }
+
+    /**
+     * The ASCII-only form of a name that is safe inside a quoted header value: quotes and control characters are
+     * dropped (the header-injection primitives), a backslash or any non-ASCII character becomes `_`. Pure and
+     * static so a consumer building their own download endpoint can reuse it.
+     */
+    public static function sanitizeHeaderFilename(string $filename): string
+    {
+        $stripped = preg_replace('/[\x00-\x1F\x7F"]/', '', $filename);
+
+        // A failed match yields an empty name rather than an unsanitized one.
+        return $stripped === null ? '' : (string) preg_replace('/[^\x20-\x7E]|\\\\/u', '_', $stripped);
+    }
+}

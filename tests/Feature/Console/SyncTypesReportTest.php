@@ -36,6 +36,20 @@ class SyncTypesReportTest extends TestCase
             ->assertExitCode(0);
     }
 
+    public function test_it_stores_the_upload_rules_of_a_type(): void
+    {
+        config()->set('documentable.types', ['DRAWING' => [
+            'name' => 'Drawing', 'max_size_mb' => 5, 'disk' => 'test_disk', 'path_prefix' => 'drawing',
+            'allowed_extensions' => ['dwg'], 'trust_extension_for_generic_mime' => true,
+        ]]);
+
+        $this->artisan('documents:sync-types')->assertExitCode(0);
+
+        $type = DocumentType::where('code', 'DRAWING')->firstOrFail();
+        $this->assertSame(['dwg'], $type->allowed_extensions);
+        $this->assertTrue($type->trust_extension_for_generic_mime);
+    }
+
     public function test_it_lists_database_types_that_config_no_longer_defines(): void
     {
         DocumentType::create(['code' => 'LEGACY', 'name' => 'Legacy', 'max_size_mb' => 1, 'disk' => 'test_disk', 'path_prefix' => 'legacy']);

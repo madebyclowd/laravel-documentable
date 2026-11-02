@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use MadeByClowd\Documentable\Drivers\S3MultipartDriver;
 
 return [
@@ -13,11 +15,31 @@ return [
     | disk with a registered Storage::buildTemporaryUrlsUsing() callback) —
     | GET /documents/{id}/url calls temporaryUrl() for every document
     | regardless of size, not just multipart-uploaded ones. Uploading via
-    | store()/uploadDetached() works on any disk (e.g. local); *viewing* a
+    | upload() and the staged upload work on any disk (e.g. local); *viewing* a
     | document after upload does not, unless the disk supports temporary URLs.
     |
     */
     'disk' => env('DOCUMENTABLE_DISK', 's3'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Owner Key Type
+    |--------------------------------------------------------------------------
+    |
+    | The column type of documents.documentable_id, the primary key of the
+    | models that own documents. One of: int, uuid, ulid, string.
+    |
+    | Match it when every owner model shares one key type: queries then use the
+    | column's index, and PostgreSQL needs no casts. Keep 'string' when owners
+    | have different key types (an int User and a uuid Invoice, say), because
+    | one column cannot hold both.
+    |
+    | Changing it on an install that already has documents converts the column
+    | with a migration. Run `php artisan documents:upgrade-check` first. On
+    | MySQL the conversion rewrites the table and blocks writes while it runs.
+    |
+    */
+    'key_type' => 'string',
 
     /*
     |--------------------------------------------------------------------------
@@ -35,10 +57,14 @@ return [
     |--------------------------------------------------------------------------
     |
     | Set to false to disable auto-registration and mount the package's
-    | controllers yourself (custom prefix/middleware/throttle).
+    | controllers yourself (custom middleware/throttle).
+    |
+    | route_prefix is the path the routes are mounted under. Change it when
+    | your app already has routes of its own under /documents.
     |
     */
     'load_routes' => true,
+    'route_prefix' => 'documents',
 
     /*
     |--------------------------------------------------------------------------
@@ -70,6 +96,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Content Validators
+    |--------------------------------------------------------------------------
+    |
+    | Checks on what an upload really is, run on its first bytes, per document
+    | type code. A type can also set `allowed_extensions` (a list of lowercase
+    | extensions) and `trust_extension_for_generic_mime` in its definition above.
+    | Built in: DwgValidator, DxfValidator, ZipValidator (also docx, xlsx, pptx),
+    | OleDocumentValidator (doc, xls, ppt), SevenZipValidator, RarValidator and
+    | GzipValidator. Write your own by implementing ValidatesUploadedFile.
+    |
+    | 'validators' => [
+    |     'DRAWING' => [\MadeByClowd\Documentable\Validators\DwgValidator::class],
+    | ],
+    |
+    */
+    'validators' => [
+        // ...
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Multipart Upload
     |--------------------------------------------------------------------------
     |
@@ -85,19 +132,53 @@ return [
     |     always resolves ETags via ListParts before completing. No CORS
     |     dependency. Needed for SaaS-managed/limited-CORS buckets.
     |
+    | object_metadata: when true, CreateMultipartUpload sends the URL-encoded
+    | original filename in object metadata. Default is false (sends no metadata).
+    |
+    | content_type: MIME type sent on CreateMultipartUpload when configured.
+    | Default is null (does not force ContentType).
+    |
     */
     'multipart' => [
         'threshold_bytes' => 10 * 1024 * 1024,
         'etag_strategy' => 'server-authoritative',
         'part_upload_url_ttl' => '+1 hour',
         'session_ttl_hours' => 24,
-        // Leave false. S3 multipart checksums are composite (a checksum of the part checksums), so
-        // the value this reads back never equals the file's SHA-256: an upload with an expected_hash
-        // is rejected, and one without stores a hash that breaks deduplication. Slated for removal.
-        'use_native_checksum' => false,
         'drivers' => [
             's3' => S3MultipartDriver::class,
         ],
+        'object_metadata' => false,
+        'content_type' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Verification
+    |--------------------------------------------------------------------------
+    |
+    | Every upload is checked before it can be served: its size, its real
+    | content type, the client's hash if one was declared, and the scanner. The
+    | hash needs the whole object read once.
+    |
+    | sync_hash_max_bytes: an object up to this size is verified inside the
+    | request. A larger one is only checked for size and content type from its
+    | first bytes, its document is created as `processing`, and a queued job
+    | hashes and scans it, then marks it `committed` or `rejected`. A
+    | `processing` document cannot be downloaded or deduplicated against. Needs
+    | a queue worker; with the `sync` queue driver the job runs in the request.
+    | The read is bound by bandwidth to storage, not by the CPU: a 1 GiB object
+    | hashes in about a second from storage on the same network, but a 50 MiB
+    | object took 27 to 39 seconds to hash over the public internet from a
+    | development machine. Size the limit to the link between your servers and
+    | the bucket. Set 0 to always verify in a job.
+    |
+    | connection / queue: where the job runs. null uses the application default.
+    |
+    */
+    'verification' => [
+        'sync_hash_max_bytes' => 50 * 1024 * 1024,
+        'connection' => null,
+        'queue' => null,
     ],
 
     /*
@@ -105,16 +186,14 @@ return [
     | Lifecycle / Orphan Cleanup
     |--------------------------------------------------------------------------
     |
-    | pending_ttl_hours: default TTL for documents created in 'pending' status
-    | (see MadeByClowd\Documentable\Models\Document::commit()). reaper_frequency
-    | is a Schedule fluent-method name ('hourly', 'daily', 'everyFiveMinutes',
-    | ...) applied to the documents:clean-orphaned command. Multipart session
-    | TTL uses multipart.session_ttl_hours — single source of truth,
-    | not duplicated here.
+    | reaper_frequency is a Schedule fluent-method name ('hourly', 'daily',
+    | 'everyFiveMinutes', ...) applied to the documents:clean-orphaned command,
+    | which expires upload sessions past their expiry and releases what they
+    | hold. How long a session lives is multipart.session_ttl_hours, for every
+    | kind of upload — single source of truth, not duplicated here.
     |
     */
     'lifecycle' => [
-        'pending_ttl_hours' => 24,
         'reaper_frequency' => 'hourly',
 
         // `documents:clean-orphaned --storage-files` only touches stored files older than this, so a file
@@ -129,8 +208,17 @@ return [
     |
     | Bind your own implementation of
     | MadeByClowd\Documentable\Contracts\AuthorizesDocumentAccess to control
-    | who can upload/view/delete documents. Default is permissive (allows
-    | everything) — replace before production use.
+    | who can upload, attach, view and delete documents. Left null, the
+    | Gate-backed default (Defaults\GateDocumentAuthorizer) is used: it asks
+    | the abilities documents.initiate-upload, documents.finalize,
+    | documents.attach, documents.view and documents.delete, and denies any
+    | the app has not defined, so nothing is allowed until you define them.
+    |
+    | In production, booting with the routes mounted and this key null throws
+    | InsecureConfiguration. Run `php artisan documents:make-authorizer` to
+    | scaffold an authorizer, then set the key to its class. To keep the
+    | Gate-backed default, set it to
+    | MadeByClowd\Documentable\Defaults\GateDocumentAuthorizer::class.
     |
     */
     'authorization' => [
@@ -139,16 +227,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Deduplication Scope
+    | Deduplication Scope & Proof-of-Possession Handshake
     |--------------------------------------------------------------------------
     |
-    | Default dedup is global by file hash. Bind your own implementation of
-    | MadeByClowd\Documentable\Contracts\ResolvesDedupScope to scope dedup
-    | (e.g. per tenant) if hash collisions across tenants are a concern.
+    | Default dedup is TypeAndTenantScope (scopes by document type and tenant).
+    | Bind GlobalDedupScope to opt into global content-hash deduplication across
+    | all slots and tenants.
+    |
+    | challenge_ttl: time in seconds a handshake challenge remains valid (default 300).
+    | max_range_bytes: upper bound on byte ranges requested in challenges (default 64 KiB).
+    | throttle: named rate limiter for handshake endpoints (default 'documents-handshake').
     |
     */
     'dedup' => [
         'scope_resolver' => null,
+        'challenge_ttl' => 300,
+        'max_range_bytes' => 64 * 1024,
+        'throttle' => 'documents-handshake',
     ],
 
     /*
@@ -169,25 +264,13 @@ return [
     | appears in this array — null means "reject every unmapped type"
     | (the safe default). Without Relation::enforceMorphMap() AND this
     | allowlist, a client can pass any Eloquent model FQCN in the app as
-    | documentable_type; the (default-permissive) authorizer is the only
+    | documentable_type; the authorizer is the only
     | other gate.
     |
     */
     'security' => [
         'scanner' => null,
         'allowed_documentable_types' => null,
-
-        // When true, a presigned finalize only accepts a path that starts with the document type's
-        // `path_prefix`. Off by default because a custom storage path generator (for example date or
-        // tenant sharding) legitimately produces other layouts. Turn it on if you keep the default
-        // "{path_prefix}/{uuid}" layout.
-        'enforce_path_prefix' => false,
-
-        // Discouraged. When true and nobody is authenticated, the multipart endpoints accept `user_id`
-        // from the request body as the session owner. Anyone who can reach the route can then name any
-        // owner, so only enable it for a device/guest flow you protect another way (signed URLs, a
-        // device token checked by your own middleware). Authenticated requests always use the real user.
-        'allow_guest_user_id' => false,
 
         // What to do when the scanner returns ScanResult::Error (it could not reach a verdict). `reject`
         // (default) refuses the file, so a scanner outage cannot silently turn scanning off. `allow` stores
@@ -206,6 +289,46 @@ return [
     */
     'url' => [
         'max_ttl_minutes' => 1440,
+        'modifier' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Attach Metadata
+    |--------------------------------------------------------------------------
+    |
+    | The client may send `metadata` when it attaches an upload, and the server
+    | must not trust it for anything that matters. Set a class implementing
+    | MadeByClowd\Documentable\Contracts\ResolvesAttachMetadata to stamp keys
+    | on the document yourself. It runs for every upload transport, its keys beat
+    | the client's, and `size`, `mime_type` and `original_filename` (measured by
+    | the package) beat both. It only adds keys: to refuse an attach, deny it in
+    | the authorizer's canAttach().
+    |
+    */
+    'attach' => [
+        'metadata_resolver' => null,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Browser Client
+    |--------------------------------------------------------------------------
+    |
+    | What GET /documents/config tells the browser uploader, so an app does not
+    | hard-code these numbers or pass them through its own props. max_concurrency
+    | is how many parts the client uploads in parallel. retry is the policy for a
+    | failed part: attempts retries, with exponential backoff from base_delay_ms
+    | up to max_delay_ms.
+    |
+    */
+    'client' => [
+        'max_concurrency' => 4,
+        'retry' => [
+            'attempts' => 3,
+            'base_delay_ms' => 500,
+            'max_delay_ms' => 8000,
+        ],
     ],
 
     /*
@@ -225,16 +348,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Per-Disk Server-Side Encryption
+    | Per-Disk Storage Settings
     |--------------------------------------------------------------------------
     |
-    | Explicit SSE, passed through to every write/presign/multipart-create
-    | call rather than relying on the bucket's default encryption setting.
-    | server_side_encryption: 'AES256' | 'aws:kms'. kms_key_id only used when
-    | server_side_encryption is 'aws:kms'.
+    | Configuration options for specific disks.
+    | - server_side_encryption: 'AES256' | 'aws:kms'.
+    | - kms_key_id: KMS key ARN or alias when server_side_encryption is 'aws:kms'.
+    | - presign_endpoint: optional public URL used when generating presigned
+    |   download and upload URLs, leaving internal traffic on the disk's endpoint.
+    | - presign_use_path_style: optional boolean overriding path-style endpoint
+    |   behavior for presigned URLs.
     |
     | Example:
-    | 's3' => ['server_side_encryption' => 'AES256'],
+    | 's3' => [
+    |     'server_side_encryption' => 'AES256',
+    |     'presign_endpoint' => 'https://downloads.example.com',
+    |     'presign_use_path_style' => false,
+    | ],
     |
     */
     'disks' => [
@@ -247,15 +377,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | Applied to every route in routes/api.php, in addition to the throttle
-    | middleware below. Default ('api') has no session/auth — $request->user()
-    | is null, so AuthorizesDocumentAccess always receives a null $user,
-    | created_by/deleted_by stay null, and the multipart endpoints reject the
-    | request unless security.allow_guest_user_id lets a client-supplied
-    | user_id stand in as the session owner. Session-based monolith (Inertia,
-    | Livewire, classic SPA-on-same-origin): use ['web', 'auth']. Separate
-    | token-auth API: use ['api', 'auth:sanctum'] (or your guard). With only
-    | ['api'] there is no session or auth, so $request->user() is null on
-    | every request.
+    | middleware below. Default ('api') has no session/auth, so $request->user()
+    | is null on every request: AuthorizesDocumentAccess receives a null $user,
+    | created_by/deleted_by stay null and the multipart endpoints refuse the
+    | request, because a session needs a real user to belong to. Session-based
+    | monolith (Inertia, Livewire, classic SPA-on-same-origin): use
+    | ['web', 'auth']. Separate token-auth API: use ['api', 'auth:sanctum'] (or
+    | your guard).
     |
     */
     'middleware' => ['api'],
@@ -267,9 +395,10 @@ return [
     |
     | Default page size for GET /documents (owner-scoped, grouped by
     | document_type_id then document_group_id). The owner's latest documents are
-    | loaded, canView() is applied to each in PHP, and only then is the result
-    | paged, so `total` counts just what the caller may view. For an owner with
-    | thousands of documents, list a narrower set with document_type_id.
+    | paged in SQL in a stable order, then AuthorizesDocumentAccess::canViewMany()
+    | is asked once for that page. A page can therefore hold fewer than per_page
+    | documents when some are hidden from the caller; `total` counts the owner's
+    | documents, not only those the caller may view.
     |
     */
     'listing' => [
@@ -281,9 +410,11 @@ return [
     | Throttle
     |--------------------------------------------------------------------------
     |
-    | Named rate limiter the package's routes are mounted behind.
-    | Package doesn't hardcode a specific rate — define this limiter
-    | (RateLimiter::for('documents', ...)) in your own AppServiceProvider.
+    | Named rate limiter the package's routes are mounted behind. When the app
+    | defines no limiter of this name, the package registers one that allows 60
+    | requests per minute per user, or per IP address for guests. Define your own
+    | (RateLimiter::for('documents', ...)) in your AppServiceProvider to change
+    | the rate.
     |
     */
     'throttle' => 'documents',
@@ -296,5 +427,31 @@ return [
     'audit' => [
         'enabled' => false,
         'access_log' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Version Retention & Pruning
+    |--------------------------------------------------------------------------
+    |
+    | Hold list of document IDs and/or document group IDs that must never be
+    | pruned by automatic retention or the prune-versions command.
+    |
+    */
+    'retention' => [
+        'hold' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Storage Doctor
+    |--------------------------------------------------------------------------
+    |
+    | Scratch prefix under which php artisan documents:doctor performs read/write
+    | probes. Always cleaned up after probes finish.
+    |
+    */
+    'doctor' => [
+        'scratch_prefix' => 'documentable-doctor',
     ],
 ];

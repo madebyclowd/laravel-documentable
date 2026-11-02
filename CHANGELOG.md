@@ -7,6 +7,213 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.0.0] - 2026-11-02
+
+### Changed
+- First stable release of 3.x. It graduates `3.0.0-alpha.11` unchanged: every change in the alpha entries below is part of 3.0.0. Upgrading from 2.x follows `UPGRADE.md`, and `php artisan documents:upgrade-check --code` finds the removed v2 APIs in your code.
+
+## [3.0.0-alpha.11] - 2026-11-02
+
+### Removed
+- `POST /documents/multipart/part-url` is replaced by `POST /documents/multipart/part-urls`, which signs up to 100 parts in one request with one session load. Clients that asked for one URL per part must send `part_numbers[]` instead; see the upgrade guide.
+
+### Added
+- `GET /documents/config` tells a browser uploader what the server already knows: the multipart threshold, part size bounds, upload concurrency, the retry policy, the hashing limit and the types the caller may upload to. The concurrency and retry policy come from the new `client` config section.
+- The TypeScript client keeps a multipart session after a lost connection and tells the caller its id. `onSession(id)` fires once the session exists, and `error.sessionId` is set when the session was kept, so an app can save the id and pass it back as `resumeSessionId`. Signing part URLs and reading session status and parts are now retried with the configured backoff, and a failed request waits for the browser's `online` event while it reports offline. `initiate` and `complete` are not retried. A refusal or the caller's own abort still aborts the session.
+- `GET /documents/{document}` returns a document with its status, so a client can wait for a `processing` document to turn `committed` or `rejected`. It is gated by `canView`.
+- A dependency-free TypeScript upload client, published with `php artisan vendor:publish --tag=documentable-client`. `uploadFile()` hashes the file incrementally, answers the dedup handshake with a proof of possession, uploads by presigned PUT or multipart with parallel parts, retry, resume and abort, waits for a `processing` document, and accepts Wayfinder route functions.
+
+## [3.0.0-alpha.10] - 2026-11-01
+
+### Changed
+- Inline URLs now declare the stored content type, so an image or PDF previews in the browser instead of downloading. Only types in `UrlOptions::INLINE_MIMES` are declared; an explicit `contentType` or a `url.modifier` still wins.
+- `documents:upgrade-check --code` reports fewer false positives: migrations are skipped (except the published-copy check), block comments are ignored, and the string `'pending'` status match needs a document mention on the line. A rule can be skipped with `--ignore=<rule-id>`.
+
+### Fixed
+- Uploads, staged uploads, attach and `documents:clean-orphaned` no longer throw a `TypeError` in an app that calls `Date::use(CarbonImmutable::class)`. `DirectUploadService` and `UploadSessionRepository` now accept any `CarbonInterface`.
+- `documents:upgrade-check` and `documents:repair` run on a v2 database before `migrate`, as UPGRADE.md orders them. They no longer fail with `relation "upload_sessions" does not exist`; a missing sessions table is treated as holding nothing.
+
+### Added
+- `ResolvesAttachMetadata`, set as `attach.metadata_resolver`, lets the server stamp document metadata as an upload is attached, for every upload transport. Its keys replace the client's. `size`, `mime_type` and `original_filename` are now always set by the package and can no longer be overwritten by the client's `metadata`.
+- `documentable.route_prefix` (default `documents`) mounts the package's routes under another path, for apps that already own routes under `/documents`.
+
+## [3.0.0-alpha.9] - 2026-10-31
+
+### Added
+- Update Laravel Boost guideline and skill for v3 architecture and provide a dedicated v3 upgrade skill with scanner patterns.
+- Restructure README for v3: quick start, upload sessions, authorization contract, versions and retention lifecycle, and upgrade guide links.
+- Add static code scan mode `documents:upgrade-check --code` to inspect applications for removed or renamed v2 APIs prior to upgrading.
+- Add comprehensive 3.x upgrade guide with preflight checks, migration lock tables, and API replacements.
+
+## [3.0.0-alpha.8] - 2026-10-31
+
+### Added
+- Public seams and testing tools:
+  - Read API: `DocumentService::readStream()` returning PHP stream resources with `DocumentNotReady` / `LogicException` guards and access logging, and `DocumentService::readContents()` with memory limit guard and `DocumentTooLargeToRead` exception.
+  - Public seams: `DocumentService::attachStorageFile()` seam for attaching existing storage files using `AttachOptions` as the supported replacement for subclassing.
+  - Model factories: `DocumentFactory`, `DocumentTypeFactory`, `StorageFileFactory`, and `UploadSessionFactory` with strict-mode compatibility and lifecycle states.
+  - Testing tools: `Documentable::fake()` faking storage disks, the multipart upload driver, and package domain events, returning `DocumentableFake` with observable assertions (`assertUploaded`, `assertMultipartInitiated`, `assertAttached`, `assertPurged`, `assertNothingUploaded`).
+  - Moved `FakeMultipartUploadDriver` to public testing surface (`MadeByClowd\Documentable\Testing\FakeMultipartUploadDriver`).
+- Read-side ergonomics and download endpoints:
+  - Model API: Document accessors for filename, size, mime, and extension, a lazy temporaryUrl() helper delegating to DocumentService::getUrl(), and query scopes for latest(), committed(), and ofType().
+  - Documentable trait helpers: documentOfType() MorphOne relation and documentsOfType() MorphMany relation respecting owner key types with eager-loading support.
+  - URLs: UrlOptions value object with inline content-type allowlist, disposition validation, TTL clamping, ModifiesUrlOptions hook contract, and container-resolved modifier config.
+  - Download routes: GET /documents/{document}/download and /view redirecting to presigned URLs with Cache-Control: no-store and access log integration.
+  - Resources: DocumentResource and DocumentCollection with opt-in ->withUrl() support.
+
+## [3.0.0-alpha.7] - 2026-10-31
+
+### Changed
+- Deleting the latest version of a document group now promotes the highest remaining committed version to latest,
+  instead of leaving the group with no latest (and the next upload starting a new group at v1). Set the document
+  type's `on_delete_latest` to `none` for the old behavior, or `block` to refuse the delete while older versions exist
+  (`CannotDeleteLatestVersion`). `document_types.max_versions_to_keep`, which nothing read, is renamed `versions_kept`
+  and now works; the migration carries existing values over.
+
+### Added
+- `DocumentService::restore()`, `deleteGroup()` and `promote()` manage versions, and `DocumentVersionPromoted` fires
+  when a version becomes latest. Document types can prune old versions with `versions_kept` and `versions_retain_days`:
+  a non-latest version is deleted only when it is beyond the count and older than the age, and a missing setting
+  leaves that axis alone. The `PruneDocumentVersions` job runs after the upload commits and dispatches
+  `DocumentVersionPruned`. `documents:prune-versions {--type=} {--dry-run}` runs the same selection on demand, and
+  `documentable.retention.hold` lists document or group ids that are never pruned.
+
+## [3.0.0-alpha.6] - 2026-10-31
+
+### Changed
+- `MultipartUploadDriver` is now `@api` and takes the `UploadSession` for every call after `create()`. Provider errors map to `MultipartUploadNotFoundException` and the new `MultipartPartTooSmallException`. `MultipartDriverConformanceTest` lets a driver package prove it honors the contract, and `PartSizePlanner` plus a `part_size` field in the initiate response give clients the constant part size Cloudflare R2 requires.
+- Download, single-PUT and multipart part URLs are now signed locally by a separate client against the optional `documentable.disks.{disk}.presign_endpoint`, instead of rewriting `temporary_url` after signing, so they stay valid behind a proxy that does not forward the original `Host`. `CreateMultipartUpload` no longer sends filename metadata (opt in with `multipart.object_metadata`, URL-encoded) or forces a `Content-Type` (opt in with `multipart.content_type`).
+
+### Fixed
+- `documents:configure-bucket-lifecycle` keeps the bucket's other lifecycle rules instead of replacing them all, and adds an expiration rule for the doctor's scratch prefix.
+- An expired single-PUT upload session now deletes its object before it is marked expired, so a failed delete leaves the session open for the next run instead of an expired row that still has an object.
+
+### Added
+- `php artisan documents:clean-orphaned --bucket` lists objects under your document types' path prefixes that no stored file or live upload session points at (dry run; `--apply` deletes). It warns when the bucket has versioning on, where a delete only adds a delete marker.
+- `php artisan documents:doctor {disk}` checks a bucket before you deploy: presigned PUT and GET, multipart create with and without metadata, `UploadPart`, the `ETag` header, ranged reads, delete, lifecycle rules, and whether the provider rejects the AWS SDK default checksum headers. Each failure prints its fix, and `documents:install` offers to run it.
+
+## [3.0.0-alpha.5] - 2026-10-28
+
+### Security
+- Close hash oracle vulnerability by redesigning deduplication scoping and introducing proof-of-possession handshake:
+  - Changed default deduplication scope resolver from `HashOnlyDedupScope` to `TypeAndTenantScope`. Reused storage files are now scoped deterministically by document type and tenant id (via the `HasDedupTenant` contract or `TypeAndTenantScope::resolveTenantUsing()`), preventing cross-tenant and cross-type hash collision claims.
+  - Added `GlobalDedupScope` (bare content hash) and `OwnerScopedDedupScope` for documented opt-in configurations.
+  - Added `storage_files.content_hash` to record the raw SHA-256 content hash while `file_hash` holds the scoped deduplication key; updated integrity verification to inspect `content_hash`.
+  - Added proof-of-possession challenge/response handshake endpoints (`POST /documents/handshake` and `POST /documents/handshake/answer`) backed by race-safe single-use `dedup_challenges` with attempt limiting (3 wrong answers dead limit) and reaper pruning.
+  - A handshake hit and miss return the same response shape; a hit needs the stored size, and the optional owner is used to resolve the scope. The answer re-checks `canInitiateUpload`, only the user a challenge was issued to can answer it, and the proof reads only the challenged ranges (one ranged GET on S3-compatible disks).
+  - An open upload session now keeps its stored file from being removed by the orphan sweep.
+  - Added reference range-proof implementation (`RangeProof`) with committed test vector fixtures.
+
+## [3.0.0-alpha.4] - 2026-10-27
+
+### Changed
+- `client_filename` is now normalized when the document is written: the directory part, control characters,
+  leading dots and trailing dots or spaces are removed, invalid UTF-8 is dropped and the length is capped at 255
+  bytes keeping the extension. The name the client sent is kept in `metadata.original_filename` when it differs, and
+  the extension rule judges the normalized name. Download URLs now send an RFC 6266 `Content-Disposition`: an ASCII
+  `filename` for old clients plus `filename*` with the real UTF-8 name, so a browser saves "résumé.pdf" as written
+  instead of an underscore. `UrlSigner::sanitizeHeaderFilename()` also replaces a backslash with `_`, and a name that
+  sanitizes to nothing is sent as `download` instead of an empty `filename=""`.
+- Large uploads are no longer hashed inside the request. An object above `verification.sync_hash_max_bytes`
+  (default 50 MiB) is checked for size and content type from its first bytes, its document is created with the new
+  `processing` status, and a queued job (`VerifyUploadedObject`) streams the hash, applies the client's hash, the
+  type rules and the scanner, then commits the document or rejects it and removes the object. `processing` and
+  `rejected` documents have no download URL (`DocumentNotReady`, HTTP 409) and are never a dedup target, and a
+  rejected replacement gives the slot back to the previous document. New events: `DocumentProcessed` and
+  `DocumentRejected`. Handle the `processing` status in your UI, and run a queue worker; with the `sync` queue
+  driver the job runs inside the request. A scanner outage is retried rather than treated as a verdict.
+
+### Removed
+- `multipart.use_native_checksum` and `MultipartUploadDriver::retrieveChecksum()` are removed. An S3 multipart
+  checksum is a checksum of the part checksums, so it never equalled a file's SHA-256 and turning the option on
+  made a correct `expected_hash` delete the upload. The server now always verifies the object itself, streaming
+  it through the hash in constant memory (about four times faster than the previous 8 KiB read loop on a 1 GiB
+  object). A custom multipart driver must drop `retrieveChecksum()`, and a published config should drop the key.
+
+### Security
+- Authorization is now deny by default. With no authorizer configured the package asks Laravel's Gate
+  (`Defaults\GateDocumentAuthorizer`) for `documents.initiate-upload`, `documents.finalize`, `documents.attach`,
+  `documents.view` and `documents.delete`, and denies every ability your app has not defined; where no Gate ability
+  exists it asks a registered policy for `initiateUpload`, `finalize`, `attach`, `view` or `delete`, and a Document
+  policy's `viewMany` answers a whole listing page at once. `PermissiveDocumentAuthorizer` is removed.
+  
+  `AuthorizesDocumentAccess::canUpload(?Authenticatable, DocumentType, ?Model)`, whose null owner meant three
+  different things, is replaced by `canInitiateUpload($user, $type)`, `canFinalize($user, $session)` (asked for every
+  follow-up on an upload session, so an app can finally refuse a finalize), `canAttach($user, $sessionOrDocument,
+  $owner)` and `canViewMany($user, $documents)`, next to `canView` and `canDelete`.
+  
+  Booting in production with the routes mounted and no `documentable.authorization.resolver` now throws
+  `InsecureConfiguration`; local, testing and `load_routes = false` boot as before. `documents:make-authorizer
+  --style=gates|class` scaffolds either style and `documents:install` scaffolds one by default (`--authorizer`
+  skips the prompt). The `documents` rate limiter defaults to 60 requests a minute per user or IP instead of
+  unlimited. A `user_id` sent by the client is never used as an upload owner, and `security.allow_guest_user_id` is
+  removed: multipart uploads require an authenticated user.
+  
+  `GET /documents` pages in SQL in a stable order and asks `canViewMany()` once for the page, so `meta.total`
+  counts the owner's documents rather than only those the caller may view, and a page can hold fewer than
+  `per_page` documents when some are hidden.
+
+### Added
+- A document type can now limit an upload by extension (`allowed_extensions`, a list of lowercase extensions) and
+  accept files fileinfo can only call `application/octet-stream` or `text/plain` when the extension is on that list
+  (`trust_extension_for_generic_mime`; a specific MIME type that is not allowed is never excused). Content validators
+  registered per type under `documentable.validators` read the file's first bytes: `DwgValidator`, `DxfValidator`,
+  `ZipValidator` (docx, xlsx, pptx), `OleDocumentValidator`, `SevenZipValidator`, `RarValidator` and
+  `GzipValidator`, or your own `ValidatesUploadedFile`. The rules apply to every transport, including a large upload
+  before it is queued. `GET /documents/types` returns the two new fields. Run the new migration.
+
+## [3.0.0-alpha.3] - 2026-10-27
+
+### Changed
+- The database now enforces one latest document per owner for single-slot document types. `latest_marker` holds the
+  document type id for those types (multi-slot types keep the group id), so two concurrent first uploads can no
+  longer both succeed. The loser retries once as the next version of the winner, and a second collision throws
+  `SlotConflict`. The new migration stops with the commands to run (`documents:upgrade-check`,
+  `documents:repair`) when an owner already has two latest documents.
+- `storage_files` now has a unique `(file_hash, disk)` index, so concurrent uploads of identical bytes create one
+  stored file and the loser adopts the winner's and deletes its own copy. The dedup lookup includes the disk, which
+  stops a type on one disk from resolving to a blob stored on another. `StorageFileRepository::findByHash()` takes
+  the disk as a second argument. The new migration stops with the commands to run (`documents:upgrade-check`,
+  `documents:repair`) while duplicate stored files exist.
+
+### Added
+- `php artisan documents:upgrade-check` reports data that would block the new integrity constraints: more than one
+  latest document for an owner and single-slot type, several stored files sharing a `(file_hash, disk)` pair, and
+  documents that point at a missing stored file. `php artisan documents:repair --dry-run` prints the fix and
+  `--apply` runs it: the highest version (newest on a tie) stays latest, duplicate stored files are merged, and a
+  blob is only deleted when no other row uses it.
+- New `documentable.key_type` setting (`int`, `uuid`, `ulid` or `string`, default `string`) gives
+  `documents.documentable_id` the type of your owner models' primary key. A new migration converts an existing
+  column after checking that every stored key fits, and stops with `php artisan documents:upgrade-check` when one
+  does not. With a typed key `$model->documents()` is Laravel's stock `MorphMany`, so PostgreSQL needs no casts
+  and the column index is usable; the default `string` keeps the string-cast relation. `documents:install` asks
+  for the key type before it runs the migrations (`--key-type` skips the prompt). Converting rewrites the
+  `documents` table, so run it in a maintenance window on a large MySQL table.
+
+## [3.0.0-alpha.2] - 2026-10-26
+
+### Changed
+- `DocumentService` is now a facade over focused internal classes (`DirectUploadService`, `MultipartUploadService`, `ObjectVerifier`, `DocumentAttacher`, `UrlSigner`, `DocumentPurger`, `AccessLogger`). Its public methods keep their names and signatures. Its protected members and constructor are gone, so a subclass that overrode or called them must switch to the public methods, the package events, or the contracts. Resolve the service from the container instead of constructing it.
+- `documents:clean-orphaned` now expires upload sessions past their expiry instead of sweeping `pending` documents and `multipart_uploads`. Expiring a session aborts an open multipart upload on the provider, or deletes the object it holds, unless the session was attached in the meantime. `--hours` expires any open session older than that.
+- Every upload transport now runs on an upload session, and `DocumentService::attach($session, $owner, new AttachOptions(...))` is the only way a session becomes a document. Presigned finalize and multipart complete take a `session_id` instead of a `path` and an `upload_id`, so a client can no longer point them at another object in your bucket. Only the user a session was started under can drive it (403 otherwise), a `document_type_id` that disagrees with the session's type is a 422, and an expired session refuses to complete. A failed check now deletes the object and aborts the session. The owner fields are optional on `POST /documents`, `presigned/finalize` and `multipart/complete`; without them the response is the `uploaded` session, to attach later with the new `POST /documents/attach`. `document_group_id` must name a group the owner already holds. Service signatures changed: `initiatePresignedUpload` replaces `createPresignedUpload`, and `initiateMultipartUpload`, `generatePartUploadUrl`, `listPartsForSession`, `completeMultipartUpload` and `finalizeDirectUpload` take sessions.
+
+### Removed
+- Removes `DocumentService::uploadDetached()`, `reassociateDocument()` and `Document::commit()`, the `pending` document status and scope, the `lifecycle.pending_ttl_hours` and `security.enforce_path_prefix` options, `POST /documents/detached`, the `GET /documents/multipart/status` fields `path` and `upload_id`, the `DocumentReassociated` event, and the `MultipartUpload` model and `multipart_uploads` table. Replace them with `stageUpload()` (or `POST /documents` without owner fields) followed by `attach()`. Document statuses are now `committed`, `processing` and `rejected` (`DocumentStatus`). The migration that drops `multipart_uploads` refuses to run while an unexpired session is open; set `DOCUMENTABLE_FORCE_DRAIN=true` to abort those provider uploads and drop the table. Open `pending` documents are converted to `uploaded` sessions; expired ones are deleted.
+
+### Added
+- Adds the `upload_sessions` table, the `UploadSession` model, the `UploadSessionStatus` and `UploadKind` enums, `UploadSessionData` and `AttachOptions`. A session is the server-side record of one upload in progress: its ULID is the only handle a client holds, and the storage path and provider upload id stay on the server. Publish and run the new migrations with `php artisan migrate`.
+
+## [3.0.0-alpha.1] - 2026-10-26
+
+### Changed
+- Raises the minimum supported versions to PHP 8.3 and Laravel 12, and requires `ext-fileinfo`. PHP 8.2 and Laravel 11 are no longer supported; upgrade PHP or Laravel before updating to 3.x.
+
+### Fixed
+- Completing a multipart upload now always sends the parts to S3 as a plain list, even when the caller keyed them by part number. Previously a keyed array produced a request S3 could not read.
+
+### Added
+- The package now validates `config/documentable.php` when the app boots. A bad value (an unknown disk, a class that does not implement its contract, a scheduler frequency that does not exist, an out-of-range number) throws `InvalidDocumentableConfig` naming the key and the fix, instead of failing at the first upload. `php artisan about` shows the resolved disk, ETag strategy and reaper frequency.
+
 ## [2.1.3] - 2026-10-24
 
 ### Changed
@@ -113,3 +320,27 @@ Initial release.
 [2.1.2]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.1...v2.1.2
 
 [2.1.3]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.2...v2.1.3
+
+[3.0.0-alpha.1]: https://github.com/madebyclowd/laravel-documentable/compare/v2.1.3...v3.0.0-alpha.1
+
+[3.0.0-alpha.2]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.1...v3.0.0-alpha.2
+
+[3.0.0-alpha.3]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.2...v3.0.0-alpha.3
+
+[3.0.0-alpha.4]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.3...v3.0.0-alpha.4
+
+[3.0.0-alpha.5]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.4...v3.0.0-alpha.5
+
+[3.0.0-alpha.6]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.5...v3.0.0-alpha.6
+
+[3.0.0-alpha.7]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.6...v3.0.0-alpha.7
+
+[3.0.0-alpha.8]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.7...v3.0.0-alpha.8
+
+[3.0.0-alpha.9]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.8...v3.0.0-alpha.9
+
+[3.0.0-alpha.10]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.9...v3.0.0-alpha.10
+
+[3.0.0-alpha.11]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.10...v3.0.0-alpha.11
+
+[3.0.0]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.11...v3.0.0
