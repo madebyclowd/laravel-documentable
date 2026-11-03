@@ -77,6 +77,15 @@ class ClientConfigEndpointTest extends TestCase
             ]);
     }
 
+    public function test_a_type_without_limits_sends_empty_lists_not_null(): void
+    {
+        $this->makeType(['allowed_mimes' => null, 'allowed_extensions' => null]);
+
+        $this->getJson('/documents/config')
+            ->assertJsonPath('types.0.allowed_mimes', [])
+            ->assertJsonPath('types.0.allowed_extensions', []);
+    }
+
     public function test_retired_types_are_left_out(): void
     {
         $this->makeType(['code' => 'live']);

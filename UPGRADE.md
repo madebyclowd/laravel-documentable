@@ -2,6 +2,15 @@
 
 ## Upgrading to 3.x
 
+### Coming from a 3.0 alpha
+
+`3.0.0` is `3.0.0-alpha.11` unchanged, so there is nothing to do if you run `alpha.11`. From an earlier alpha, set the constraint to `^3.0` and read the `CHANGELOG.md` entries newer than the one you run.
+
+What `alpha.11` changed, which is the last step for an `alpha.10` app:
+
+- `POST /documents/multipart/part-url` is gone. Use [`part-urls`](#single-part-url-route-removed). A generated route helper such as Wayfinder's `partUrl` disappears too, so run `php artisan wayfinder:generate` and fix imports.
+- New `GET /documents/config` and `GET /documents/{document}` routes, and the published [TypeScript client](#replace-a-hand-written-uploader) that uses them. Nothing breaks if you ignore them.
+
 ### Requirements
 
 - PHP ^8.3
@@ -170,6 +179,8 @@ Response:
 
 **Detect it:**
 Search your frontend upload code or API client for `multipart/part-url` that is not followed by `s` (for example `grep -rnE "multipart/part-url([^s]|$)" resources/js`).
+
+Wayfinder (or Ziggy-style generated actions) also hide the path: search for the generated name too, for example `grep -rnE "partUrl\b" resources/js`. After the update, run `php artisan wayfinder:generate` and fix imports of the removed `partUrl` export, or `vite build` fails with `MISSING_EXPORT`.
 
 **Manual step:**
 Update client uploader code to call `POST /documents/multipart/part-urls` with `part_numbers` (up to 100 part numbers per request) and read the presigned URLs from the `urls` object keyed by part number.

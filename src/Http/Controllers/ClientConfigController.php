@@ -34,8 +34,8 @@ class ClientConfigController extends Controller
                 'code' => $type->code,
                 'name' => $type->name,
                 'max_bytes' => $type->max_size_mb * 1024 * 1024,
-                'allowed_mimes' => $type->allowed_mimes,
-                'allowed_extensions' => $type->allowed_extensions,
+                'allowed_mimes' => $type->allowed_mimes ?? [],
+                'allowed_extensions' => $type->allowed_extensions ?? [],
                 'trust_extension_for_generic_mime' => $type->trust_extension_for_generic_mime,
                 'allows_multiple' => $type->allows_multiple,
             ])

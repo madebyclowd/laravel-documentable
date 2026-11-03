@@ -7,6 +7,14 @@ New entries from this point forward are generated from `.changes/*.md` changeset
 [.changes/README.md](.changes/README.md) — not edited here by hand. The three entries below are a
 retroactive seed summarizing the pre-changesets manual releases.
 
+## [3.1.0] - 2026-11-03
+
+### Fixed
+- `uploadFile()` no longer throws `TypeError: Cannot read properties of null (reading 'length')` for a document type without an extension limit. `GET /documents/config` now sends `[]` instead of `null` for `allowed_mimes` and `allowed_extensions`, and the client accepts both. Anything unexpected inside `uploadFile()` now leaves as an `UploadError` with code `server`, so callers can branch on `error.code`. The built-in SHA-256 no longer allocates per 64-byte block, which makes hashing about 3.4 times faster (46 to 158 MB/s on a 256 MB buffer in Node), so a 500 MB file spends about 3 s hashing instead of 11 s.
+
+### Added
+- The TypeScript client tells the caller where a large upload is. `onStage` reports `hashing`, `uploading`, `finalizing` and `processing`, so a UI no longer sits at 100% while the server verifies the object. `onHashProgress` reports the bytes read while hashing, and `ClientOptions.hash` swaps in the app's own hasher (`hash-wasm`, a Web Worker). Without `pollIntervalMs` the wait for a `processing` document polls after 1 s, 2 s, then every 5 s, instead of every 2 s. The published file now starts with a header saying how to tell whether it is stale. Docs: the Wayfinder `partUrl` import in the upgrade detect step, a "Coming from a 3.0 alpha" section, and the Vite `**/vendor/**` watch trap and `--force` overwrite next to the publish command.
+
 ## [3.0.0] - 2026-11-02
 
 ### Changed
@@ -344,3 +352,5 @@ Initial release.
 [3.0.0-alpha.11]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.10...v3.0.0-alpha.11
 
 [3.0.0]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0-alpha.11...v3.0.0
+
+[3.1.0]: https://github.com/madebyclowd/laravel-documentable/compare/v3.0.0...v3.1.0

@@ -383,6 +383,30 @@ describe('TypeScript client upload flow', () => {
     expect(uploadInitiations.length).toBe(0);
   });
 
+  it('a type with no extension or mime limit (null) uploads', async () => {
+    const server = new FakeServer();
+    (server.configData.types as Array<Record<string, unknown>>).push({
+      id: 'type_any', code: 'any', name: 'Any', max_bytes: 10 * 1024 * 1024,
+      allowed_mimes: null, allowed_extensions: null, trust_extension_for_generic_mime: false, allows_multiple: true,
+    });
+    const file = new File(['content'], 'whatever.xyz', { type: 'application/octet-stream' });
+
+    const result = await uploadFile(file, { type: 'any' }, { baseUrl: '/documents', fetch: server.fetch });
+
+    expect(result.sessionId).toBeDefined();
+  });
+
+  it('an unexpected failure leaves uploadFile as an UploadError', async () => {
+    const server = new FakeServer();
+    server.configData.types = null;
+    const file = new File(['content'], 'a.pdf', { type: 'application/pdf' });
+
+    const err = await uploadFile(file, { type: 'passport' }, { baseUrl: '/documents', fetch: server.fetch }).catch(e => e);
+
+    expect(err).toBeInstanceOf(UploadError);
+    expect(err.code).toBe('server');
+  });
+
   it('422 maps to validation with errors', async () => {
     const server = new FakeServer();
     server.injectFailure({
@@ -1050,6 +1074,70 @@ describe('TypeScript client upload flow', () => {
       expect(statusReq!.url).toContain('foo=bar&session_id=01RESUMESESSIONID00000000');
     });
   });
+  describe('progress you can show', () => {
+    it('reports stages in order for a small upload with an owner that needs processing', async () => {
+      const server = new FakeServer();
+      server.setDocumentStatus(['processing', 'committed']);
+      const stages: string[] = [];
+      const file = new File(['hello'], 'a.pdf', { type: 'application/pdf' });
+
+      await uploadFile(file, { type: 'passport', owner: { type: 'App\\Models\\User', id: 1 }, onStage: s => stages.push(s) },
+        { baseUrl: '/documents', fetch: server.fetch, sleep: async () => {} });
+
+      expect(stages).toEqual(['hashing', 'uploading', 'finalizing', 'processing']);
+    });
+
+    it('a multipart upload without an owner stops after finalizing', async () => {
+      const server = new FakeServer();
+      const stages: string[] = [];
+      const file = new File([new Uint8Array(12 * 1024 * 1024)], 'big.bin', { type: 'application/octet-stream' });
+
+      await uploadFile(file, { type: 'archive', dedup: false, onStage: s => stages.push(s) },
+        { baseUrl: '/documents', fetch: server.fetch, sleep: async () => {} });
+
+      expect(stages).toEqual(['hashing', 'uploading', 'finalizing']);
+    });
+
+    it('reports hashing progress up to the file size', async () => {
+      const server = new FakeServer();
+      const seen: Array<{ loaded: number; total: number }> = [];
+      const file = new File([new Uint8Array(9 * 1024 * 1024)], 'a.pdf', { type: 'application/pdf' });
+
+      await uploadFile(file, { type: 'archive', dedup: false, onHashProgress: p => seen.push(p) },
+        { baseUrl: '/documents', fetch: server.fetch, sleep: async () => {} });
+
+      expect(seen.length).toBe(3);
+      expect(seen.at(-1)).toEqual({ loaded: file.size, total: file.size });
+    });
+
+    it('uses the app hasher when one is set and rejects a malformed result', async () => {
+      const server = new FakeServer();
+      const file = new File(['hello'], 'a.pdf', { type: 'application/pdf' });
+      const good = crypto.createHash('sha256').update('hello').digest('hex').toUpperCase();
+
+      await uploadFile(file, { type: 'passport' }, { baseUrl: '/documents', fetch: server.fetch, hash: async () => good });
+      const presign = server.requests.find(r => r.url === '/documents/presigned');
+      expect((presign!.body as { declared_hash: string }).declared_hash).toBe(good.toLowerCase());
+
+      const err = await uploadFile(file, { type: 'passport' }, { baseUrl: '/documents', fetch: server.fetch, hash: async () => 'nope' }).catch(e => e);
+      expect(err).toBeInstanceOf(UploadError);
+      expect(err.code).toBe('server');
+    });
+
+    it('polls with a growing delay unless pollIntervalMs is set', async () => {
+      const server = new FakeServer();
+      server.setDocumentStatus(['processing', 'processing', 'processing', 'processing', 'committed']);
+      const delays: number[] = [];
+      let virtualTime = 0;
+      const file = new File(['hello'], 'a.pdf', { type: 'application/pdf' });
+
+      await uploadFile(file, { type: 'passport', owner: { type: 'App\\Models\\User', id: 1 } },
+        { baseUrl: '/documents', fetch: server.fetch, now: () => virtualTime, sleep: async ms => { delays.push(ms); virtualTime += ms; } });
+
+      expect(delays).toEqual([1000, 2000, 5000, 5000]);
+    });
+  });
+
   describe('interrupted connections', () => {
     const bigFile = () => new File([new Uint8Array(12 * 1024 * 1024)], 'large.pdf', { type: 'application/pdf' });
     const client = (server: FakeServer, extra: Record<string, unknown> = {}) => ({

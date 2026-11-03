@@ -8,6 +8,11 @@ php artisan vendor:publish --tag=documentable-client
 
 This copies the client helper to `resources/js/vendor/documentable/documentable.ts`.
 
+Two things to know about that folder:
+
+- A Vite setting such as `server.watch.ignored: ['**/vendor/**']` also matches `resources/js/vendor`. If you set it, edits to the published file never reach the dev server. Anchor the pattern to Composer's folder (the `vendor` folder at the project root) or publish to another folder.
+- Publishing again with `--force` overwrites local edits. Keep changes out of the file, or diff before you force.
+
 ## Basic usage
 
 ```typescript
@@ -42,13 +47,15 @@ async function handleFileSelect(event: Event) {
 | `metadata` | `Record<string, unknown>` | `undefined` | Key-value metadata passed to finalize or attach. |
 | `documentGroupId` | `string` | `undefined` | Attach as a new version of this existing document group; it must already belong to the same owner and type. |
 | `onProgress` | `(p: { loaded: number; total: number }) => void` | `undefined` | Callback receiving loaded and total byte counts. |
+| `onHashProgress` | `(p: { loaded: number; total: number }) => void` | `undefined` | Bytes read while hashing. The file is hashed before anything is sent, so `onProgress` stays silent until then. |
+| `onStage` | `(stage) => void` | `undefined` | Called when the upload moves to `'hashing'`, `'uploading'`, `'finalizing'` or `'processing'`. A dedup hit skips `'uploading'`. `'processing'` only happens with an `owner`. |
 | `signal` | `AbortSignal` | `undefined` | Signal to abort in-flight hashing, uploads, or polling waits. |
 | `resumeSessionId` | `string` | `undefined` | Multipart upload session ID to resume after interruption. See [Connection loss and resuming](#connection-loss-and-resuming). |
 | `onSession` | `(sessionId: string) => void` | `undefined` | Multipart uploads only. Called once the session exists, for a new session and for a resumed one. Store the id to resume later. |
 | `dedup` | `boolean` | `true` | When true, attempts a proof-of-possession handshake before uploading bytes. |
 | `waitForProcessing` | `boolean` | `true` | Polls the show route while the attached document status is `processing`. |
 | `processingTimeoutMs` | `number` | `120000` | Maximum milliseconds to wait for a `processing` document. |
-| `pollIntervalMs` | `number` | `2000` | Milliseconds between status polls to `GET /documents/{document}`. |
+| `pollIntervalMs` | `number` | 1000, 2000, then 5000 | Milliseconds between status polls to `GET /documents/{document}`. Set it for a fixed interval. |
 
 ## Client configuration (`ClientOptions`)
 
@@ -60,6 +67,7 @@ async function handleFileSelect(event: Event) {
 | `fetch` | `typeof fetch` | `globalThis.fetch` | Fetch implementation used for all HTTP requests. |
 | `headers` | `() => Record<string, string> \| Promise<Record<string, string>>` | auto-detected | Headers added to server requests. In browsers, defaults to `X-Requested-With: XMLHttpRequest` and `X-XSRF-TOKEN` (decoded from the `XSRF-TOKEN` cookie). Providing a callback replaces this default entirely. Storage PUT requests never receive application headers. |
 | `routes` | `ClientRoutes` | `undefined` | Custom route mapping for Wayfinder or non-standard route names. |
+| `hash` | `(blob, signal?, onProgress?) => Promise<string>` | built-in SHA-256 | Replaces the built-in hasher, for example with `hash-wasm` or a Web Worker. Resolve with the lower-case hex SHA-256 of the whole blob. A result that is not 64 hex characters fails the upload with code `server`. |
 | `isOnline` | `() => boolean` | `navigator.onLine` | Tells the helper whether the browser is online. Returns `true` where there is no `navigator`. |
 | `waitForOnline` | `(signal?: AbortSignal) => Promise<void>` | waits for the window `online` event | Called when a request fails while `isOnline()` is `false`. |
 
@@ -151,11 +159,11 @@ On resume the helper calls `GET /documents/multipart/status` and `GET /documents
 
 When `dedup !== false` and `file.size > 0`, the client issues a handshake request to `POST /documents/handshake` after hashing the file. The server returns a challenge with random byte ranges. The client reads those ranges, computes `sha256(nonce || range_bytes)`, and posts the proof to `POST /documents/handshake/answer`.
 
-If the server already has the file, it returns HTTP 201 with an uploaded session immediately, skipping raw byte transfer. If the file is not on the server, the answer returns HTTP 422 (a decoy challenge and an invalid proof are deliberately indistinguishable to prevent existence enumeration attacks). The client treats HTTP 422 as a miss and continues with normal upload. Any non-abort network or server error during the handshake also falls back to normal upload.
+If the server already has the file, it returns HTTP 201 with an uploaded session immediately, skipping raw byte transfer. If the file is not on the server, the answer returns HTTP 422 (a decoy challenge and an invalid proof are deliberately indistinguishable to prevent existence enumeration attacks). The client treats HTTP 422 as a miss and continues with normal upload. A red `422` on `/handshake/answer` in the browser console is therefore normal on a first upload. Any non-abort network or server error during the handshake also falls back to normal upload.
 
 ## Waiting for processing
 
-When a document requires background verification (for files exceeding `documentable.verification.sync_hash_max_bytes`), the server attaches it with status `processing`. When `waitForProcessing !== false`, the helper polls `GET /documents/{document}` every `pollIntervalMs` until the status becomes `committed` or `rejected`. If the status becomes `rejected`, it throws `UploadError('rejected')`. If the timeout (`processingTimeoutMs`, default 120 seconds) is reached, it throws `UploadError('processing_timeout')` while leaving the document on the server.
+When a document requires background verification (for files exceeding `documentable.verification.sync_hash_max_bytes`), the server attaches it with status `processing`. When `waitForProcessing !== false`, the helper polls `GET /documents/{document}` (after 1 s, 2 s, then every 5 s, or every `pollIntervalMs` when set) until the status becomes `committed` or `rejected`. If the status becomes `rejected`, it throws `UploadError('rejected')`. If the timeout (`processingTimeoutMs`, default 120 seconds) is reached, it throws `UploadError('processing_timeout')` while leaving the document on the server.
 
 ## Document status endpoint
 
