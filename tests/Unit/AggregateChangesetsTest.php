@@ -70,6 +70,41 @@ class AggregateChangesetsTest extends TestCase
         $this->assertFileDoesNotExist($this->dir.'/.changes/change.md');
     }
 
+    /**
+     * @return array<string, array{0: string, 1: string, 2: string}>
+     */
+    public static function unreachableTags(): array
+    {
+        return [
+            'a stable tag off this branch still sets the base' => ['v3.0.0', 'stable', '3.0.1'],
+            'a prerelease tag off this branch graduates' => ['v3.0.0-alpha.11', 'stable', '3.0.0'],
+            'a prerelease tag off this branch keeps counting' => ['v3.0.0-alpha.11', 'alpha', '3.0.0-alpha.12'],
+        ];
+    }
+
+    /**
+     * Squash-only branch protection leaves the tags of a long-lived branch unreachable from main, so
+     * `git describe` would report the last tag main happens to contain. The newest version tag in the repo wins.
+     */
+    #[DataProvider('unreachableTags')]
+    public function test_it_uses_the_highest_tag_even_when_it_is_not_reachable_from_head(string $otherTag, string $channel, string $expected): void
+    {
+        $this->git('tag v2.1.3');
+        $this->git('checkout -q -b side');
+        file_put_contents($this->dir.'/side.txt', 'x');
+        $this->git('add -A');
+        $this->git('commit -q -m side');
+        $this->git('tag '.escapeshellarg($otherTag));
+        $this->git('checkout -q 3.x');
+        file_put_contents($this->dir.'/.changes/change.md', "---\nbump: patch\ntype: Changed\n---\n\nSomething changed.\n");
+
+        $output = [];
+        exec(sprintf('cd %s && PRERELEASE_CHANNEL=%s php bin/aggregate-changesets.php 2>&1', escapeshellarg($this->dir), escapeshellarg($channel)), $output, $status);
+
+        $this->assertSame(0, $status, implode("\n", $output));
+        $this->assertSame($expected, trim(implode("\n", $output)));
+    }
+
     private function git(string $args): void
     {
         exec(sprintf('cd %s && git %s 2>&1', escapeshellarg($this->dir), $args), $output, $status);

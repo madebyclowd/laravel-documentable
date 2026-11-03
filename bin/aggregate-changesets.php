@@ -38,8 +38,7 @@ foreach ($fragments as $fragment) {
     }
 }
 
-$latestTag = trim((string) shell_exec("git describe --tags --abbrev=0 --match 'v*' 2>/dev/null"));
-$latestTag = $latestTag !== '' ? $latestTag : 'v0.0.0';
+$latestTag = latestVersionTag();
 $channel = trim((string) getenv('PRERELEASE_CHANNEL'));
 $channel = $channel === 'stable' ? '' : $channel;
 $newVersion = $channel !== ''
@@ -101,6 +100,29 @@ function collectFragments(string $changesDir): array
     }
 
     return $fragments;
+}
+
+/**
+ * The newest version tag in the repository, by version, not by what the current commit can reach.
+ *
+ * `git describe` only sees tags reachable from HEAD. A long-lived branch that lands on main as a squash commit
+ * (linear history required) leaves its tags unreachable, and describe then reports the last tag main happened to
+ * contain, so the next version would be computed from the wrong tag.
+ */
+function latestVersionTag(): string
+{
+    $tags = array_filter(
+        array_map('trim', explode("\n", (string) shell_exec("git tag --list 'v*' 2>/dev/null"))),
+        fn (string $tag) => preg_match('/^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/', $tag) === 1
+    );
+
+    if ($tags === []) {
+        return 'v0.0.0';
+    }
+
+    usort($tags, fn (string $a, string $b) => version_compare(ltrim($a, 'v'), ltrim($b, 'v')));
+
+    return end($tags);
 }
 
 function nextPrereleaseVersion(string $latestTag, string $bumpLevel, string $channel): string
