@@ -6,10 +6,12 @@ namespace MadeByClowd\Documentable\Tests\Feature\Http;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use MadeByClowd\Documentable\Config\DocumentableConfig;
+use MadeByClowd\Documentable\Http\Controllers\ClientConfigController;
 use MadeByClowd\Documentable\Models\DocumentType;
 use MadeByClowd\Documentable\Services\PartSizePlanner;
 use MadeByClowd\Documentable\Tests\Fixtures\ConfigurableAuthorizer;
 use MadeByClowd\Documentable\Tests\TestCase;
+use ReflectionMethod;
 
 /**
  * `GET /documents/config` tells a browser uploader what the server already knows, so no app has to hard-code
@@ -75,6 +77,22 @@ class ClientConfigEndpointTest extends TestCase
                 'trust_extension_for_generic_mime' => false,
                 'allows_multiple' => false,
             ]);
+    }
+
+    public function test_the_action_is_a_public_entry_point(): void
+    {
+        $this->getJson('/documents/config')->assertOk();
+
+        $this->assertTrue((new ReflectionMethod(ClientConfigController::class, 'show'))->isPublic());
+    }
+
+    public function test_a_type_without_limits_sends_empty_lists_not_null(): void
+    {
+        $this->makeType(['allowed_mimes' => null, 'allowed_extensions' => null]);
+
+        $this->getJson('/documents/config')
+            ->assertJsonPath('types.0.allowed_mimes', [])
+            ->assertJsonPath('types.0.allowed_extensions', []);
     }
 
     public function test_retired_types_are_left_out(): void

@@ -1,3 +1,13 @@
+// laravel-documentable browser client, published with `php artisan vendor:publish --tag=documentable-client`.
+// This copy is not updated by `composer update`. To see if it is stale, diff it against
+// vendor/madebyclowd/laravel-documentable/resources/client/documentable.ts (re-publishing with --force overwrites your edits).
+
+/**
+ * Where an upload is: reading the file for its hash, sending bytes, asking the server to finish, waiting for the
+ * server to verify the stored object. A dedup hit skips 'uploading'. 'processing' only happens with an `owner`.
+ */
+export type UploadStage = 'hashing' | 'uploading' | 'finalizing' | 'processing';
+
 export interface DocumentRecord {
   id: string;
   [key: string]: unknown;
@@ -9,13 +19,15 @@ export interface UploadOptions {
   metadata?: Record<string, unknown>;
   documentGroupId?: string;
   onProgress?: (p: { loaded: number; total: number }) => void;
+  onHashProgress?: (p: { loaded: number; total: number }) => void; // bytes read while hashing, before any byte is sent
+  onStage?: (stage: UploadStage) => void;         // called when the stage changes, so a UI can say more than "100%"
   signal?: AbortSignal;
   resumeSessionId?: string;                       // continue an interrupted multipart upload
   onSession?: (sessionId: string) => void;        // multipart only: called once the session exists. Store the id to resume after a reload
   dedup?: boolean;                                // default true: attempt proof-of-possession handshake before uploading
   waitForProcessing?: boolean;                    // default true: poll show route while status is 'processing'
   processingTimeoutMs?: number;                   // default 120000 ms
-  pollIntervalMs?: number;                        // default 2000 ms
+  pollIntervalMs?: number;                        // default: back off 1000, 2000, then 5000 ms. Set it for a fixed interval
 }
 
 export interface ClientRoutes {
@@ -44,6 +56,8 @@ export interface ClientOptions {
   isOnline?: () => boolean;                       // default: navigator.onLine, true where there is no navigator
   waitForOnline?: (signal?: AbortSignal) => Promise<void>; // default: waits for the window 'online' event
   routes?: ClientRoutes;
+  /** Replaces the built-in hasher (for example hash-wasm or a Web Worker). Resolve with the lower-case hex SHA-256 of the whole blob. */
+  hash?: (blob: Blob, signal?: AbortSignal, onProgress?: (p: { loaded: number; total: number }) => void) => Promise<string>;
 }
 
 export interface UploadResult {
@@ -86,8 +100,8 @@ interface DocumentTypeConfig {
   code: string;
   name: string;
   max_bytes: number;
-  allowed_mimes: string[];
-  allowed_extensions: string[];
+  allowed_mimes: string[] | null;
+  allowed_extensions: string[] | null;
   trust_extension_for_generic_mime: boolean;
   allows_multiple: boolean;
 }
@@ -123,17 +137,19 @@ export class Sha256 {
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
   ]);
 
-  private processBlock(block: Uint8Array): void {
-    const w = this.w, K = Sha256.K;
-    const view = new DataView(block.buffer, block.byteOffset, 64);
-    for (let t = 0; t < 16; t++) w[t] = view.getUint32(t * 4, false);
+  /** Compresses the 64 bytes at `data[offset]`. Allocation-free: this runs once per block, millions of times per large file. */
+  private processBlock(data: Uint8Array, offset: number): void {
+    const w = this.w, K = Sha256.K, H = this.h;
+    for (let t = 0, i = offset; t < 16; t++, i += 4) {
+      w[t] = (data[i]! << 24) | (data[i + 1]! << 16) | (data[i + 2]! << 8) | data[i + 3]!;
+    }
     for (let t = 16; t < 64; t++) {
       const w15 = w[t - 15]!, w2 = w[t - 2]!;
       const s0 = ((w15 >>> 7) | (w15 << 25)) ^ ((w15 >>> 18) | (w15 << 14)) ^ (w15 >>> 3);
       const s1 = ((w2 >>> 17) | (w2 << 15)) ^ ((w2 >>> 19) | (w2 << 13)) ^ (w2 >>> 10);
       w[t] = (w[t - 16]! + s0 + w[t - 7]! + s1) >>> 0;
     }
-    let [a, b, c, d, e, f, g, h] = this.h as unknown as [number, number, number, number, number, number, number, number];
+    let a = H[0]!, b = H[1]!, c = H[2]!, d = H[3]!, e = H[4]!, f = H[5]!, g = H[6]!, h = H[7]!;
     for (let t = 0; t < 64; t++) {
       const s1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
       const ch = (e & f) ^ (~e & g);
@@ -143,8 +159,8 @@ export class Sha256 {
       const t2 = (s0 + maj) >>> 0;
       h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
     }
-    const add = [a, b, c, d, e, f, g, h];
-    for (let i = 0; i < 8; i++) this.h[i] = (this.h[i]! + add[i]!) >>> 0;
+    H[0] = H[0]! + a; H[1] = H[1]! + b; H[2] = H[2]! + c; H[3] = H[3]! + d;
+    H[4] = H[4]! + e; H[5] = H[5]! + f; H[6] = H[6]! + g; H[7] = H[7]! + h;
   }
 
   update(data: Uint8Array | ArrayBuffer | ArrayBufferView | string): this {
@@ -161,7 +177,7 @@ export class Sha256 {
       const needed = 64 - this.bufLen;
       if (len >= needed) {
         this.buffer.set(bytes.subarray(0, needed), this.bufLen);
-        this.processBlock(this.buffer);
+        this.processBlock(this.buffer, 0);
         offset += needed; len -= needed; this.bufLen = 0;
       } else {
         this.buffer.set(bytes, this.bufLen);
@@ -170,7 +186,7 @@ export class Sha256 {
       }
     }
     while (len >= 64) {
-      this.processBlock(bytes.subarray(offset, offset + 64));
+      this.processBlock(bytes, offset);
       offset += 64; len -= 64;
     }
     if (len > 0) {
@@ -187,18 +203,22 @@ export class Sha256 {
     this.buffer[this.bufLen++] = 0x80;
     if (this.bufLen > 56) {
       this.buffer.fill(0, this.bufLen, 64);
-      this.processBlock(this.buffer);
+      this.processBlock(this.buffer, 0);
       this.bufLen = 0;
     }
     this.buffer.fill(0, this.bufLen, 56);
     new DataView(this.buffer.buffer, this.buffer.byteOffset, 64).setBigUint64(56, totalBits, false);
-    this.processBlock(this.buffer);
+    this.processBlock(this.buffer, 0);
     return Array.from(this.h).map(n => n.toString(16).padStart(8, '0')).join('');
   }
 }
 
 /** Reads a Blob in 4 MiB slices to calculate lower-case hex SHA-256 without memory blowup. */
-export async function hashBlob(blob: Blob, signal?: AbortSignal): Promise<string> {
+export async function hashBlob(
+  blob: Blob,
+  signal?: AbortSignal,
+  onProgress?: (p: { loaded: number; total: number }) => void
+): Promise<string> {
   const CHUNK_SIZE = 4 * 1024 * 1024;
   const sha = new Sha256();
   let offset = 0;
@@ -208,8 +228,17 @@ export async function hashBlob(blob: Blob, signal?: AbortSignal): Promise<string
     const buffer = await blob.slice(offset, end).arrayBuffer();
     sha.update(buffer);
     offset = end;
+    onProgress?.({ loaded: offset, total: blob.size });
   }
   return sha.digest();
+}
+
+/** Hashes the file with the app's own hasher when it set one, else the built-in. */
+async function hashFile(blob: Blob, options: UploadOptions, client: ClientOptions): Promise<string> {
+  if (!client.hash) return hashBlob(blob, options.signal, options.onHashProgress);
+  const hash = (await client.hash(blob, options.signal, options.onHashProgress)).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error('The custom hash function must resolve with a 64-character hex SHA-256');
+  return hash;
 }
 
 /** Computes lower-case hex sha256(nonce || concatenated range bytes) matching RangeProof::computeFromConcatenated. */
@@ -325,6 +354,9 @@ async function requestServer<T>(
   return res.status === 204 ? (undefined as unknown as T) : ((await res.json()) as T);
 }
 
+/** Delays between status polls when `pollIntervalMs` is not set: quick at first, then settling at the last value. */
+const POLL_BACKOFF_MS = [1000, 2000, 5000];
+
 async function waitForProcessingIfNeeded(
   initialDoc: DocumentRecord,
   options: UploadOptions,
@@ -334,13 +366,15 @@ async function waitForProcessingIfNeeded(
     return initialDoc;
   }
 
-  const pollIntervalMs = options.pollIntervalMs ?? 2000;
+  const pollDelay = (attempt: number): number => options.pollIntervalMs ?? POLL_BACKOFF_MS[Math.min(attempt, POLL_BACKOFF_MS.length - 1)]!;
   const timeoutMs = options.processingTimeoutMs ?? 120000;
   const sleepFn = client.sleep ?? defaultSleep;
   const nowFn = client.now ?? Date.now;
   const startTime = nowFn();
 
+  options.onStage?.('processing');
   let doc = initialDoc;
+  let attempt = 0;
   while (doc.status === 'processing') {
     if (options.signal?.aborted) {
       throw new UploadError('aborted', 'Document processing wait was aborted');
@@ -349,7 +383,7 @@ async function waitForProcessingIfNeeded(
       throw new UploadError('processing_timeout', `Document processing timed out after ${timeoutMs}ms`);
     }
 
-    await sleepFn(pollIntervalMs);
+    await sleepFn(pollDelay(attempt++));
 
     if (options.signal?.aborted) {
       throw new UploadError('aborted', 'Document processing wait was aborted');
@@ -374,6 +408,7 @@ async function waitForProcessingIfNeeded(
 
 /** Finishes a dedup hit: attaches the stored session to the owner (when there is one) and waits for processing. */
 async function finishDedupHit(sessionId: string, options: UploadOptions, client: ClientOptions): Promise<UploadResult> {
+  options.onStage?.('finalizing');
   if (!options.owner) return { sessionId };
 
   const attachUrl = resolveUrl(client, 'attach', '/attach');
@@ -604,7 +639,20 @@ export function createUploader(client: ClientOptions = {}): {
     return configPromise;
   }
 
+  // Callers branch on `error.code`, so anything unexpected leaves as an UploadError too.
   async function uploadFileImpl(
+    file: File | (Blob & { name: string }),
+    options: UploadOptions
+  ): Promise<UploadResult> {
+    try {
+      return await runUpload(file, options);
+    } catch (err) {
+      if (err instanceof UploadError) throw err;
+      throw new UploadError('server', `Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async function runUpload(
     file: File | (Blob & { name: string }),
     options: UploadOptions
   ): Promise<UploadResult> {
@@ -617,20 +665,23 @@ export function createUploader(client: ClientOptions = {}): {
       throw new UploadError('file_too_large', `File size (${file.size}) exceeds maximum allowed bytes (${docType.max_bytes})`);
     }
 
-    if (docType.allowed_extensions.length > 0) {
+    const allowedExtensions = docType.allowed_extensions ?? [];
+    if (allowedExtensions.length > 0) {
       const ext = filename.includes('.') ? filename.split('.').pop()!.toLowerCase() : '';
-      if (!docType.allowed_extensions.map(e => e.toLowerCase()).includes(ext)) {
+      if (!allowedExtensions.map(e => e.toLowerCase()).includes(ext)) {
         throw new UploadError('type_not_allowed', `File extension .${ext} is not allowed for type "${docType.name}"`);
       }
     }
 
-    const hash = await hashBlob(file, options.signal);
+    options.onStage?.('hashing');
+    const hash = await hashFile(file, options, client);
 
     const dedupSessionId = await tryDedupHandshake(file, options, client, docType, hash);
     if (dedupSessionId !== null) {
       return finishDedupHit(dedupSessionId, options, client);
     }
 
+    options.onStage?.('uploading');
     return file.size <= config.threshold_bytes
       ? uploadSinglePut(file, options, docType, hash)
       : uploadMultipart(file, options, config, docType, hash);
@@ -668,6 +719,7 @@ export function createUploader(client: ClientOptions = {}): {
     }
 
     options.onProgress?.({ loaded: file.size, total: file.size });
+    options.onStage?.('finalizing');
     const finalizeUrl = resolveUrl(client, 'presignFinalize', '/presigned/finalize');
     const finalizeBody = attachPayload(options, { session_id: presign.session_id, expected_hash: hash });
     const finalized = await requestServer<Record<string, unknown>>(client, finalizeUrl, 'POST', finalizeBody, options.signal);
@@ -813,6 +865,7 @@ export function createUploader(client: ClientOptions = {}): {
         completedParts.sort((a, b) => a.PartNumber - b.PartNumber);
         completeBody.parts = completedParts;
       }
+      options.onStage?.('finalizing');
       const completeUrl = resolveUrl(client, 'multipartComplete', '/multipart/complete');
       const completeRes = await requestServer<Record<string, unknown>>(
         client, completeUrl, 'POST', completeBody, options.signal

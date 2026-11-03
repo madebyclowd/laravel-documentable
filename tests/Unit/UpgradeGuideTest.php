@@ -59,17 +59,17 @@ class UpgradeGuideTest extends TestCase
         $artisan = Artisan::all();
 
         // Optional external commands from companion packages not present in core package dev dependencies
-        $externalCommands = ['boost:update'];
+        $externalCommands = ['boost:update' => 'Laravel Boost', 'wayfinder:generate' => 'Wayfinder'];
 
         foreach ($matches as $match) {
             $commandName = $match[1];
             $optionsPart = $match[2];
 
-            if (in_array($commandName, $externalCommands, true)) {
+            if (isset($externalCommands[$commandName])) {
                 $this->assertStringContainsString(
-                    'Laravel Boost',
+                    $externalCommands[$commandName],
                     $content,
-                    "UPGRADE.md must clarify that {$commandName} is only run when Laravel Boost is installed."
+                    "UPGRADE.md must clarify that {$commandName} is only run when {$externalCommands[$commandName]} is installed."
                 );
 
                 continue;
